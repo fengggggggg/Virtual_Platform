@@ -1,1 +1,1 @@
-# CETC38_Virtual_Platform
+# Virtual Platform
