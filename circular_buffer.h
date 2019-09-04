@@ -5,7 +5,7 @@
 //#include <tlmdt>
 #include "common.h"       
 
-#define MAX_SIZE (1 << 9)      //2^9 = 512
+#define MAX_SIZE 512    //2^9 = 512
 
 #if defined(__APPLE__)
 # include <libkern/OSAtomic.h>
@@ -51,6 +51,11 @@ public:
   ( tlm::tlm_generic_payload *&payload,
     tlm::tlm_phase           *&phase,
     sc_core::sc_time         *&time);
+
+  bool push_sort (
+                tlm::tlm_generic_payload &payload,
+                tlm::tlm_phase           &phase,
+                sc_core::sc_time         &time );
 
   bool get_front
   ( tlm::tlm_generic_payload *&payload,

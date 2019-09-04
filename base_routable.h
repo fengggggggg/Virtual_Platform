@@ -5,53 +5,54 @@
  * Description   : 
 ******************************************************************************/
 
-#ifndef __ROUTABLE_H__
-#define __ROUTABLE_H__
+#ifndef __BASE_ROUTABLE_H__
+#define __BASE_ROUTABLE_H__
 
 #include "common.h"
-#include "base_routable.h"
 
-// typedef struct multi_node
-// {
-// 	unsigned int data[6];
-// 	struct multi_node* next;
-// }multi_node;
-
-class Routing_Table:
-	public Base_Routing_Table
+//后期考虑将该结构体可以单独作为模板参数放入class Routing_Table中,作为不同路由表的路由项
+typedef struct multi_node
 {
-private:
+	unsigned int data[6];
+	struct multi_node* next;
+}multi_node;
 
-	// map<unsigned int, uint64> 	m_table;
-	// unsigned int multi_cast_table[256][6]; 
-	// multi_node* head=NULL;
+// 将路由表也设计一个基类,子类可以继承并实现他,形成RapidIO路由表,以太网交换表,DSP内部交换表
+//以实现更好的代码复用性和封装性
+class Base_Routing_Table
+{
+public:
+
+	map<unsigned int, uint64> 	m_table;
+	unsigned int multi_cast_table[256][6]; 
+    //上面为组播路由表采取数组设计形式
+	multi_node* head=NULL;
 	//每一行为虚拟设备ID,端口0,1,2,3,4,其中端口位置1,则表示需要从该端口转发
+    //将数组和链表形式都留下,以方便后期修改调整
 
 public:
 
-	Routing_Table() {}
-	~Routing_Table() {}
+	Base_Routing_Table() {}
+	~Base_Routing_Table() {}
 
 	// 添加条目
-	void add_item(unsigned int targID, uint64 portID)
+	virtual void add_item(unsigned int targID, uint64 portID)
 	{
 		m_table.insert(pair<unsigned int, uint64>(targID, portID));
 	}
 
-	//更新条目
-	void update_item(unsigned int targID, uint64 portID)
+	virtual void update_item(unsigned int targID, uint64 portID)
 	{
 		m_table[targID] = portID;
 	}
 
-	//删除条目
-	void delete_item(unsigned int targID)
+	virtual void delete_item(unsigned int targID)
 	{
 		m_table.erase(targID);
 	}
 
 	// 清空路由表
-	void clear()
+	virtual void clear()
 	{
 		// 不释放内存
 		m_table.clear();
@@ -69,14 +70,13 @@ public:
 		// m_table.clear();
 	}
 
-	//路由表条目数量
-	int size()
+	virtual int size()
 	{
 		return m_table.size();
 	}
 
 	// 根据设备ID查找目标端口
-	int query_port(uint64 targID)
+	virtual int query_port(uint64 targID)
 	{
 		try {
 			return m_table.at(targID);
@@ -89,7 +89,7 @@ public:
 	}
 
 	//根据端口查找设备ID
-	int query_addr(unsigned int portID)
+	virtual int query_addr(unsigned int portID)
 	{
 		map<unsigned int, uint64>::iterator it;
 		for (it = m_table.begin(); it != m_table.end(); it++)
@@ -99,16 +99,15 @@ public:
 		return -1;
 	}
 
-	//打印路由表
-	void print_table()
+	virtual void print_table()
 	{
 		map<unsigned int, uint64>::iterator it;
 		for (it = m_table.begin(); it != m_table.end(); it++)
 			cout<<" "<<it->first<<" "<<it->second<<endl;
 	}
 
-	//多播数据通过虚拟设备ID来表示,根据虚拟设备ID查找转发端口
-	multi_node* query_multi_cast(unsigned int multi_id)
+//多播数据通过虚拟设备ID来表示
+	virtual multi_node* query_multi_cast(unsigned int multi_id)
 	{
 		multi_node* p;
 		// multi_node* q=new multi_head;
@@ -129,8 +128,8 @@ public:
 		}	
 	}
 
-	//增加多播条目项
-	void add_multi_cast(unsigned int* data)
+//可将该形参有int* 类型改为模板参数类型,例如用T代替,以实现通用多态,区别于特定多态(特定多态通常是指函数重载等)
+	virtual void add_multi_cast(unsigned int* data)
 	{
 		multi_node* p;
 		multi_node* q;
@@ -170,8 +169,7 @@ public:
 		}
 	}
 
-	//删除多播条目项
-	void delete_multi_cast(unsigned int multi_id)
+	virtual void delete_multi_cast(unsigned int multi_id)
 	{
 		multi_node* p;
 		multi_node* q;
@@ -197,8 +195,7 @@ public:
 		}
 	}
 
-	//更新多播条目项
-	void update_multi_cast(unsigned int* data)
+	virtual void update_multi_cast(unsigned int* data)
 	{
 		multi_node* p;
 		p=query_multi_cast(data[0]);
@@ -214,7 +211,6 @@ public:
 				p->data[i]=data[i];
 			}
 		}
-		
 	}
 
 };

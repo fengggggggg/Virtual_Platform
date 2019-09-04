@@ -18,116 +18,95 @@
 	7.  已经通过enumeration完成初始化系统枚举,据此基础形成动态路由
 ******************************************************/
 
-#ifndef __ROUTER_H__
-#define __ROUTER_H__
+#ifndef __BASE_ROUTER_H__
+#define __BASE_ROUTER_H__
 
 #include "common.h"
 #include "centralized_buffer.h"
 #include "routable.h"
-#include "base_router.h"
 
-class Router
-	: public sc_core::sc_module,
-	public Base_Router<Routing_Table>
+template <class T>
+class Base_Router
 {
 
 public:
-	//////////////////////////////////////////////////////
-	// Member Variables
-	//////////////////////////////////////////////////////
-	size_t								m_router_id;		// single board id
-	size_t								m_inits;			// number of initiators
-	size_t								m_targs;			// number of targets
+	T routing_table;   //模板参数定义方式,可实现以太网交换表或者RapidIO交换表形式
 
-	soclib::tlmdt::centralized_buffer	m_central_buffer;	// input fifos
+	//后期可考虑将其该为一种环形队列,采用定期清除以前的广播多播缓存pkt_id
+	unsigned int broad_pkt_buffer[100][2];
+	unsigned int broad_pkt_index=0;
+	unsigned int multi_pkt_buffer[100][2];
+	unsigned int multi_pkt_index=0;
 
-	//以下被注释掉的成员变量等均在基类中已经定义过
-	// T routing_table;   //模板参数定义方式,可实现以太网交换表或者RapidIO交换表形式
-
-	// //后期可考虑将其该为一种环形队列,采用定期清除以前的广播多播缓存pkt_id
-	// unsigned int broad_pkt_buffer[100][2];
-	// unsigned int broad_pkt_index=0;
-	// unsigned int multi_pkt_buffer[100][2];
-	// unsigned int multi_pkt_index=0;
-
-	// unsigned int CSR[3]={0,0,0};
-	// //register CSR分别代表masterenable,discovered,deviceid;
-	// unsigned int CAR[3]={0,0,0};
-	// //register CAR分别代表port_total,port_number,port_state
+	unsigned int CSR[3]={0,0,0};
+	//register CSR分别代表masterenable,discovered,deviceid;
+	unsigned int CAR[3]={0,0,0};
+	//register CAR分别代表port_total,port_number,port_state
 
 	//////////////////////////////////////////////////////
 	// Functions
 	//////////////////////////////////////////////////////
 
 	//建立静态路由表
-	virtual void static_table_thread();
+	virtual void static_table_thread(){}
 
 	//调度一个包,从buffer出来	
-	virtual void execLoop();
+	virtual void execLoop(){}
 
 	//清楚广播多播缓存标志位
-	virtual void clear_multi_broad();
+	virtual void clear_multi_broad(){}
 
 	//将一个包路由到目标
 	virtual void route( size_t						from,
 				tlm::tlm_generic_payload	&payload,
 				tlm::tlm_phase				&phase,
-				sc_core::sc_time			&time);
+				sc_core::sc_time			&time){}
 
-
+	//前向传播函数
 	virtual tlm_sync_enum nb_transport_fw( int					from,
 								   tlm_generic_payload	&payload, 
 								   tlm_phase			&phase,
-								   sc_time				&time);
+								   sc_time				&time){}
   
+	//反向传播函数
 	virtual tlm_sync_enum nb_transport_bw( int 					id, 
 								   tlm_generic_payload	&payload, 
 								   tlm_phase 			&phase,
-								   sc_time				&time);
+								   sc_time				&time){}
 
 	//rapidio动态建立初始路由表
 	virtual void enumeration( int 		from, 
 								   tlm_generic_payload	&payload, 
 								   tlm_phase 			&phase,
-								   sc_time				&time);
+								   sc_time				&time){}
 
 	//广播函数
-	virtual  void broad_cast( int 		from, 
+	virtual void broad_cast( int 		from, 
 								   tlm_generic_payload	&payload, 
 								   tlm_phase 			&phase,
-								   sc_time				&time);
+								   sc_time				&time){}
 
 	//组播函数	
 	virtual void multi_cast( int 		from, 
 								   tlm_generic_payload	&payload, 
 								   tlm_phase 			&phase,
-								   sc_time				&time);
+								   sc_time				&time){}
 
-	//rapidio以太网共用修改路由表
+	//rapidio以太网共用修改路由表,RapidIO维护包使用，以太网维护路由使用
 	virtual void maintain_packet( int 		from, 
 								   tlm_generic_payload	&payload, 
 								   tlm_phase 			&phase,
-								   sc_time				&time);
-
-protected:
-
-	SC_HAS_PROCESS(Router);
+								   sc_time				&time){}
 
 public:
 
-	// sc_in_clk											clk;
-	// sc_in_clk											maintain_table_clk;
-	// sc_core::sc_time 	time = sc_time(4, SC_NS);
+	sc_in_clk											clk;
+	sc_in_clk											maintain_table_clk;
+	sc_core::sc_time 	time = sc_time(4, SC_NS);
 
-	vector<simple_target_socket_tagged<Router> *>		targ_socket;
-	vector<simple_initiator_socket_tagged<Router> *>	init_socket;
+	Base_Router(){}
 
-	Router( sc_core::sc_module_name		name,
-			const size_t				router_id,
-			const size_t				n_inits,
-			const size_t				n_targs);
-
-	~Router() {}
+	~Base_Router() {}
 
 };
 

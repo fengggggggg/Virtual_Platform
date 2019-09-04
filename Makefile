@@ -1,8 +1,10 @@
 SYSTEMC_PATH=/opt/systemc-2.3.1
-SYSTEMC_INCLUDE=-I$(SYSTEMC_PATH)/include
+SOCLIB_PATH=/opt/soclib/soclib/lib/tlmdt
+VCI_SOURCE=/opt/soclib/soclib/communication/vci/tlmt/source/
+SYSTEMC_INCLUDE=-I$(SYSTEMC_PATH)/include -I$(SOCLIB_PATH)/include -I$(VCI_SOURCE)/include
 SYSTEMC_L_OPTION=-L$(SYSTEMC_PATH)/lib-linux64
 
-CXX = g++ -std=c++11 -Wall -g -O2
+CXX = g++ -std=c++11 -w -g -O2
 CXXFLAGS= $(SYSTEMC_INCLUDE)
 LDFLAGS= $(SYSTEMC_L_OPTION) -lsystemc
 

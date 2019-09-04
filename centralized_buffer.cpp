@@ -59,7 +59,7 @@ bool centralized_buffer::push ( size_t                    from,
 //   are returned in (payload, phase, time), the transaction is 
 //   removed from the central buffer, and the selected port time is updated.
 ///////////////////////////////////////////////////////////////////////////////
-bool centralized_buffer::pop ( size_t                    &from,
+bool  centralized_buffer::pop(size_t                    &from,
                                tlm::tlm_generic_payload* &payload,
                                tlm::tlm_phase*           &phase,
                                sc_core::sc_time*         &time )
@@ -81,13 +81,13 @@ bool centralized_buffer::pop ( size_t                    &from,
             if(m_port_array[i].buffer.is_empty())   // buffer空，输出端口时间
             {
                 time_value = m_port_array[i].port_time.value();
-                //std::cout << "@@@ port " << i << " / empty / time = " 
+                // std::cout << "@@@ port " << i << " / empty / time = " 
                 //          << std::dec << time_value << std::endl;
             } else                                  // buffer不空，输出端口时间，取出最早事务
             {
                 m_port_array[i].buffer.get_front(payload, phase, time);
                 time_value = (*time).value();
-                //std::cout << "@@@ port " << i << " /  ok   / time = " 
+                // std::cout << "@@@ port " << i << " /  ok   / time = " 
                 //          << std::dec << time_value << std::endl;
             }
 
@@ -112,6 +112,8 @@ bool centralized_buffer::pop ( size_t                    &from,
         return false;
     }
 } // end pop()
+
+
    
 ////////////////////////////////////////////////////////////
 circular_buffer centralized_buffer::get_buffer(size_t index)

@@ -18,6 +18,7 @@ namespace soclib { namespace tlmdt {
 class init_port_descriptor
 ////////////////////////////
 {
+public:
     friend class centralized_buffer;
   
     circular_buffer         buffer;      // circular buffer of transactions
@@ -39,6 +40,7 @@ class centralized_buffer
 //////////////////////////
   : public sc_core::sc_module       
 {
+public:
     // member variables
     const size_t            m_slots;       // number of initiators                 
     init_port_descriptor*   m_port_array;  // array of initiator port descriptors
