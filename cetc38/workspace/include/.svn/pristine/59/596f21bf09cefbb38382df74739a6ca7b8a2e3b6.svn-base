@@ -1,0 +1,303 @@
+#include "DDR_MODULE.h"
+
+
+DDR_MODULE::DDR_MODULE(sc_module_name mn)
+{
+	init_socket2dmac0.bind(*this);
+	targ_socket2dmac0.bind(*this);
+
+	init_socket2dmac1.bind(*this);
+	targ_socket2dmac1.bind(*this); 
+
+
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+}
+
+
+tlm::tlm_sync_enum DDR_MODULE::nb_transport_bw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+
+		return tlm::TLM_UPDATED;
+}
+
+
+
+tlm::tlm_sync_enum DDR_MODULE::nb_transport_fw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+
+		DMAC_MEM*		msg;
+		unsigned int	rd_result = 0;
+		unsigned int    core_id = trans.get_data_length();
+		unsigned int    tranport_type = trans.get_streaming_width();
+		
+		msg = (DMAC_MEM*)trans.get_data_ptr();
+		u32ChanIdx = msg->u32ChanIdx;   //zqw+ 2019.2.15
+
+
+		if(trans.get_address() == DMAC_WR_REQ){//get data return from own Core
+			
+			if(!write_ddr(msg)){
+				trans.set_response_status(tlm::TLM_OK_RESPONSE);
+			}else{
+				trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+			}
+		}
+
+
+		if(trans.get_address() == DMAC_RD_REQ){//get data return from own Core
+
+
+			if(tranport_type == 1){   //1 DMA transport
+				if(dma_rdack_mission_on[core_id].read() == 0){//check idle or not
+					Sdst_x_len_record[core_id]	= msg->arrRWInfo[2].u32Addr;
+					Sdst_y_len_record[core_id]	= msg->arrRWInfo[3].u32Addr;
+
+					Sdst_D_sel_rd[core_id]		= msg->arrRWInfo[0].u32Addr;
+					Sdst_curr_addr_rd[core_id]	= msg->arrRWInfo[1].u32Addr;
+					Sdst_rem_x_len_rd[core_id]	= msg->arrRWInfo[2].u32Addr;	
+					Sdst_rem_y_len_rd[core_id]	= msg->arrRWInfo[3].u32Addr;	
+					Sdst_addr_x_step_rd[core_id]	= msg->arrRWInfo[4].u32Addr;
+					Sdst_addr_y_step_rd[core_id]	= msg->arrRWInfo[5].u32Addr;
+
+					dma_rdack_mission_on[core_id].write(1);
+
+				}else{
+					ERROR_REPORT_DMAC("resent DMA_RDACK mission not end yet! CH_"<<core_id)
+				}
+			}else if(tranport_type == 2){  //2 SRIO transport
+
+				if(srio_rdack_mission_on[core_id].read() == 0){//check idle or not
+
+					Ssrio_dst_curr_addr_rd[core_id]	= msg->arrRWInfo[0].u32Addr;
+					Ssrio_dst_rem_x_len_rd[core_id]	= msg->arrRWInfo[1].u32Addr;			
+					srio_rdack_mission_on[core_id].write(1);
+
+				}else{
+					ERROR_REPORT_DMAC("resent SRIO_DMA_RDACK mission not end yet! CH_"<<core_id)
+				}
+			}
+
+		}
+				
+
+	/*	 zqw 2019.2.15 ×¢ÊÍµô
+	if(trans.get_address() == DMAC_RD_REQ_DDR){
+
+			if(!read_ddr(msg)){
+				msg->u32ChanIdx = XMCH2_RD;
+				if(msg->u32ElemNum == 8 && msg->arrRWInfo[0].u32Addr == 0xc10004bc){
+					cout<<"get"<<endl;
+				}
+				unsigned int tt;
+				tt = sc_time_stamp().value()/1000;
+				rd_data_vec[core_id].push_back(make_pair(*msg,Delay));
+				trans.set_response_status(tlm::TLM_OK_RESPONSE);
+			}else{
+				trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+			}
+
+		}
+		*/
+	
+
+		return tlm::TLM_UPDATED;
+
+}
+
+//Interface for JTAG
+bool DDR_MODULE::read_word(unsigned int addr,unsigned int &value){
+	bool res = true;
+	if(addr < DDRDataStart || addr> DDRDataStart + DDRData_MaxOffset){
+		res = false;
+	}else{
+		value = data[addr - DDRDataStart];
+	}
+	return res;
+}
+//Interface for JTAG
+bool DDR_MODULE::write_word(unsigned int addr,const unsigned int value){
+	bool res = true;
+	if(addr < DDRDataStart || addr> DDRDataStart + DDRData_MaxOffset){
+		res = false;
+	}else{
+		data[addr - DDRDataStart] = value;
+	}
+	return res;
+}
+
+
+
+
+void DDR_MODULE::clock_tick(){
+	rdackprepare();
+	rdack();
+}
+
+
+void DDR_MODULE::reset(){
+
+	for (int i = 0; i!= LEN; i++){
+		data[i] = i;
+	}
+}
+
+bool DDR_MODULE::write_ddr(DMAC_MEM* msg){
+	bool res = 0;
+	if(addrjudge(msg)){
+		res = 1;
+	}else{
+		for(int i = 0; i != msg->u32ElemNum; i++){
+			//data[msg->arrRWInfo[i].u32Addr - DDRDataStart] = msg->arrRWInfo[i].u32Value;
+			data[msg->arrRWInfo[i].u32Addr - DDRDataStart] = msg->arrRWInfo[i].u32Value + msg->arrRWInfo[i].u32Addr ; //zqw+ 2019.1.2
+
+		}
+	}
+
+
+	return res;
+}
+
+
+bool DDR_MODULE::read_ddr(DMAC_MEM* msg){
+
+	bool res = 0;
+
+	if(addrjudge(msg)){
+		res = 1;
+	}else{
+		for(int i = 0; i != msg->u32ElemNum; i++){
+			msg->arrRWInfo[i].u32Value = data[msg->arrRWInfo[i].u32Addr - DDRDataStart];
+		}
+	}
+	return res;
+}
+
+
+bool DDR_MODULE::addrjudge(DMAC_MEM* msg){
+	bool res  = 0;
+
+	for(int i = 0; i!=msg->u32ElemNum; i++){
+		if (msg->arrRWInfo[i].u32Addr < DDRDataStart || msg->arrRWInfo[i].u32Addr> DDRDataStart + DDRData_MaxOffset)
+		{
+			res = 1;
+			break;
+		}
+	}
+	return res;
+}
+
+void  DDR_MODULE::rdack(){
+
+	tlm::tlm_generic_payload p_trans2core;
+	tlm::tlm_phase ph = tlm::BEGIN_REQ;
+	sc_time tt = SC_ZERO_TIME;
+	DMAC_MEM * ptr;
+	p_trans2core.set_address(DMAC_RD_ACK);
+
+	for (int coreid = 0; coreid!= ISS_NUM_DEF; coreid++){
+		for(int i =0; i!= rd_data_vec[coreid].size(); i++){
+			if(rd_data_vec[coreid][i].second >0 ){
+				rd_data_vec[coreid][i].second -- ;
+			}
+		}
+		if(!rd_data_vec[coreid].empty() && rd_data_vec[coreid][0].second == 0){//last accept, trans new if there is
+			p_trans2core.set_data_ptr((unsigned char*)&rd_data_vec[coreid][0].first);
+			init_socket2dmac0->nb_transport_fw(p_trans2core, ph, tt);
+			if(p_trans2core.get_response_status() == tlm::TLM_OK_RESPONSE ){
+				rd_data_vec[coreid].erase(rd_data_vec[coreid].begin()); //accept then erase
+			}
+		}
+	}
+}
+
+void  DDR_MODULE::rdackprepare(){
+
+	for(int coreid = 0; coreid!= ISS_NUM_DEF; coreid++){
+		if(dma_rdack_mission_on[coreid].read()){
+
+			DMAC_MEM tmp;
+			memset(&tmp,0,sizeof(tmp));
+			tmp.u32ChanIdx = u32ChanIdx;
+			if(Sdst_D_sel_rd[coreid] == 0){//Sdst is 1D
+				tmp.u32ElemNum =  Sdst_rem_x_len_rd[coreid] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[coreid];
+				Sdst_rem_x_len_rd[coreid] -=  tmp.u32ElemNum ;
+				for(int i = 0; i != tmp.u32ElemNum; i++){
+					tmp.arrRWInfo[i].bolIsRead = true;
+					tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[coreid];
+					Sdst_curr_addr_rd[coreid] += Sdst_addr_x_step_rd[coreid];
+				}
+			}else{//src is 2D
+				if(Sdst_rem_y_len_rd[coreid] == Sdst_y_len_record[coreid]){//check first or not
+					Sdst_rem_y_len_rd[coreid] --;
+					tmp.u32ElemNum =  Sdst_rem_x_len_rd[coreid] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[coreid];
+					Sdst_rem_x_len_rd[coreid] -=  tmp.u32ElemNum ;
+					for(int i = 0; i != tmp.u32ElemNum; i++){
+						tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+						tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[coreid];
+						Sdst_curr_addr_rd[coreid] += Sdst_addr_x_step_rd[coreid];
+					}
+				}else{//not the first trans
+					if(Sdst_rem_x_len_rd[coreid] == 0){//check 1D is over or not
+						Sdst_rem_y_len_rd[coreid] --;
+						Sdst_rem_x_len_rd[coreid] = Sdst_x_len_record[coreid];
+						Sdst_curr_addr_rd[coreid] = Sdst_curr_addr_rd[coreid] + Sdst_addr_y_step_rd[coreid];
+						tmp.u32ElemNum =  Sdst_rem_x_len_rd[coreid] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[coreid];
+						Sdst_rem_x_len_rd[coreid] -=  tmp.u32ElemNum ;
+						for(int i = 0; i != tmp.u32ElemNum; i++){
+							tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+							tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[coreid];
+							Sdst_curr_addr_rd[coreid] += Sdst_addr_x_step_rd[coreid];
+						}
+					}else{//1D not over
+						tmp.u32ElemNum =  Sdst_rem_x_len_rd[coreid] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[coreid];
+						Sdst_rem_x_len_rd[coreid] -=  tmp.u32ElemNum ;
+						for(int i = 0; i != tmp.u32ElemNum; i++){
+							tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+							tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[coreid];
+							Sdst_curr_addr_rd[coreid] += Sdst_addr_x_step_rd[coreid];
+						}
+					}
+				}
+			}
+
+			if(!read_ddr(&tmp)){
+				rd_data_vec[coreid].push_back(make_pair(tmp,Delay));
+			}
+			if(Sdst_rem_y_len_rd[coreid] == 0 && Sdst_rem_x_len_rd[coreid] == 0){
+				dma_rdack_mission_on[coreid].write(0);
+			}
+		}
+
+	}//for
+
+
+	for(int coreid = 0; coreid!= SRIO_NUM; coreid++){   //zqw+ 2019.2.15 SRIO
+		if(srio_rdack_mission_on[coreid].read()){
+
+			DMAC_MEM tmp;
+			memset(&tmp,0,sizeof(tmp));
+			tmp.u32ChanIdx = u32ChanIdx;
+			tmp.u32ElemNum =  Ssrio_dst_rem_x_len_rd[coreid] >= SRIO_DATA_WIDTH_WORDS ? SRIO_DATA_WIDTH_WORDS : Ssrio_dst_rem_x_len_rd[coreid];
+			Ssrio_dst_rem_x_len_rd[coreid] -=  tmp.u32ElemNum ;
+			for(int i = 0; i != tmp.u32ElemNum; i++){
+				tmp.arrRWInfo[i].bolIsRead = true;
+				tmp.arrRWInfo[i].u32Addr = Ssrio_dst_curr_addr_rd[coreid];
+				Ssrio_dst_curr_addr_rd[coreid] += 1;
+			}
+
+			if(!read_ddr(&tmp)){
+				rd_data_vec[coreid].push_back(make_pair(tmp,Delay));
+			}
+			if(Ssrio_dst_rem_x_len_rd[coreid] == 0){
+				srio_rdack_mission_on[coreid].write(0);
+			}
+		}
+
+	}//for
+}

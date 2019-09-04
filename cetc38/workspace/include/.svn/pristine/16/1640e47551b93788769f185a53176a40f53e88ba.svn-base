@@ -1,0 +1,69 @@
+#include "register32.h"
+
+using namespace BWDSP104X;
+
+register32::register32(std::string nm)
+	:name(nm)
+{
+
+	return;
+}
+
+unsigned int register32::read()
+{
+	return val_out;
+}
+
+void register32::write(unsigned int v)
+{
+	val_in = v;
+	return;
+}
+
+void register32::update()
+{
+	val_out = val_in;
+}
+
+void register32::reset()
+{
+	val_in = val_out =0;
+	return;
+}
+
+void register32::set(unsigned int v)
+{
+	val_in = val_out = v;
+	return;
+}
+
+
+//register_cacheline2136::register_cacheline2136(std::string nm)
+//	:name(nm)
+//{
+//
+//	return;
+//}
+//
+//cacheLine2136 register_cacheline2136::read()
+//{
+//	return val_out;
+//}
+//
+//void register_cacheline2136::write(cacheLine2136 v)
+//{
+//	val_in = v;
+//	return;
+//}
+//
+//void register_cacheline2136::update()
+//{
+//	val_out = val_in;
+//}
+//
+//void register_cacheline2136::reset()
+//{
+//	val_in.reset();
+//	val_out.reset();
+//	return;
+//}

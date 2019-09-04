@@ -1,0 +1,18 @@
+ 
+
+#include "sc_iss.h"
+
+//--------------------------------------------------------------------
+void sc_iss::InitJITCache()
+{
+	memset(g_arrJITCache, 0, sizeof(INST_DEC_INFO) * JIT_CACHE_SIZE);
+}
+
+// map address of instruction to 1024 entries of JIT cache
+DSPU32 sc_iss::PC2JITIdx(DSPU32 p_u32PC)
+{
+	return ( p_u32PC & JIT_IDX_MASK );
+}
+
+
+

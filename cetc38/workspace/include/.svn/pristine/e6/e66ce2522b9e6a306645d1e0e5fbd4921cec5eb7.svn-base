@@ -1,0 +1,543 @@
+/*************************************************
+  File name:      iss_dmac_comm.h
+
+  Author:
+  Version:                 
+  Date: 
+
+  Description:    BWDSP104x内核与DMAC间的TLM通信接口定义。
+
+  Others:         // 其它内容的说明
+  
+  Function List:  // 主要函数列表，每条记录应包括函数名及功能简要说明
+    1. ....
+    
+  History:
+
+    1. Date:	2013-3-21
+       Author:	GRui
+       Modification: 删除了CMD_RW_DMAC_REGS_ACK、CMD_INSN_RW_OUT_MEM_ACK、
+	                 CMD_INSN_RW_CORE_MEM_ACK、CMD_BURST_WR_CORE_MEM_ACK、
+					 CMD_BURST_RD_CORE_MEM_ACK命令定义。对应的消息报文使用
+					 phase项与相应的请求消息报文区分。
+
+	2. Date:	2013-5-25
+       Author:	GRui
+       Modification: 1. 使用generic_payload.m_address 存储命令码
+                  2. 修改了CMD_BURST_WR_CORE_MEM (CORE --> DMAC)中的请求信息
+				  3. 将CMD_RW_DMAC_REGS替换为CMD_RD_DMAC_REG和CMD_WR_DMAC_REG。
+
+    3. Date:	2013-6-5
+       Author:	GRui
+       Modification: 1. 将MSG_INSN_RW_MEM_ELEM中的u32Slot修改为u32Bus.
+
+	4. Date:	2013-7-2
+       Author:	GRui
+       Modification: 1. 在MSG_INSN_RW_MEM中增加了arrBusInfo[4]数据项。
+
+	5. Date:	2013-7-3
+       Author:	GRui
+       Modification: 1. 在MSG_INSN_RW_MEM_BUS中增加了以下数据项。
+       				 仅供作为master的内核使用, DMAC无需处理或提供。
+       					DSPU32 u32SlotPlus1;    // 分配到该总线的指令在指令行中的slot序号(1 ~ 16)	
+						bool bolSingleWord;      // 是否是单字访存指令
+						bool bolIsDM8;          // 是否是双模8指令  
+
+	4. Date:	2013-7-11
+       Author:	GRui
+       Modification: 1. 在MSG_INSN_RW_MEM_ELEM中增加了u32AddrIdx数据项。
+
+    5. Date:	2014-4-9
+       Author:	GRui
+       Modification: 1. 删除CMD_INSN_RW_CORE_MEM消息定义(其他核以指令方式读/写本核内部存储空间)
+
+
+
+*************************************************/
+#ifndef SC_DMAC_H_
+#define SC_DMAC_H_
+
+#ifdef DSP_WIN32
+#include ".\src\AlgoriLib\dsptypes.h"
+#else
+#include "./src/AlgoriLib/dsptypes.h"
+#endif
+
+enum DMAC_CHANNEL
+{
+	HSCH0_RW,
+	XMCH0_RD,
+	XMCH0_WR,
+	XMCH2_RD,
+	XMCH2_WR,
+	XMCH3_RD,
+	XMCH3_WR,
+	XSCH0_RD,
+	XSCH0_WR,
+	XSCH2_RD,
+	XSCH2_WR,
+	XSCH3_RD,
+	XSCH3_WR,
+	XSCH4_RD,
+	XSCH4_WR,
+	XSCH5_RD,
+	XSCH5_WR,
+	XSCH6_RD,
+	XSCH6_WR,
+	XSCH7_RD,
+	XSCH7_WR,
+	HMCH0_RW,
+	DMAC_MAX_CHANNELS =200
+};
+
+//zqw+ 2019.1.21  SRIO信号
+enum SRIO_CHANNEL
+{
+	SRIOMCH0_RD = 100,
+	SRIOMCH0_WR,
+	SRIOSCH0_RD,
+	SRIOSCH0_WR,
+	SRIOMCH1_RD,
+	SRIOMCH1_WR,
+	SRIOSCH1_RD,
+	SRIOSCH1_WR,
+	SRIO_MAX_CHANNELS
+};
+
+/************************************ Definition ************************************************/
+enum DMAC_CMD
+{
+	CORE_REQ_RD_REG,			// 读DMAC控制寄存器，获得DMA状态
+	CORE_REQ_WR_REG,			// 写DMAC控制寄存器，发起DMA请求
+	JTAG_REQ_RD_REG,			// JTAG读DMA控制寄存器
+	JTAG_REQ_WR_REG,			// JTAG写DMA控制寄存器
+	CORE_REQ_OUT_MEM,		// CORE发起的指令方式读写核外存储器(非核内与ICMA范围)
+	CORE_RESET_DMAC,			// CORE发起的DMAC reset操作
+	DMAC_REQ_CORE_MEM,		// DMAC发起的访问核内存储器请求
+	DMAC_REQ_INT,
+	DMAC_WR_REQ, //add by wangqiang for AXI 
+	DMAC_WR_ACK,//add by wangqiang for AXI 
+	DMAC_RD_REQ,//add by wangqiang for AXI 
+	DMAC_RD_ACK,//add by wangqiang for AXI 
+	DMAC_ADDR_ERR,//add by wangqiang for AXI 
+	DMAC_CMD_MAX,
+
+	SYS_CFG_MSG,		//add by wangqiang for SystemConfigReg trans Msg to Core
+	DMAC_RD_REQ_DDR		//read have 2 ways, 1 is DMAC_RD_REQ 2 is only 8 words read, but write have only one way
+};
+
+typedef struct
+{
+	DSPU32 u32INT;
+} DMAC_INT_S;
+
+typedef struct
+{
+	DSPU32 u32SrcEvt;
+	bool bolPosEdge;
+} SRC_EVT_S;
+//-------------------------------------------
+// 访问DMAC控制寄存器
+//-------------------------------------------
+// (CORE --> DMAC)
+//		CORE_REQ_RD_REG
+//		CORE_REQ_WR_REG
+// 请求信息：
+// generic_payload.m_address: CORE_REQ_RD_REG/CORE_REQ_WR_REG
+// generic_payload.m_data: 指向DMAC_RW_REG_S结构体的指针
+// generic_payload.m_length: sizeof(DMAC_RW_REG_S)
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED/TLM_UPDATED
+//
+typedef struct
+{
+	DSPU32 u32Addr;
+	DSPU32 u32Value;
+} DMAC_RW_REG_S;
+
+//-------------------------------------------
+// 内核与DMAC之间访存接口
+//-------------------------------------------
+// 请求信息：
+// generic_payload.m_address: 
+//	(CORE --> DMAC)
+//		CORE_REQ_OUT_MEM
+//		CORE_RESP_DMAC
+//	(DMAC --> CORE)
+//		DMAC_REQ_CORE_MEM
+//		DMAC_RESP_CORE
+// generic_payload.m_data: 指向DMAC_REQ_MEM结构体的指针
+// generic_payload.m_length: sizeof(DMAC_REQ_MEM)
+// phase: BEGIN_REQ/BEGIN_RESP
+//
+// 返回信息：
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_RESP/END_REQ
+// 
+// 函数返回值：TLM_COMPLETED/TLM_UPDATED/TLM_ACCEPTED
+//
+typedef struct
+{
+	bool bolIsRead;
+	DSPU32 u32Addr;
+	DSPU32 u32Value;
+	DSPU32 u32Bus;
+	DSPU32 u32WMask;
+	DSPU32 u32AddrIdx;
+} DMAC_ELEM;
+
+typedef struct 
+{
+	DSPU32 u32ElemNum; 
+	DSPU32 u32ChanIdx;
+	DMAC_ELEM arrRWInfo[24];
+	bool bolAllWrReq;
+} DMAC_MEM;
+
+//zqw+ 2019.3.6 SRIO帧格式
+typedef struct 
+{
+	DSPU32 TT; 
+	DSPU32 Ftype;
+	DSPU32 TargetID;
+	DSPU32 SouceID; 
+	DSPU32 Ttype; 
+	DSPU32 Extension; 
+	DSPU32 TID; 
+	DSPU32 OffsetAddress;
+	DSPU32 Wdptr; 
+	DSPU32 Addr; 
+	DSPU32 Date[64];
+} SRIO_FRAME;
+
+#endif
+
+
+#if 0
+
+//------------------------------------------------
+enum tlm_core_dmac_command 
+{
+	// 内核读DMAC单个寄存器
+    CMD_RD_DMAC_REG,
+
+	// 内核写DMAC单个寄存器
+    CMD_WR_DMAC_REG,
+
+	// 内核以指令方式读/写核外存储空间
+	// 内核通过AHB总线读/写外设寄存器也采用该方式
+	CMD_INSN_RW_OUT_MEM,
+
+	// DMAC内的DMA控制器以burst方式写核内存储器
+    CMD_BURST_WR_CORE_MEM,
+
+	// DMAC内的DMA控制器以burst方式读核内存储器
+	CMD_BURST_RD_CORE_MEM,
+
+	// 内核复位DMAC
+	CMD_RESET_DMAC,
+
+	CMD_RESERVED
+};
+
+//------------------------------------------------
+// 关于内核访问DMAC寄存器的说明
+//
+// 内核每周期可访问DMAC的寄存器个数：
+//     12组独立的写请求（8个基于通用寄存器，4个基于立即数），每组32位宽。
+//     4组独立的读请求，每组32位宽。
+// 延时：
+//     对于写寄存器操作，单周期即可完成
+//     对于读寄存器操作，数据被立刻读出，寄存2 级后返回给内核。
+//     请求总会被接受，若通道正忙，写操作不会产生效果，并不会触发异常等。
+// 汇编工具链保证同一时刻多个写请求不会写同一个寄存器。
+//
+
+//------------------------------------------------
+// CMD_RD_DMAC_REG (CORE --> DMAC)
+//
+// 延时：
+//     DMAC寄存器相当于AC/EX流水线寄存器，
+//     内核在AC级发起的读、写操作均立即生效，即访问无延时。
+//
+// 函数: nb_transport_fw() bind with tsocket of DMAC
+//
+// 请求信息：
+// generic_payload.m_address: CMD_RD_DMAC_REG
+// generic_payload.m_data: 指向MSG_RW_DMAC_REG结构体的指针
+// generic_payload.m_length: sizeof(MSG_RW_DMAC_REG)
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_data: 指向的MSG_RW_DMAC_REG结构体中存放读出数据。
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED
+//
+//
+
+//------------------------------------------------
+// CMD_WR_DMAC_REG (CORE --> DMAC)
+//
+// 延时：
+//     DMAC寄存器相当于AC/EX流水线寄存器，
+//     内核在AC级发起的读、写操作均立即生效，即访问无延时。
+//
+// 函数: nb_transport_fw() bind with tsocket of DMAC
+//
+// 请求信息：
+// generic_payload.m_address: CMD_WR_DMAC_REG
+// generic_payload.m_data: 指向MSG_RW_DMAC_REG结构体的指针
+// generic_payload.m_length: sizeof(MSG_RW_DMAC_REG)
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED
+//
+//
+typedef struct msg_rw_dmac_reg
+{
+	DSPU32 u32Addr;   // [addr] 12位地址
+	DSPU32 u32Value;  // 寄存器值
+
+} MSG_RW_DMAC_REG;
+
+//------------------------------------------------
+// CMD_BURST_WR_CORE_MEM (CORE <-- DMAC)
+//
+// burst方式下，DMAC与CORE间读、写位宽最大为256位。
+//
+// 函数: nb_transport_fw() bind with tsocket of CORE
+//
+// 请求信息：
+// generic_payload.m_address: CMD_BURST_WR_CORE_MEM
+// generic_payload.m_data: 指向MSG_RW_CORE_MEM结构体的指针
+// generic_payload.m_length: sizeof(MSG_RW_CORE_MEM)
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     请求未被接受（设备忙）：TLM_COMMAND_ERROR_RESPONSE
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_REQ
+// 
+// 函数返回值：TLM_UPDATED
+//
+typedef struct msg_rw_core_mem_elem
+{
+	DSPU32 u32Addr;  // 地址
+	DSPU32 u32Value; // 数据
+
+} MSG_RW_CORE_MEM_ELEM;
+
+typedef struct msg_rw_core_mem
+{
+	DSPU32 u32ID;      // 消息ID
+	DSPU32 u32ElemNum; // 访存地址单元个数，最大为８。不随访存的进行而减小。
+	DSPU32 u32ChanIdx;  // burst方式有多个通道，用于区分通道。0 ~ 10
+	MSG_RW_CORE_MEM_ELEM arrRWElems[8];
+
+} MSG_RW_CORE_MEM;
+
+//------------------------------------------------
+// CMD_BURST_WR_CORE_MEM (CORE --> DMAC)
+//
+// burst方式下，DMAC与CORE间读、写位宽最大为256位。
+//
+// 函数: nb_transport_bw() bind with isocket of DMAC
+//
+// 请求信息：
+// generic_payload.m_address: CMD_BURST_WR_CORE_MEM
+// generic_payload.m_data: 指向MSG_RW_CORE_MEM结构体的指针，
+//                       结构体中的u32ID数据项与被服务的请求ID相符。
+// generic_payload.m_length: sizeof(MSG_RW_CORE_MEM)
+// phase: BEGIN_RESP
+//
+// 返回信息：
+// generic_payload.m_response_status：TLM_OK_RESPONSE
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED
+
+
+//------------------------------------------------
+// CMD_BURST_RD_CORE_MEM (CORE <-- DMAC)
+//
+// burst方式下，DMAC与CORE间读、写位宽最大为256位。
+//
+// 函数: nb_transport_fw() bind with tsocket of CORE
+//
+// 请求信息：
+// generic_payload.m_address: CMD_BURST_RD_CORE_MEM
+// generic_payload.m_data: 指向MSG_RW_CORE_MEM结构体的指针
+// generic_payload.m_length: sizeof(MSG_RW_CORE_MEM)
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     请求未被接受（设备忙）：TLM_COMMAND_ERROR_RESPONSE
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_REQ
+// 
+// 函数返回值：TLM_UPDATED
+
+
+//------------------------------------------------
+// CMD_BURST_RD_CORE_MEM (CORE --> DMAC)
+//
+// burst方式下，DMAC与CORE间读、写位宽最大为256位。
+//
+// 函数: nb_transport_bw() bind with isocket of DMAC
+//
+// 请求信息：
+// generic_payload.m_address: CMD_BURST_RD_CORE_MEM
+// generic_payload.m_data: 指向MSG_RW_CORE_MEM结构体的指针
+// generic_payload.m_length: sizeof(MSG_RW_CORE_MEM)
+// phase: BEGIN_RESP
+//
+// 返回信息：
+// generic_payload.m_response_status：TLM_OK_RESPONSE
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED
+
+
+//------------------------------------------------
+// CMD_INSN_RW_OUT_MEM (CORE --> DMAC)
+//
+// 一个消息中可包括（2个读请求+1个写请求）或（1个读请求+2个写请求）。
+// 每个请求可访问8个地址。
+// DMAC可能由于忙而不能接受请求消息，
+// 此时DMAC对消息内的所有访存请求均不接受。
+//
+// 函数: nb_transport_fw() bind with tsocket of DMAC
+//
+// 请求信息：
+// generic_payload.m_address: CMD_INSN_RW_OUT_MEM
+// generic_payload.m_data: 指向MSG_INSN_RW_MEM结构体的指针
+// generic_payload.m_length: sizeof(MSG_INSN_RW_MEM)
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     请求未被接受（设备忙）：TLM_COMMAND_ERROR_RESPONSE
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+// phase: END_REQ
+// 
+// 函数返回值：TLM_UPDATED
+//
+typedef struct msg_insn_rw_mem_elem
+{
+	bool bolIsRead;         // true: 读；false: 写。
+	DSPU32 u32Bus;      // 所属指令使用的bus序号 (0或1)
+						// 注:较小的bus序号对应较大的slot序号
+	DSPU32 u32AddrIdx;   // 是当前总线上的第几个地址
+						// 与访存地址被计算出来的顺序号相同
+						
+	DSPU32 u32Addr;  // 地址
+	DSPU32 u32Value; // 数据
+
+
+} MSG_INSN_RW_MEM_ELEM;
+
+// 描述分配到某条总线的访存指令相关信息
+typedef struct msg_insn_rw_mem_bus
+{
+	// DMAC需要的信息
+	bool bolAtom; // 使用该总线的指令是否为原子操作	
+	DSPU32 u32BankConflictNum; // 解决bank冲突需要的周期数
+	DSPU32 u32BankConflictState; // bank冲突的状态
+
+	// 以下信息DMAC无需处理或提供
+	DSPU32 u32SlotPlus1; // 分配到该总线的指令在指令行中的slot序号(1 ~ 16)	
+					   // 0表示该总线尚未被分配
+	bool bolSingleWord;      // 是否是单字访存指令
+	bool bolIsDM8;          // 是否是双模8指令    
+
+} MSG_INSN_RW_MEM_BUS;
+
+typedef struct msg_insn_rw_mem
+{
+	DSPU32 u32ID;      // 消息ID
+	DSPU32 u32ElemNum; // 原始的访存单元个数，不随访存的进行而减小。最大为3 * 8 = 24。
+	MSG_INSN_RW_MEM_ELEM arrInsnsRWInfo[24];  // 访存指令的访存信息
+
+	// arrBusInfo[0]：read_bus_0
+    // arrBusInfo[1]：read_bus_1
+    // arrBusInfo[2]：write_bus_0
+    // arrBusInfo[3]：write_bus_1
+	MSG_INSN_RW_MEM_BUS arrBusInfo[4]; // 分配到各总线上的访存指令相关信息
+
+	// 在硬件设计中,若一个执行行中有一个原子访存操作,
+	// 则该执行行中的所有访存操作都被认为是原子的。(不区分读写)
+	bool bolAtom;               // 本执行行是否含原子访存操作
+
+	// for special use(liuyu)
+	DSPU32 u32SpecWrMask;
+	
+} MSG_INSN_RW_MEM;
+
+//------------------------------------------------
+// CMD_INSN_RW_OUT_MEM (CORE <-- DMAC)
+//
+// 当相应的CMD_INSN_RW_OUT_MEM请求得到服务并完成时，返回该消息。
+// 一个消息内的所有读访存结果是同时返回的。
+//
+// 函数: nb_transport_bw() bind with isocket of CORE
+//
+// 请求信息：
+// generic_payload.m_address: CMD_RW_DMAC_REGS
+// generic_payload.m_data: 指向MSG_INSN_RW_MEM结构体的指针
+// generic_payload.m_length: sizeof(MSG_INSN_RW_MEM)
+// phase: BEGIN_RESP
+//
+// 返回信息：
+
+// generic_payload.m_response_status：
+//     请求被接受：TLM_OK_RESPONSE；
+//     其他各类错误：TLM_GENERIC_ERROR_RESPONSE。
+//
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED
+
+
+//------------------------------------------------
+// CMD_RESET_DMAC (CORE --> DMAC)
+//
+// 函数: nb_transport_fw() bind with tsocket of DMAC
+//
+// 请求信息：
+// generic_payload.m_address: CMD_RESET_DMAC
+// phase: BEGIN_REQ
+//
+// 返回信息：
+// generic_payload.m_response_status: TLM_OK_RESPONSE
+// phase: END_RESP
+// 
+// 函数返回值：TLM_COMPLETED
+//
+//
+
+#endif
+

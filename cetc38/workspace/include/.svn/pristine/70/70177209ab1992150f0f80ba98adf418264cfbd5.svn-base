@@ -1,0 +1,11 @@
+#include "sc_iss.h"
+
+//=====================================================================
+void sc_iss::RstBlkPortMask()
+{
+	m_u32VBlockMask = 0U;
+	m_u32RdBlockMask = 0U;
+	m_u32WrBlockMask = 0U;
+	m_u32OutReqBlockMask = 0U;
+}
+

@@ -1,0 +1,5734 @@
+#include "sc_iss.h"
+
+bool sc_iss::InitLogForECS()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/TraceCases.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)	{
+		printf("ClrDbgInfo: Error occured when open %s\n", g_arrFileName);
+		return false;
+	}
+#ifdef ECS_LOG2
+	sprintf(g_arrFileName, "%s/U8Log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)	{
+		printf("ClrDbgInfo: Error occured when open %s\n", g_arrFileName);
+		return false;
+	}
+	sprintf(g_arrFileName, "%s/PC.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)	{
+		printf("ClrDbgInfo: Error occured when open %s\n", g_arrFileName);
+		return false;
+	}
+#endif
+	fclose(fp);
+
+	return true;
+}
+
+#ifndef BWSIM_PUB_MODE
+//----------------------------------------------------------
+bool  sc_iss::ClrDbgInfo()
+{
+	FILE *fp = NULL;
+
+#ifndef LOG_PXP
+	sprintf(g_arrFileName, "%s/gpio_log.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		printf("ClrDbgInfo: Error occured when open %s\n", g_arrFileName);
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/timer_log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open timer_log.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/uart_log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open uart_log.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/DSPRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open DSPRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/AddrRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open AddrRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/GenRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open GenRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/imafr.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open imafr.txt\n");
+		return false;
+	}
+
+	fclose(fp);
+	sprintf(g_arrFileName, "%s/ALUReg0.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)    
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ALUReg0.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/ALUReg1.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ALUReg1.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/SPURegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open SPURegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/SHFRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open SHFRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/MULRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open MULRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/DBGRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open DBGRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/WrMemLog.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open WrMemLog.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/ResAlloc.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ResAlloc.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/pio.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open pio.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/PRComp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open PRComp.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/GenRegs_100_104.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open GenRegs_100_104.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/PipePC.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open PipePC.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	for(int i = 0x28; i <= 0x2f; i++)
+	{
+		sprintf(g_arrFileName, "%s/CFG_INT%x.txt", g_arrIOPath, i);
+		if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+		{
+			PrintToCerr("%s: Error occured when open %s\n", __FUNCTION__, g_arrFileName);
+			return false;
+		}
+		fclose(fp);	
+	}
+	sprintf(g_arrFileName, "%s/CFG_Normal.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("%s: Error occured when open %s\n", __FUNCTION__, g_arrFileName);
+		return false;
+	}
+	fclose(fp);	
+	
+	sprintf(g_arrFileName, "%s/DBGPR.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open DBGPR.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/DBGIRQTest.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open DBGIRQTest.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/DBGIRQTest_AREG.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open DBGIRQTest_AREG.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/SpecRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open SpecRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/INTRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open INTRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/DMACRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open DMACRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+/*
+	sprintf(g_arrFileName, "%s/ResUseInfo.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ResUseInfo.txt\n");
+		return false;
+	}
+	fclose(fp);
+*/
+
+	sprintf(g_arrFileName, "%s/xRegsComp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open xRegsComp.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/yRegsComp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open yRegsComp.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/zRegsComp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open zRegsComp.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/tRegsComp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open tRegsComp.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/Data1Comp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open Data1Comp.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/CtrlRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open CtrlRegs.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/ResAluUseInfo.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ResAluUseInfo.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/ResAluUseInfo_debug.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ResAluUseInfo_debug.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/ResMulUseInfo.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ResMulUseInfo.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/ResMulUseInfo_debug.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ResMulUseInfo_debug.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/memory.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open memory.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/IAB.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open IAB.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/BusUseOne.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open BusUseOne.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/BusUseTwo.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open BusUseTwo.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/MemCE.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open MemCE.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/stall_info.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open stall_info.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/flush_info.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open flush_info.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/StateOnEnterISR.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open StateOnEnterISR.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/StateOnLeaveISR.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open StateOnLeaveISR.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/SHTStab.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open SHTStab.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+#ifdef LIBTESTCODE
+		
+	
+	if ((fp = fopen("./CodeCoverage.txt", "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open CodeCoverage.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+
+	if ((fp = fopen("./CondCoverage.txt", "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open CondCoverage.txt\n");
+		return false;
+	}
+	fclose(fp);
+#endif
+	sprintf(g_arrFileName, "%s/mem_software.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("%s: Error occured when open mem_software.txt\n", __FUNCTION__);
+		return false;
+	}
+	fclose(fp);
+#endif // ifndef LOG_PXP
+
+#ifdef LOG_PXP
+	memset(log_pxp_msg, 0, sizeof(log_pxp_msg));
+
+	sprintf(g_arrFileName, "%s/GenRegs_PXP.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open GenRegs_PXP.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/AddrRegs_PXP.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open AddrRegs_PXP.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/PipePC_PXP.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open PipePC_PXP.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/ALUReg_PXP.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open ALUReg_PXP.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/MULRegs_PXP.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open MULRegs_PXP.txt\n");
+		return false;
+	}
+	fclose(fp);
+		
+	sprintf(g_arrFileName, "%s/SHFRegs_PXP.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrDbgInfo: Error occured when open SHFRegs_PXP.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+#endif
+
+	return true;
+}
+//-------------------------------------------------------------------------------------------------------
+bool sc_iss::ResetSHFTab()
+{
+	FILE *fp = NULL;
+
+	if ((fp = fopen("./SHFStabInit.txt", "r")) == NULL)
+	{
+		PrintToCerr("Error occured when open ./SHFStabInit.txt\n");
+		return false;
+	}
+	int i=0;
+	while(i<4096)
+	{
+		char tempbuf[80];
+		char *endptr;
+		char *p;
+		memset(tempbuf,0,80);
+		if(fgets(tempbuf,80,fp)==NULL)
+			break;
+
+		p = strtok(tempbuf, " ");
+		u32_SHF_TAB[i/1024][0].arrElem[(i/256)%4][i%256] = strtol(p,&endptr,16);
+		p = strtok(NULL, " ");
+		u32_SHF_TAB[i/1024][1].arrElem[(i/256)%4][i%256] = strtol(p,&endptr,16);
+		p = strtok(NULL, " ");
+		u32_SHF_TAB[i/1024][2].arrElem[(i/256)%4][i%256] = strtol(p,&endptr,16);
+		p = strtok(NULL, "\n");
+		u32_SHF_TAB[i/1024][3].arrElem[(i/256)%4][i%256] = strtol(p,&endptr,16);
+		i++;
+	}
+	fclose(fp);
+	/*
+	FILE *fp_out = NULL;
+
+	if ((fp_out = fopen("./SHFStabTmp.txt", "w")) == NULL)
+	{
+		PrintToCerr("Error occured when open ./SHFStabTmp.txt\n");
+		return false;
+	}
+
+	for(int i=0;i<4;i++)
+	{
+		for(int n=0;n<4;n++)
+		{
+			for(int d=0;d<256;d++)
+			{
+				for(int j=0;j<4;j++)
+				{
+					if(j==3)
+						fprintf(fp_out,"%08x\n",u32_SHF_TAB[i][j].arrElem[n][d]);
+					else
+						fprintf(fp_out,"%08x ",u32_SHF_TAB[i][j].arrElem[n][d]);
+				}
+			}
+		}		
+	}
+	
+	fclose(fp_out);*/
+	return true;
+}
+//-------------------------------------------------------------------------------------------------------
+bool sc_iss::LogDMemOnIRET()
+{
+	FILE *fp;
+	sprintf(g_arrFileName, "%s/mem_software.txt", g_arrIOPath);
+	if((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("%s: Error on openning mem_software.txt\n", __FUNCTION__);
+		return false;
+	}
+
+	for(int i = 0x3f000; i < 0x40000; i ++)
+	{
+		fprintf(fp, "%08x\n", u32_data_mem[5][i]);
+	}
+	fclose(fp);
+}
+#ifdef STALL_REASON_LOG
+//-------------------------------------------------------------------------------------------------------
+bool sc_iss::LogPipeStall(DSPU32 p_u32Reason, DSPU32 p_u32SrcPC, DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32Phase)
+{
+	FILE *fp;
+	sprintf(g_arrFileName, "%s/stall_info.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("LogPipeStall: Error occured when open stall_info.txt\n");
+		return false;
+	}
+
+	DSPU32 u32DestPC = 0xffffffffU;
+	
+	switch(p_u32Phase)
+	{
+		case PHASE_DC3:
+			u32DestPC = PIPE_EX.DC2_DC3.m_right.uint32r_pc;
+			break;
+		case PHASE_DC4:
+			u32DestPC = PIPE_EX.DC3_DC4.m_right.uint32r_pc;
+			break;
+		case PHASE_AC:
+			u32DestPC = PIPE_EX.DC4_AC.m_right.uint32r_pc;
+			break;
+		case PHASE_EX:
+			u32DestPC = PIPE_EX.AC_EX.m_right.uint32r_pc;
+			break;
+		case PHASE_WB:
+			u32DestPC = PIPE_EX.EX_WB.m_right.uint32r_pc;
+			break;
+		default:
+			PrintToCerr("LogPipeStall: illegal Dest-Phase\n");
+	}
+	
+	fprintf(fp, "*************** Cycle = %#x ***************\n", (DSPU32)u32r_CyclesL);
+	if(p_u32Reason == GPR_HAZARD_MR || p_u32Reason == GPR_HAZARD_NI || p_u32Reason == SACC_HAZARD || p_u32Reason == STAB_HAZARD)
+	{
+		if(p_u32Reason == GPR_HAZARD_MR)
+		{
+			fprintf(fp, "REASON: GPR Hazard(MR)[%cR%-2d]\tSrc_PC(AC): %#-10x", \
+				GetMacroName(p_u32UnitIdx), p_u32RegIdx, p_u32SrcPC);	
+		}
+		else if(p_u32Reason == GPR_HAZARD_NI)
+		{
+			fprintf(fp, "REASON: GPR Hazard(NI)[%cR%-2d]\tSrc_PC(AC): %#-10x", \
+				GetMacroName(p_u32UnitIdx), p_u32RegIdx, p_u32SrcPC);	
+		}
+		else if(p_u32Reason == SACC_HAZARD)
+		{
+			fprintf(fp, "REASON: SACC Hazard[%cSACC_%d]\tSrc_PC(AC): %#-10x", 
+				GetMacroName(p_u32RegIdx/8), p_u32RegIdx%8, p_u32SrcPC);	
+		}
+		else
+		{
+			fprintf(fp, "REASON: STAB Hazard[%c_SHF_%d_STAB_%d]\tSrc_PC(AC): %#-10x", 
+				GetMacroName(p_u32UnitIdx), (p_u32RegIdx/4), (p_u32RegIdx%4), p_u32SrcPC);	
+		}
+		if(p_u32Phase == PHASE_EX)
+		{
+			fprintf(fp, "\tDest_PC(EX): %#-10x\n", u32DestPC);
+		}
+		else if(p_u32Phase == PHASE_WB)
+		{
+			fprintf(fp, "\tDest_PC(WB): %#-10x\n", u32DestPC);
+		}
+		else
+		{
+			PrintToCerr("LogPipeStall: illegal phase in GPR Hazard\n");
+		}
+	}
+	else if(p_u32Reason == CPRED_HAZARD)
+	{
+		fprintf(fp, "REASON: CPRED Hazard:%cCPred\tSrc_PC(DC4): %#-10x\tDest_PC(AC): %#-10x\n",\
+			GetMacroName(p_u32UnitIdx), p_u32SrcPC, u32DestPC);
+	}
+
+	else if(p_u32Reason == IRET_HAZARD)
+	{
+		fprintf(fp, "REASON: IRET Hazard\n");
+		fprintf(fp, "IRET_PC(DC4): %#-10x\tBINST_PC(AC): %#-10x\n", p_u32SrcPC, u32DestPC);
+	}
+	else if(p_u32Reason == ISR_HAZARD)
+	{
+		fprintf(fp, "REASON: ISR Hazard\n");
+		fprintf(fp, "ISR_PC(DC4): %#-10x\tNORM_PC(AC): %#-10x\n", p_u32SrcPC, u32DestPC);
+	}
+	else if(p_u32Reason == AREG_HAZARD)
+	{
+		fprintf(fp, "REASON: UVW Hazard[%c%-2d]", GetUVWName(p_u32UnitIdx), p_u32RegIdx);		
+		fprintf(fp, "\tSrc_PC(DC2): %#-10x", p_u32SrcPC);
+		if(p_u32Phase == PHASE_DC3)
+		{
+			fprintf(fp, "\tDest_PC(DC3): %#-10x\n", u32DestPC);
+		}
+		else if(p_u32Phase == PHASE_DC4)
+		{
+			fprintf(fp, "\tDest_PC(DC4): %#-10x\n", u32DestPC);
+		}
+		else if(p_u32Phase == PHASE_AC)
+		{
+			fprintf(fp, "\tDest_PC(AC): %#-10x\n", u32DestPC);
+		}
+	}
+	else if(p_u32Reason == AMACC_HAZARD)
+	{
+		fprintf(fp, "REASON: AMACC Hazard:%c_MUL_%d\tSrc_PC(AC): %#-10x\tDest_PC(EX): %#-10x\n",\
+			GetMacroName(p_u32UnitIdx), p_u32RegIdx, p_u32SrcPC, u32DestPC);
+	}
+
+	fclose(fp);
+	return true;
+}
+
+//-------------------------------------------------------------------------------------------------------
+bool sc_iss::LogBankConf(bool p_bolRead, DSPU32 p_u32Reason, DSPU32 p_u32Blk, DSPU32 p_u32Bank)
+{
+	FILE *fp;
+	sprintf(g_arrFileName, "%s/stall_info.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("LogBankConf: Error occured when open stall_info.txt\n");
+		return false;
+	}
+
+	fprintf(fp, "*************** PC = %#x, Cycle = %#x ***************\n", PIPE_EX.DC3_DC4.m_right.uint32r_pc, (DSPU32)u32r_CyclesL);
+	if(p_bolRead)
+	{
+		if(p_u32Reason == BLK_PORT_CLOSED)
+		{
+			fprintf(fp, "REASON: RD Port Closed [Blk%d(RdMask: %#x)]\n", p_u32Blk, m_u32RdBlockMask);		
+		}
+		if(p_u32Reason == BANK_CONF)
+		{
+			fprintf(fp, "REASON: RD Bank Conf [Blk%d, Bank%d]\n", p_u32Blk, p_u32Bank);
+		}
+		if(p_u32Reason == SLOT_CONF)
+		{
+			fprintf(fp, "REASON: RD SLOT Conf [Blk%d, Slot%d]\n", p_u32Blk, p_u32Bank);
+		}
+	}
+	else
+	{	
+		if(p_u32Reason == BLK_PORT_CLOSED)
+		{
+			fprintf(fp, "REASON: WR Port Closed [Blk%d(WrMask: %#x)]\n", p_u32Blk, m_u32WrBlockMask);		
+		}
+		if(p_u32Reason == BANK_CONF)
+		{
+			fprintf(fp, "REASON: WR Bank Conf [Blk%d, Bank%d]\n", p_u32Blk, p_u32Bank);
+		}
+		if(p_u32Reason == SLOT_CONF)
+		{
+			fprintf(fp, "REASON: WR SLOT Conf [Blk%d, Slot%d]\n", p_u32Blk, p_u32Bank);
+		}
+		if(p_u32Reason == RD_NOT_DONE)
+		{
+			fprintf(fp, "REASON: RD req not done [WrMask: %#x]\n", m_u32WrBlockMask);
+		}
+	}
+
+	fclose(fp);
+	return true;
+}
+#endif		// #ifdef STALL_REASON_LOG
+
+#ifdef MEM_CE_TESTING
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogMemCE()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/MemCE.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open MemPort.txt\n");
+		return false;
+	}
+
+	if ( m_bolLogRegsDetail )
+	{
+		fprintf(fp, "EPC: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+	fprintf(fp, "ADDR\t\tDATA\t\tCE\tEN\n");
+	for(int i = 0; i < BLK_NUM_PERCORE; i++)
+	{
+		for(int j = 0; j < BANK_NUM_PERBLK; j++)
+		{
+			MEM_CE_INFO *p_mce = &g_arrMemCE[i][j];
+			fprintf(fp, "0x%08x\t0x%08x\t%d\t%d\n", \
+				p_mce->u32Addr, p_mce->u32Data, !(p_mce->bolNotCE), p_mce->bolEN);
+		}
+		fprintf(fp, "------------------------------------\n");
+	}
+
+	fclose(fp);
+	return true;
+}
+#endif		// #ifdef MEM_CE_TESTING
+#ifdef LOG_PXP
+//----------------------------------------------------------
+bool sc_iss::LogPipePC_PXP()
+{
+	FILE *fp = NULL;
+	static bool bolEn = false;
+
+	if(!bolEn)
+	{
+		bolEn = (bool)bolr_UseCustomINT;
+		bolEn |= (bool)bolr_UseRTLINT;
+	}
+	if(bolEn)
+	{
+		sprintf(g_arrFileName, "%s/PipePC_PXP.txt", g_arrIOPath);
+
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open PipePC_PXP.txt\n");
+			return false;
+		}
+
+		fprintf(fp, "PC: %08x", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		fprintf(fp, "    CGCR: %08x\n", u32ro_CGCR);
+
+		fclose(fp);
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogGenRegs_PXP()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/GenRegs_PXP.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open GenRegs_PXP.txt\n");
+		return false;
+	}
+	fprintf(fp, "PC: %08x ", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	
+	for(int i = 0 ; i < NUM_OF_PAGES; i++)
+	{
+		for(int j = 0 ; j < NUM_OF_UNITS; j++)
+		{
+			for(int k = 0; k < REG_NUM_OF_UNIT; k++)
+			{
+				if(m_arrFWDValid[i][j][k])
+				{
+					char macroName = GetMacroName(j) - 'a' + 'A';
+					fprintf(fp, "%c%c%d:%08x ", macroName, (i==0)?'A':'B', k, m_arrFWDValue[i][j][k]);					
+				}
+			}
+		}
+	}
+
+	fprintf(fp, "\n");
+	fclose(fp);
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogAddrRegs_PXP()
+{
+	FILE *fp = NULL;
+	DSPU32 u32RegVal, u32RegIdx;
+
+	sprintf(g_arrFileName, "%s/AddrRegs_PXP.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open AddrRegs_PXP.txt\n");
+		return false;
+	}
+	fprintf(fp, "PC: %08x ", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	for(int i = 0; i < REG_NUM_OF_ADDRUNIT * NUM_OF_ADDR_UNITS; i++)
+	{
+		if(GIsBitSet64(m_u64ARegWMask, i))
+		{
+			u32RegIdx = i % REG_NUM_OF_ADDRUNIT;
+			switch(i/REG_NUM_OF_ADDRUNIT)
+			{
+				case 0:
+					u32RegVal = u32ri_U[u32RegIdx];
+					break;
+				case 1:
+					u32RegVal = u32ri_V[u32RegIdx];
+					break;
+				case 2:
+					u32RegVal = u32ri_W[u32RegIdx];
+					break;
+			}
+			fprintf(fp, "%c%d:%08x ", GetUVWName(i/REG_NUM_OF_ADDRUNIT), u32RegIdx, u32RegVal);			
+		}
+	}
+	fprintf(fp, "\n");
+	fclose(fp);
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogALUReg_PXP()
+{
+	FILE *fp = NULL;
+	char ch;
+	char *pos = log_pxp_msg;
+	DSPU32 u32Temp, u32Temp1, u32Temp2;
+
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		ch = GetMacroName(i) - 'a' + 'A';
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			if(u40ri_ALU_ACC[i][j].u32Low != u40ro_ALU_ACC[i][j] .u32Low ||\
+				u40ri_ALU_ACC[i][j].u8High != u40ro_ALU_ACC[i][j].u8High || \
+				u8ri_ALU_EXP[i][j] != u8ro_ALU_EXP[i][j])
+			{
+				sprintf(pos, "%cACC%d:%02x%02x%08x ", ch, j, u8ri_ALU_EXP[i][j], u40ri_ALU_ACC[i][j].u8High, u40ri_ALU_ACC[i][j].u32Low);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			if(u32ri_ALU_CON[i][j] != u32ro_ALU_CON[i][j])
+			{
+				sprintf(pos, "%cCON%d:%08x ", ch, j, u32ri_ALU_CON[i][j]);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			u32r_ALU_ACF[i][j].GetInput(&u32Temp);
+			if(u32Temp != (DSPU32)u32r_ALU_ACF[i][j])
+			{
+				sprintf(pos, "%cACF%d:%08x ", ch, j, u32Temp);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			if(u32ri_ALUFR[i][j] != u32ro_ALUFR[i][j])
+			{
+				sprintf(pos, "%cFR%d:%08x ", ch, j, u32ri_ALUFR[i][j]);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			if(u32ri_ALU_CA[i][j] != u32ro_ALU_CA[i][j])
+			{
+				sprintf(pos, "%cCAFR%d:%08x ", ch, j, u32ri_ALU_CA[i][j]);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{		
+			if(u32ri_ALU_DFER[i][j] != u32ro_ALU_DFER[i][j])
+			{
+				sprintf(pos, "%cDFER%d:%08x ", ch, j, u32ri_ALU_DFER[i][j]);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{		
+			if(u64ri_ALU_DFMR[i][j].u32High != u64ro_ALU_DFMR[i][j].u32High ||
+				u64ri_ALU_DFMR[i][j].u32Low != u64ro_ALU_DFMR[i][j].u32Low)
+			{
+				sprintf(pos, "%cDFMR%d:%08x%08x ", ch, j, u64ri_ALU_DFMR[i][j].u32High, u64ri_ALU_DFMR[i][j].u32Low);
+				pos += strlen(pos);
+			}
+		}
+		for(int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{		
+			if(u64ri_ALU_DFIRR[i][j].u32High != u64ro_ALU_DFIRR[i][j].u32High ||
+				u64ri_ALU_DFIRR[i][j].u32Low != u64ro_ALU_DFIRR[i][j].u32Low)
+			{
+				sprintf(pos, "%cDFIRR%d:%08x%08x ", ch, j, u64ri_ALU_DFIRR[i][j].u32High, u64ri_ALU_DFIRR[i][j].u32Low);
+				pos += strlen(pos);
+			}
+		}	
+		//输出ALUCAFR
+		u32r_ALU_BKFlag[i].GetInput(&u32Temp1);
+		u32r_SHF_BKFlag[i].GetInput(&u32Temp2);
+		u32Temp1 = (u32Temp1 > u32Temp2) ? u32Temp1 : u32Temp2;
+		u32Temp2 = (u32r_ALU_BKFlag[i]>u32r_SHF_BKFlag[i])? u32r_ALU_BKFlag[i]: u32r_SHF_BKFlag[i];
+		if(u32Temp1 != u32Temp2)
+		{
+			sprintf(pos,"%cABFPR:%08x ", ch, u32Temp1);		
+			pos += strlen(pos);
+		}
+		//输出Cpred
+		if(u32ri_CPredReg[i] != u32ro_CPredReg[i])
+		{
+			sprintf(pos,"%cCPred:%08x ", ch, u32ri_CPredReg[i]);
+			pos += strlen(pos);
+		}
+		//输出ALUCR
+		if(u32ri_ALUCR[i] != u32ro_ALUCR[i])
+		{
+			sprintf(pos,"%cALUCR:%08x ", ch, u32ri_ALUCR[i]);
+			pos += strlen(pos);
+		}	
+	}
+	*pos = '\0';
+	if(log_pxp_msg != pos)
+	{	
+		sprintf(g_arrFileName, "%s/ALUReg_PXP.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open ALUReg_PXP.txt\n");
+			return false;
+		}
+		fprintf(fp, "PC: %08x ", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		fprintf(fp, "%s\n", log_pxp_msg);
+		fclose(fp);
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogMULRegs_PXP()
+{
+	FILE *fp = NULL;
+	DSPU32 u32Temp = 0;
+	char cName;
+	char *pos = log_pxp_msg;
+
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		cName = GetMacroName(i) - 'a' + 'A';
+
+		if(u32ri_MULCR[i] != u32ro_MULCR[i])
+		{
+			sprintf(pos, "%cCR:%08x ",cName, u32ri_MULCR[i]);
+			pos += strlen(pos);
+		}
+		u32r_MULFAR[i].GetInput(&u32Temp);
+		if(u32Temp != (DSPU32)u32r_MULFAR[i])
+		{
+			sprintf(pos, "%cFAR:%08x ",cName, u32Temp);
+			pos += strlen(pos);
+		}
+		u32r_MULFOR[i].GetInput(&u32Temp);
+		if(u32Temp != (DSPU32)u32r_MULFOR[i])
+		{
+			sprintf(pos, "%cFOR:%08x ",cName, u32Temp);
+			pos += strlen(pos);
+		}
+		u32r_MULCUTR[i].GetInput(&u32Temp);
+		if(u32Temp != (DSPU32)u32r_MULCUTR[i])
+		{
+			sprintf(pos, "%cCUTR:%08x ",cName, u32Temp);
+			pos += strlen(pos);
+		}
+		
+		// MACC
+		for(int j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			if(u128ri_MUL_MACC[i][j].u32LL != u128ro_MUL_MACC[i][j].u32LL)
+			{
+				sprintf(pos, "%cLL%d:%08x ",cName, j, u128ri_MUL_MACC[i][j].u32LL);
+				pos += strlen(pos);
+			}
+			if(u128ri_MUL_MACC[i][j].u32HL != u128ro_MUL_MACC[i][j].u32HL)
+			{
+				sprintf(pos, "%cHL%d:%08x ",cName, j, u128ri_MUL_MACC[i][j].u32HL);
+				pos += strlen(pos);
+			}
+			if(u128ri_MUL_MACC[i][j].u32LH != u128ro_MUL_MACC[i][j].u32LH)
+			{
+				sprintf(pos, "%cLH%d:%08x ",cName, j, u128ri_MUL_MACC[i][j].u32LH);
+				pos += strlen(pos);
+			}
+			if(u128ri_MUL_MACC[i][j].u32HH != u128ro_MUL_MACC[i][j].u32HH)
+			{
+				sprintf(pos, "%cHH%d:%08x ",cName, j, u128ri_MUL_MACC[i][j].u32HH);
+				pos += strlen(pos);
+			}
+		}
+		// MULFR
+		for(int j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			if(u32ri_MULFR[i][j] != u32ro_MULFR[i][j])
+			{
+				sprintf(pos, "%cFR%d:%08x ",cName, j, u32ri_MULFR[i][j]);			
+				pos += strlen(pos);
+			}
+		}
+		
+	}
+	*pos = '\0';
+	if(log_pxp_msg != pos)
+	{	
+		sprintf(g_arrFileName, "%s/MULRegs_PXP.txt", g_arrIOPath);
+
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open MULRegs_PXP.txt\n");
+			return false;
+		}
+		fprintf(fp, "PC: %08x ", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		fprintf(fp, "%s\n", log_pxp_msg);
+		fclose(fp);
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogSHFRegs_PXP()
+{
+	FILE *fp = NULL;
+	DSPU32 u32Temp=0;
+	char ch;
+	char *pos = log_pxp_msg;
+
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		ch = GetMacroName(i) - 'a' + 'A';
+		for(int j = 0; j < SHF_NUM_OF_UNIT; j++)
+		{
+			if(u64ri_SHF_SACC[i][j].u32Low != u64ro_SHF_SACC[i][j].u32Low ||
+				u64ri_SHF_SACC[i][j].u32High != u64ro_SHF_SACC[i][j].u32High)				
+			{
+				sprintf(pos, "%cSACC%d:%08x%08x ", ch, j, u64ri_SHF_SACC[i][j].u32High,u64ri_SHF_SACC[i][j].u32Low);
+				pos += strlen(pos);
+			}		
+		}
+		for(int j=0; j<SHF_NUM_OF_UNIT; j++)
+		{
+			u32_SHF_SCF[i][j].GetInput(&u32Temp);
+			if(u32Temp != (DSPU32)u32_SHF_SCF[i][j])
+			{
+				sprintf(pos, "%cSCF%d:%01x ", ch, j, u32Temp);
+				pos += strlen(pos);
+			}
+		}
+		for(int j=0; j<SHF_NUM_OF_UNIT; j++)
+		{
+			if(u32ri_SHFFR[i][j] != u32ro_SHFFR[i][j])
+			{
+				sprintf(pos, "%cFR%d:%08x ", ch, j, u32ri_SHFFR[i][j]);
+				pos += strlen(pos);
+			}
+		}
+		u32r_SHFFAR[i].GetInput(&u32Temp);
+		if(u32Temp != (DSPU32)u32r_SHFFAR[i])
+		{
+			sprintf(pos, "%cFAR:%08x ", ch, u32Temp);
+			pos += strlen(pos);
+		}
+		u32r_SHFFOR[i].GetInput(&u32Temp);
+		if(u32Temp != (DSPU32)u32r_SHFFOR[i])
+		{
+			sprintf(pos, "%cFOR:%08x ", ch, u32Temp);
+			pos += strlen(pos);
+		}
+		for(int j=0; j<SHF_NUM_OF_UNIT; j++)
+		{
+			u32r_SHF_SLTAR[i][j].GetInput(&u32Temp);
+			if(u32Temp != (DSPU32)u32r_SHF_SLTAR[i][j])
+			{
+				sprintf(pos, "%cSLTAR%d:%08x ",ch, j, u32Temp);
+				pos += strlen(pos);
+			}
+		}		
+		for(int j=0; j<SHF_NUM_OF_UNIT; j++)
+		{
+			u32r_SHFER[i][j].GetInput(&u32Temp);
+			if(u32Temp != (DSPU32)u32r_SHFER[i][j])
+			{
+				sprintf(pos, "%cER%d:%08x ",ch, j, u32Temp);
+				pos += strlen(pos);
+			}
+		}	
+		u32r_SHF_BKFlag[i].GetInput(&u32Temp);
+		if(u32Temp != (DSPU32)u32r_SHF_BKFlag[i])
+		{		
+			sprintf(pos, "%cSBFPR:%08x ", ch, u32Temp);
+			pos += strlen(pos);
+		}
+	}
+	*pos = '\0';
+	if(log_pxp_msg != pos)
+	{
+		sprintf(g_arrFileName, "%s/SHFRegs_PXP.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open SHFRegs_PXP.txt\n");
+			return false;
+		}
+
+		fprintf(fp, "PC: %08x ", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		fprintf(fp, "%s\n", log_pxp_msg);
+		fclose(fp);
+	}
+
+	return true;
+}
+
+#endif
+#ifdef LOG_STEP_TESTING
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogAddrRegs()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/AddrRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open AddrRegs.txt\n");
+		return false;
+	}
+
+	if ( m_bolLogRegsDetail )
+	{
+		fprintf(fp, "EPC: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+
+	// line 1
+	for (int i = 0; i < REG_NUM_OF_ADDRUNIT; i++)
+	{
+		// caution: (unsigned int)must be used, or APP will crash. 
+		// because u32ro_U is an object, not a value.
+		fprintf(fp, "U%d:%08x", i, (unsigned int)u32ro_U[i]);
+		if ( i != (REG_NUM_OF_ADDRUNIT-1) )
+		{
+			fprintf(fp, " ");
+		}
+	}
+	fprintf(fp, "\n");
+
+	// line 2
+	for (int i = 0; i < REG_NUM_OF_ADDRUNIT; i++)
+	{
+		fprintf(fp, "V%d:%08x", i, (unsigned int)u32ro_V[i]);
+		if ( i != (REG_NUM_OF_ADDRUNIT-1)  )
+		{
+			fprintf(fp, " ");
+		}
+	}
+	fprintf(fp, "\n");
+
+	// line 3
+	for (int i = 0; i < REG_NUM_OF_ADDRUNIT; i++)
+	{
+		fprintf(fp, "W%d:%08x", i, (unsigned int)u32ro_W[i]);
+		if ( i != (REG_NUM_OF_ADDRUNIT-1)  )
+		{
+			fprintf(fp, " ");
+		}
+	}
+	fprintf(fp, "\n");
+
+	fclose(fp);
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogGenRegs()
+{
+//	if (m_bolWBDone)
+	{
+		FILE *fp = NULL;
+
+		sprintf(g_arrFileName, "%s/GenRegs.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open GenRegs.txt\n");
+			return false;
+		}
+
+		if ( m_bolLogRegsDetail )
+		{
+			fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		}
+
+		// line 1
+		//X宏A面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.
+			fprintf(fp, "XR%d:%08x", i, (unsigned int)u32ro_R[i]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		
+		//X宏B面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.
+			fprintf(fp, " XBR%d:%08x", i, (unsigned int)u32ro_R[i+256]);
+		}
+		
+		fprintf(fp, "\n");
+
+		// line 2
+		//Y宏A面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "YR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *1]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		
+		//Y宏B面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.
+			fprintf(fp, " YBR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *1 +256]);
+		}
+		
+		fprintf(fp, "\n");
+
+		// line 3
+		//Z宏A面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "ZR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *2]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		
+		//Z宏B面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.
+			fprintf(fp, " ZBR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *2 +256]);
+		}
+		
+		fprintf(fp, "\n");
+
+		// line 4
+		//T宏A面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "TR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *3]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		
+		//T宏B面寄存器
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.
+			fprintf(fp, " TBR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *3 +256]);
+		}
+		
+		//fprintf(fp, "\nimafr:%08x\n", (DSPU32)u32r_IMAFR);
+        fprintf(fp, "\n");
+
+		fclose(fp);
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+//LogALUReg0用于系统级测试，打印ALU中相关寄存器
+bool  sc_iss::LogALUReg0()
+{
+//	if (m_bolWBDone)
+	{
+		FILE *fp = NULL;
+		DSP_BIT48 u48Temp;
+		DSPU32 u32Temp;
+
+		sprintf(g_arrFileName, "%s/ALUReg0.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open ALUReg0.txt\n");
+			return false;
+		}
+
+		if ( m_bolLogRegsDetail )
+		{
+			//fprintf(fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+			//fprintf(fp, "EPC: %08x\n", (unsigned int)u32r_EPC);
+			fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		}
+
+		// line 1
+		//输出ACC
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			ReadACC_48(0, i, u48Temp);
+			fprintf(fp, "xAcc%d:%02x%02x%08x ", i, u48Temp.u8High, u48Temp.u8Mid, u48Temp.u32Low);		
+		}	
+		//输出con
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadCON(0, i);
+			fprintf(fp, "xcon%d:%08x ", i, u32Temp);		
+		}
+		//输出ACF
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32r_ALU_ACF[0][i];	
+			fprintf(fp, "xACF%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32ro_ALUFR[0][i];
+			fprintf(fp, "xALUFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUCA(0, i);
+			fprintf(fp, "xALUCAFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		u32Temp = (u32r_ALU_BKFlag[0]>u32r_SHF_BKFlag[0])? u32r_ALU_BKFlag[0]: u32r_SHF_BKFlag[0];
+		fprintf(fp,"xABFPR:%08x ", u32Temp);
+		//输出Cpred
+		u32Temp = u32ro_CPredReg[0];
+		fprintf(fp,"xCpred:%08x ", u32Temp);
+		//输出ALUCR
+		u32Temp = u32ro_ALUCR[0];
+		fprintf(fp,"xALUCR:%08x ", u32Temp);
+		fprintf(fp, "\n");
+
+		// line 2
+		//输出ACC
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			ReadACC_48(1, i, u48Temp);
+			fprintf(fp, "yAcc%d:%02x%02x%08x ", i, u48Temp.u8High, u48Temp.u8Mid, u48Temp.u32Low);		
+		}	
+		//输出con
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadCON(1, i);
+			fprintf(fp, "ycon%d:%08x ", i, u32Temp);		
+		}
+		//输出ACF
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32r_ALU_ACF[1][i];	
+			fprintf(fp, "yACF%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32ro_ALUFR[1][i];
+			fprintf(fp, "yALUFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUCA(1, i);
+			fprintf(fp, "yALUCAFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		u32Temp = (u32r_ALU_BKFlag[1]>u32r_SHF_BKFlag[1])? u32r_ALU_BKFlag[1]: u32r_SHF_BKFlag[1];
+		fprintf(fp,"yABFPR:%08x ", u32Temp);
+		//输出Cpred
+		u32Temp = u32ro_CPredReg[1];
+		fprintf(fp,"yCpred:%08x ", u32Temp);
+		//输出ALUCR
+		u32Temp = u32ro_ALUCR[1];
+		fprintf(fp,"yALUCR:%08x ", u32Temp);
+		fprintf(fp, "\n");
+
+		// line 3
+		//输出ACC
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			ReadACC_48(2, i, u48Temp);
+			fprintf(fp, "zAcc%d:%02x%02x%08x ", i, u48Temp.u8High, u48Temp.u8Mid, u48Temp.u32Low);		
+		}	
+		//输出con
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadCON(2, i);
+			fprintf(fp, "zcon%d:%08x ", i, u32Temp);		
+		}
+		//输出ACF
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32r_ALU_ACF[2][i];	
+			fprintf(fp, "zACF%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32ro_ALUFR[2][i];
+			fprintf(fp, "zALUFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUCA(2, i);
+			fprintf(fp, "zALUCAFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		u32Temp = (u32r_ALU_BKFlag[2]>u32r_SHF_BKFlag[2])? u32r_ALU_BKFlag[2]: u32r_SHF_BKFlag[2];
+		fprintf(fp,"zABFPR:%08x ", u32Temp);
+		//输出Cpred
+		u32Temp = u32ro_CPredReg[2];
+		fprintf(fp,"zCpred:%08x ", u32Temp);	
+		//输出ALUCR
+		u32Temp = u32ro_ALUCR[2];
+		fprintf(fp,"zALUCR:%08x ", u32Temp);
+		fprintf(fp, "\n");
+
+		// line 4
+		//输出ACC
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			ReadACC_48(3, i, u48Temp);
+			fprintf(fp, "tAcc%d:%02x%02x%08x ", i, u48Temp.u8High, u48Temp.u8Mid, u48Temp.u32Low);		
+		}	
+		//输出con
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadCON(3, i);
+			fprintf(fp, "tcon%d:%08x ", i, u32Temp);		
+		}
+		//输出ACF
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32r_ALU_ACF[3][i];	
+			fprintf(fp, "tACF%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = u32ro_ALUFR[3][i];
+			fprintf(fp, "tALUFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUCA(3, i);
+			fprintf(fp, "tALUCAFR%d:%08x ", i, u32Temp);		
+		}
+		//输出ALUCAFR
+		u32Temp = (u32r_ALU_BKFlag[3]>u32r_SHF_BKFlag[3])? u32r_ALU_BKFlag[3]: u32r_SHF_BKFlag[3];
+		fprintf(fp,"tABFPR:%08x ", u32Temp);
+		//输出Cpred
+		u32Temp = u32ro_CPredReg[3];
+		fprintf(fp,"tCpred:%08x ", u32Temp);
+		//输出ALUCR
+		u32Temp = u32ro_ALUCR[3];
+		fprintf(fp,"tALUCR:%08x ", u32Temp);
+		fprintf(fp, "\n");
+		
+		fclose(fp);
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+//LogALUReg1用于系统级测试，打印ALU中ALUDFER, ALUDFMR, ALUDFIRR
+bool  sc_iss::LogALUReg1()
+{
+//	if (m_bolWBDone)
+	{
+		FILE *fp = NULL;
+		DSP_BIT64 u64Temp;
+		DSPU32 u32Temp;
+
+		sprintf(g_arrFileName, "%s/ALUReg1.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open ALUReg1.txt\n");
+			return false;
+		}
+
+		if ( m_bolLogRegsDetail )
+		{
+			//fprintf(fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+			//fprintf(fp, "EPC: %08x\n", (unsigned int)u32r_EPC);
+			fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+		}
+
+		// line 1
+		//输出ALUDFER
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUDFER(0, i);
+			fprintf(fp, "xDFER%d:%08x ", i, u32Temp);		
+		}	
+		//输出ALUDFMR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFMR(0, i);
+			fprintf(fp, "xDFMR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}
+		//输出ALUDFIRR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFIRR(0, i);
+			fprintf(fp, "xDFIRR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}				
+		fprintf(fp, "\n");
+
+		// line 2
+		//输出ALUDFER
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUDFER(1, i);
+			fprintf(fp, "yDFER%d:%08x ", i, u32Temp);		
+		}	
+		//输出ALUDFMR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFMR(1, i);
+			fprintf(fp, "yDFMR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}
+		//输出ALUDFIRR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFIRR(1, i);
+			fprintf(fp, "yDFIRR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}				
+		fprintf(fp, "\n");
+
+		// line 3
+		//输出ALUDFER
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUDFER(2, i);
+			fprintf(fp, "zDFER%d:%08x ", i, u32Temp);		
+		}	
+		//输出ALUDFMR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFMR(2, i);
+			fprintf(fp, "zDFMR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}
+		//输出ALUDFIRR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFIRR(2, i);
+			fprintf(fp, "zDFIRR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}				
+		fprintf(fp, "\n");
+
+		// line 4
+		//输出ALUDFER
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u32Temp = ReadALUDFER(3, i);
+			fprintf(fp, "tDFER%d:%08x ", i, u32Temp);		
+		}	
+		//输出ALUDFMR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFMR(3, i);
+			fprintf(fp, "tDFMR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}
+		//输出ALUDFIRR
+		for (int i = 0; i < ALU_NUM_OF_UNIT; i++)	
+		{		
+			u64Temp = ReadALUDFIRR(3, i);
+			fprintf(fp, "tDFIRR%d:%08x%08x ", i, u64Temp.u32High, u64Temp.u32Low);		
+		}				
+		fprintf(fp, "\n");
+		
+		fclose(fp);
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogSPURegs()
+{
+//	if (m_bolWBDone)
+	{
+		FILE *fp = NULL;
+		DSPU32 u32Temp=0;
+
+		sprintf(g_arrFileName, "%s/SPURegs.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open SPURegs.txt\n");
+			return false;
+		}
+
+		if ( m_bolLogRegsDetail )
+		{
+			fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+
+			//fprintf(fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+		}
+		
+		//输出SPUFR
+		u32Temp = u32ro_SPUCR[0];
+		fprintf(fp, "xSPUCR:%08x ", u32Temp);
+		u32Temp = u32ro_SPUFR[0];
+		fprintf(fp, "xSPUFR:%08x ", u32Temp);
+		u32Temp = u32ro_CPredReg[0];
+		fprintf(fp, "xCPred:%08x\n", u32Temp);		
+
+		//输出SPUFR
+		u32Temp = u32ro_SPUCR[1];
+		fprintf(fp, "ySPUCR:%08x ", u32Temp);
+		u32Temp = u32ro_SPUFR[1];
+		fprintf(fp, "ySPUFR:%08x ", u32Temp);
+		u32Temp = u32ro_CPredReg[1];
+		fprintf(fp, "yCPred:%08x\n", u32Temp);		
+		
+		//输出SPUFR
+		u32Temp = u32ro_SPUCR[2];
+		fprintf(fp, "zSPUCR:%08x ", u32Temp);
+		u32Temp = u32ro_SPUFR[2];
+		fprintf(fp, "zSPUFR:%08x ", u32Temp);
+		u32Temp = u32ro_CPredReg[2];
+		fprintf(fp, "zCPred:%08x\n", u32Temp);		
+		
+		//输出SPUFR
+		u32Temp = u32ro_SPUCR[3];
+		fprintf(fp, "tSPUCR:%08x ", u32Temp);
+		u32Temp = u32ro_SPUFR[3];
+		fprintf(fp, "tSPUFR:%08x ", u32Temp);
+		u32Temp = u32ro_CPredReg[3];
+		fprintf(fp, "tCPred:%08x\n", u32Temp);		
+
+		fclose(fp);
+	}
+
+	return true;
+}
+
+bool  sc_iss::LogSHFRegs()
+{
+//	if (m_bolWBDone)
+	{
+		FILE *fp = NULL;
+		DSPU32 u32Temp=0;
+		DSPU32 u32SACCLow=0;
+		DSPU32 u32SACCHigh=0;
+
+		sprintf(g_arrFileName, "%s/SHFRegs.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open SHFRegs.txt\n");
+			return false;
+		}
+
+		if ( m_bolLogRegsDetail )
+		{
+			fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+
+			//fprintf(fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+		}
+
+		//line 1
+		//输出SACC
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32SACCLow = u64ro_SHF_SACC[0][i].u32Low;
+			u32SACCHigh = u64ro_SHF_SACC[0][i].u32High;
+			fprintf(fp, "xSacc%d:%08x%08x ", i, u32SACCHigh,u32SACCLow);	
+		}
+		
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32_SHF_SCF[0][i];
+			fprintf(fp, "xScf%d:%01x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32ro_SHFFR[0][i];
+			fprintf(fp, "xShffr%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHFFAR[0];
+		fprintf(fp, "xSHFFAR:%08x ", u32Temp);
+		u32Temp = u32r_SHFFOR[0];
+		fprintf(fp, "xSHFFOR:%08x ", u32Temp);
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHF_SLTAR[0][i];
+			fprintf(fp, "xSLTAR%d:%08x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHFER[0][i];
+			fprintf(fp, "xSHFER%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHF_BKFlag[0];
+		fprintf(fp, "xSBFPR:%08x", u32Temp);
+		fprintf(fp,"\n");
+
+		//line 2s
+		//输出SACC
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32SACCLow = u64ro_SHF_SACC[1][i].u32Low;
+			u32SACCHigh = u64ro_SHF_SACC[1][i].u32High;
+			fprintf(fp, "ySacc%d:%08x%08x ", i, u32SACCHigh,u32SACCLow);	
+		}
+		
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32_SHF_SCF[1][i];
+			fprintf(fp, "yScf%d:%01x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32ro_SHFFR[1][i];
+			fprintf(fp, "yShffr%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHFFAR[1];
+		fprintf(fp, "ySHFFAR:%08x ", u32Temp);
+		u32Temp = u32r_SHFFOR[1];
+		fprintf(fp, "ySHFFOR:%08x ", u32Temp);
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHF_SLTAR[1][i];
+			fprintf(fp, "ySLTAR%d:%08x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHFER[1][i];
+			fprintf(fp, "ySHFER%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHF_BKFlag[1];
+		fprintf(fp, "ySBFPR:%08x", u32Temp);
+		fprintf(fp,"\n");
+
+		//line 3
+		//输出SACC
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32SACCLow = u64ro_SHF_SACC[2][i].u32Low;
+			u32SACCHigh = u64ro_SHF_SACC[2][i].u32High;
+			fprintf(fp, "zSacc%d:%08x%08x ", i, u32SACCHigh,u32SACCLow);	
+		}
+		
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32_SHF_SCF[2][i];
+			fprintf(fp, "zScf%d:%01x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32ro_SHFFR[2][i];
+			fprintf(fp, "zShffr%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHFFAR[2];
+		fprintf(fp, "zSHFFAR:%08x ", u32Temp);
+		u32Temp = u32r_SHFFOR[2];
+		fprintf(fp, "zSHFFOR:%08x ", u32Temp);
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHF_SLTAR[2][i];
+			fprintf(fp, "zSLTAR%d:%08x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHFER[2][i];
+			fprintf(fp, "zSHFER%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHF_BKFlag[2];
+		fprintf(fp, "zSBFPR:%08x", u32Temp);
+		fprintf(fp,"\n");
+
+		//line 4
+		//输出SACC
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32SACCLow = u64ro_SHF_SACC[3][i].u32Low;
+			u32SACCHigh = u64ro_SHF_SACC[3][i].u32High;
+			fprintf(fp, "tSacc%d:%08x%08x ", i, u32SACCHigh,u32SACCLow);	
+		}
+		
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32_SHF_SCF[3][i];
+			fprintf(fp, "tScf%d:%01x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32ro_SHFFR[3][i];
+			fprintf(fp, "tShffr%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHFFAR[3];
+		fprintf(fp, "tSHFFAR:%08x ", u32Temp);
+		u32Temp = u32r_SHFFOR[3];
+		fprintf(fp, "tSHFFOR:%08x ", u32Temp);
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHF_SLTAR[3][i];
+			fprintf(fp, "tSLTAR%d:%08x ", i, u32Temp);	
+		}
+		for(int i=0; i<SHF_NUM_OF_UNIT; i++)
+		{
+			u32Temp = u32r_SHFER[3][i];
+			fprintf(fp, "tSHFER%d:%08x ", i, u32Temp);	
+		}
+		u32Temp = u32r_SHF_BKFlag[3];
+		fprintf(fp, "tSBFPR:%08x", u32Temp);
+		
+		fprintf(fp,"\n");
+
+		fclose(fp);
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogMULRegs()
+{
+	FILE *fp = NULL;
+	DSPU32 u32Temp = 0;
+	char cName;
+
+	sprintf(g_arrFileName, "%s/MULRegs.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open MULRegs.txt\n");
+		return false;
+	}
+
+	if ( m_bolLogRegsDetail )
+	{
+		fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+
+	
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		cName = GetMacroName(i);
+
+		u32Temp = ReadMULCR(i);
+		fprintf(fp, "%cMULCR:%08x ",cName, u32Temp);
+		// MULFAR
+		u32Temp = u32r_MULFAR[i];
+		fprintf(fp, "%cMULFAR:%08x ",cName, u32Temp);
+		// MULFOR
+		u32Temp = u32r_MULFOR[i];
+		fprintf(fp, "%cMULFOR:%08x ",cName, u32Temp);
+		// MULCUTR
+		u32Temp = u32r_MULCUTR[i];
+		fprintf(fp, "%cMULCUTR:%08x ",cName, u32Temp);
+		// MACC
+		for(int j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u128ro_MUL_MACC[i][j].u32LL;
+			fprintf(fp, "%cMACC%d_LL:%08x ",cName, j, u32Temp);
+			u32Temp = u128ro_MUL_MACC[i][j].u32HL;
+			fprintf(fp, "%cMACC%d_HL:%08x ",cName, j, u32Temp);
+			u32Temp = u128ro_MUL_MACC[i][j].u32LH;
+			fprintf(fp, "%cMACC%d_LH:%08x ",cName, j, u32Temp);
+			u32Temp = u128ro_MUL_MACC[i][j].u32HH;
+			fprintf(fp, "%cMACC%d_HH:%08x ",cName, j, u32Temp);
+		}
+		// MULFR
+		for(int j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u32ro_MULFR[i][j];
+			fprintf(fp, "%cMULFR%d:%08x ",cName, j, u32Temp);
+		}
+		
+		fprintf(fp, "\n");
+	}
+
+	fclose(fp);
+}
+//----------------------------------------------------------------------------
+bool sc_iss::LogFlagRegs()
+{
+	int j;
+	if (m_bolWBDone)
+	{
+		FILE *fp = NULL;
+
+		sprintf(g_arrFileName, "%s/FlagRegs.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open FlagRegs.txt\n");
+			return false;
+		}
+		int MUL_count=8;
+		int SHF_count=4;
+		#ifdef CMP_WITH_BW100
+    		MUL_count=4;
+			SHF_count=2;
+		#endif
+		// line 1
+		for ( j = 0; j < ALU_NUM_OF_UNIT; j++ )
+		{				
+				fprintf(fp, "XALUFR%d:%08x", j, (unsigned int)u32ro_ALUFR[ 0][ j ]);
+				fprintf(fp, " ");
+		}
+		for ( j = 0; j < MUL_count; j++ )
+		{
+				fprintf(fp, "XMULFR%d:%08x", j, (unsigned int)u32ro_MULFR[ 0][ j ]);
+				fprintf(fp, " ");
+		}	
+		for ( j = 0; j < SHF_count; j++ )
+		{
+				fprintf(fp, "XSHFFR%d:%08x", j, (unsigned int)u32ro_SHFFR[ 0][ j ]);
+				fprintf(fp, " ");
+		}
+		fprintf(fp, "XSPUFR:%08x",  (unsigned int)u32ro_SPUFR[ 0]);
+		fprintf(fp, "\n");
+
+		// line 2
+		for ( j = 0; j < ALU_NUM_OF_UNIT; j++ )
+		{				
+				fprintf(fp, "YALUFR%d:%08x", j, (unsigned int)u32ro_ALUFR[ 1][ j ]);
+				fprintf(fp, " ");
+		}
+		for ( j = 0; j < MUL_count; j++ )
+		{
+				fprintf(fp, "YMULFR%d:%08x", j, (unsigned int)u32ro_MULFR[ 1][ j ]);
+				fprintf(fp, " ");
+		}	
+		for ( j = 0; j < SHF_count; j++ )
+		{
+				fprintf(fp, "YSHFFR%d:%08x", j, (unsigned int)u32ro_SHFFR[ 1][ j ]);
+				fprintf(fp, " ");
+		}
+		fprintf(fp, "YSPUFR:%08x",  (unsigned int)u32ro_SPUFR[ 1]);
+		fprintf(fp, "\n");
+
+		// line 3
+		for ( j = 0; j < ALU_NUM_OF_UNIT; j++ )
+		{				
+				fprintf(fp, "ZALUFR%d:%08x", j, (unsigned int)u32ro_ALUFR[ 2][ j ]);
+				fprintf(fp, " ");
+		}
+		for ( j = 0; j < MUL_count; j++ )
+		{
+				fprintf(fp, "ZMULFR%d:%08x", j, (unsigned int)u32ro_MULFR[ 2][ j ]);
+				fprintf(fp, " ");
+		}	
+		for ( j = 0; j < SHF_count; j++ )
+		{
+				fprintf(fp, "ZSHFFR%d:%08x", j, (unsigned int)u32ro_SHFFR[ 2][ j ]);
+				fprintf(fp, " ");
+		}
+		fprintf(fp, "ZSPUFR:%08x",  (unsigned int)u32ro_SPUFR[ 2]);
+		fprintf(fp, "\n");
+
+		// line 4
+		for ( j = 0; j < ALU_NUM_OF_UNIT; j++ )
+		{				
+				fprintf(fp, "TALUFR%d:%08x", j, (unsigned int)u32ro_ALUFR[ 3][ j ]);
+				fprintf(fp, " ");
+		}
+		for ( j = 0; j < MUL_count; j++ )
+		{
+				fprintf(fp, "TMULFR%d:%08x", j, (unsigned int)u32ro_MULFR[ 3][ j ]);
+				fprintf(fp, " ");
+		}	
+		for ( j = 0; j < SHF_count; j++ )
+		{
+				fprintf(fp, "TSHFFR%d:%08x", j, (unsigned int)u32ro_SHFFR[ 3][ j ]);
+				fprintf(fp, " ");
+		}
+		fprintf(fp, "TSPUFR:%08x",  (unsigned int)u32ro_SPUFR[ 3]);
+		fprintf(fp, "\n");
+		fprintf(fp,"\n");
+		fclose(fp);
+	}
+	
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogSpecRegs()
+{
+	FILE *fp = NULL;
+	DSPU32 u32Temp = 0;
+	DSP_BIT48 u48Temp;
+	char cName;
+
+	sprintf(g_arrFileName, "%s/SpecRegs.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open SpecRegs.txt\n");
+		return false;
+	}
+
+	if (m_bolLogRegsDetail)
+	{
+		fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+	
+	/*for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		cName = GetMacroName(i);
+
+		u32Temp = ReadALUCR(i);
+		fprintf(fp,"%cALUCR:%08x\n",cName,u32Temp);
+	}*/
+	
+	// Commented by liuyu:
+	// 注意GREGISTER类型数据不能直接打印(Linux环境下会报运行时错误)
+	//u32Temp = (DSPU32)u32r_CyclesL + 0x68a1;// for hardware test
+	//fprintf(fp,"CC0:%08x ",u32Temp);
+#ifdef LOG_STEP_TESTING
+	//fprintf(fp,"CC0:%08x ",0);
+	//fprintf(fp,"CC1:%08x ",0);  
+#endif
+	fprintf(fp,"CC0:%08x ",(DSPU32)u32r_CyclesL);
+	fprintf(fp,"CC1:%08x ",(DSPU32)u32r_CyclesH);
+	fprintf(fp,"BA:%08x ",(DSPU32)u32ro_BAR);
+	fprintf(fp,"SRP:%08x ",(DSPU32)u32ro_SRP);
+	fprintf(fp,"LC0:%08x ",(DSPU32)u32ro_LC[0]);
+	fprintf(fp,"LC1:%08x ",(DSPU32)u32ro_LC[1]);
+	fprintf(fp,"LC2:%08x ",(DSPU32)u32ro_LC[2]);
+	fprintf(fp,"LC3:%08x ",(DSPU32)u32ro_LC[3]);
+	fprintf(fp,"SER:%08x ",(DSPU32)u32ro_CJMP);
+	fprintf(fp,"IMACR:%08x ",(DSPU32)u32r_IMACR);
+	fprintf(fp,"REGFS:%08x ",(DSPU32)u32r_REGFS);
+	fprintf(fp,"CINF:%08x ",(DSPU32)u32r_CINF);
+	fprintf(fp,"CGCR:%08x\n",(DSPU32)u32ro_CGCR);
+
+	
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		cName = GetMacroName(i);
+
+		u32Temp = ReadALUCR(i);
+		fprintf(fp,"%cALUCR:%08x ",cName,u32Temp);
+
+		u32Temp = RdALUFAR(i);
+		fprintf(fp,"%cALUFAR:%08x ",cName,u32Temp);
+
+		u32Temp = RdALUFOR(i);
+		fprintf(fp,"%cALUFOR:%08x ",cName,u32Temp);
+
+		//u32Temp = u32r_ALU_BKFlag[i];
+		u32Temp = (u32r_ALU_BKFlag[i]>u32r_SHF_BKFlag[i])? u32r_ALU_BKFlag[i]: u32r_SHF_BKFlag[i];
+		fprintf(fp,"%cABFPR:%08x ",cName,u32Temp);
+
+		for(int j = 0; j < 8; j++)
+		{
+			u32Temp = u32ro_ALUFR[i][j];
+			fprintf(fp,"%cALUFR%d:%08x ",cName,j, u32Temp);
+		}
+
+		for (int j = 0; j < 8; j++)
+		{
+			u32Temp = u32r_ALU_ACF[i][j];
+			fprintf(fp, "%cACF%d:%08x ", cName, j, u32Temp);
+		}
+
+		for (int j = 0; j < 8; j++)
+		{
+			u32Temp = u32ro_ALU_CON[i][j];
+			fprintf(fp, "%cCON%d:%08x ", cName, j, u32Temp);
+		}
+
+		for (int j = 0; j < 8; j++)
+		{
+			u32Temp = u32ro_ALU_CA[i][j];
+			fprintf(fp, "%cALUCAFR%d:%08x ", cName, j, u32Temp);
+		}
+
+		for (int j = 0; j < 8; j++)
+		{
+			u32Temp = u32ro_ALU_DFER[i][j];
+			fprintf(fp, "%cALUDFER%d:%08x ", cName, j, u32Temp);
+		}
+
+
+		for (int j = 0; j < 8; j++)
+		{
+			u32Temp = u64ro_ALU_DFMR[i][j].u32Low;
+			fprintf(fp, "%cALUDFMRl%d:%08x ",cName, j, u32Temp);
+
+			u32Temp = u64ro_ALU_DFMR[i][j].u32High;
+			fprintf(fp, "%cALUDFMRh%d:%08x ", cName, j, u32Temp);
+		}
+
+
+		for (int j = 0; j < 8; j++)
+		{
+			u32Temp = u64ro_ALU_DFIRR[i][j].u32Low;
+			fprintf(fp, "%cALUDFIRRl%d:%08x ", cName, j, u32Temp);
+
+			u32Temp = u64ro_ALU_DFIRR[i][j].u32High;
+			fprintf(fp, "%cALUDFIRRh%d:%08x ", cName, j, u32Temp);
+		}
+
+		u32Temp = u32ro_CPredReg[i];
+		fprintf(fp,"%cCPRED:%08x ",cName,u32Temp);
+
+		for(int j = 0; j < 8; j++)
+		{
+			ReadACC_48(i, j, u48Temp);
+			fprintf(fp,"%cACCl%d:%08x ",cName,j, u48Temp.u32Low);
+			fprintf(fp,"%cACCm%d:%08x ",cName,j, u48Temp.u8Mid);			
+			fprintf(fp,"%cACCh%d:%08x ",cName,j, u48Temp.u8High);
+		}
+
+
+		u32Temp = ReadSHFCR(i);
+		fprintf(fp,"%cSHFCR:%08x ",cName,u32Temp);
+
+		u32Temp = RdSHFFAR(i);
+		fprintf(fp,"%cSHFFAR:%08x ",cName,u32Temp);
+
+		u32Temp = RdSHFFOR(i);
+		fprintf(fp,"%cSHFFOR:%08x ",cName,u32Temp);
+
+		for (int j = 0; j < 4; j++)
+		{
+			u32Temp = u32ro_SHFFR[i][j];
+			fprintf(fp, "%cSHFFR%d:%08x ", cName, j, u32Temp);
+		}
+
+		for (int j = 0; j < 4; j++)
+		{
+			u32Temp = u32r_SHF_SLTAR[i][j];
+			fprintf(fp, "%cSLTAR%d:%08x ", cName, j, u32Temp);
+		}
+
+		for (int j = 0; j < 4; j++)
+		{
+			u32Temp = u32_SHF_SCF[i][j];
+			fprintf(fp, "%cSCF%d:%08x ", cName, j, u32Temp);
+		}
+
+		u32Temp = u32r_SHFCUTR[i];
+		fprintf(fp,"%cSHFCUTR:%08x ",cName,u32Temp);
+
+		u32Temp = ReadGPLYR(i);
+		fprintf(fp,"%cGPLYR32:%08x ",cName,u32Temp);
+
+		for (int j = 0; j < 4; j++)
+		{
+			u32Temp = u32r_SHFER[i][j];
+			fprintf(fp, "%cSHFER%d:%08x ", cName, j, u32Temp);
+		}
+
+		u32Temp = u32ro_SPUCR[i];
+		fprintf(fp,"%cSPUCR:%08x ",cName,u32Temp);
+
+		u32Temp = u32ro_SPUFR[i];
+		fprintf(fp,"%cSPUFR:%08x ",cName,u32Temp);
+
+		u32Temp = ReadMULCR(i);
+		fprintf(fp,"%cMULCR:%08x ",cName,u32Temp);
+
+		u32Temp = u32r_MULFAR[i];
+		fprintf(fp,"%cMULFAR:%08x ",cName,u32Temp);
+
+		u32Temp = u32r_MULFOR[i];
+		fprintf(fp,"%cMULFOR:%08x ",cName,u32Temp);
+
+		for(int j = 0; j < 8; j++)
+		{
+			u32Temp = u32ro_MULFR[i][j];
+			fprintf(fp,"%cMULFR%d:%08x ",cName,j, u32Temp);
+		}
+
+		u32Temp = u32r_MULCUTR[i];
+		fprintf(fp,"%cMULCUTR:%08x\n",cName,u32Temp);
+	}
+
+
+	fclose(fp);
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogDMACRegs()
+{
+	FILE *fp = NULL;
+	DSPU32 u32Temp = 0;
+	DSPU32 u32Temp1 = 0;
+	DSPU32 u32Addr12Bit = 0;
+	DSPU32 u32BaseAddr = 0;
+	int i = 0;
+
+	sprintf(g_arrFileName, "%s/DMACRegs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open DMACRegs.txt\n");
+		return false;
+	}
+
+	if (m_bolLogRegsDetail)
+	{
+		fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+
+	u32Addr12Bit = 0x601;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "GLB_STATUS:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x620;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_START:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x621;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_STATUS:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x622;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_CTL:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x630;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_START_ADDR:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x631;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_LEN_X:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x632;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_ADDR_STEP:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x633;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_LEN_Y:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x634;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_CURR_ADDR:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x635;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_LEN_REM_X:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x636;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_SRC_LEN_REM_Y:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x62c;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp1);
+	u32Addr12Bit = 0x638;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	//fprintf(fp, "HCH_DST_START_ADDRL:%08x%08x ", u32Temp1, u32Temp);
+	fprintf(fp, "HCH_DST_START_ADDRL:%08x ", u32Temp);
+	fprintf(fp, "HCH_DST_START_ADDRH:%08x ", u32Temp1);
+
+	u32Addr12Bit = 0x639;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_DST_LEN_X:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x63a;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_DST_ADDR_STEP:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x63b;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_DST_LEN_Y:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x63c;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_DST_CURR_ADDR:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x63d;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_DST_LEN_REM_X:%08x ", u32Temp);
+
+	u32Addr12Bit = 0x63e;
+	rd_dmac_reg(u32Addr12Bit, &u32Temp);
+	fprintf(fp, "HCH_DST_LEN_REM_Y:%08x ", u32Temp);
+
+	//Channel 0 2 3
+	for(i = 0; i <= 3; i++)
+	{
+		if(i == 1) i = 2;
+
+		switch(i)
+		{
+		case 0:
+			u32BaseAddr = 0x640;
+			break;
+		case 2:
+			u32BaseAddr = 0x6c0;
+			break;
+		case 3:
+			u32BaseAddr = 0x700;
+			break;
+		}
+
+		u32Addr12Bit = u32BaseAddr + 0x00;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_START:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x01;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_STATUS:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x02;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_CTL:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x10;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_START_ADDR:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x11;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_LEN_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x12;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_ADDR_STEP:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x13;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_LEN_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x14;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_CURR_ADDR:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x15;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_LEN_REM_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x16;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_SRC_LEN_REM_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0xC;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp1);
+		u32Addr12Bit = u32BaseAddr + 0x18;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		//fprintf(fp, "XWCH%d_DST_START_ADDR:%08x%08x ", i, u32Temp1,u32Temp);
+		fprintf(fp, "XWCH%d_DST_START_ADDRL:%08x ", i, u32Temp);
+		fprintf(fp, "XWCH%d_DST_START_ADDRH:%08x ", i, u32Temp1);
+
+		u32Addr12Bit = u32BaseAddr + 0x19;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_DST_LEN_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x1a;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_DST_ADDR_STEP:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x1b;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_DST_LEN_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x1c;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_DST_CURR_ADDR:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x1d;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_DST_LEN_REM_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x1e;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XWCH%d_DST_LEN_REM_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x20;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_START:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x21;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_STATUS:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x22;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_CTL:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x30;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_START_ADDR:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x31;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_LEN_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x32;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_ADDR_STEP:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x33;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_LEN_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x34;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_ADDR_CURR:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x35;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_LEN_REM_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x36;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_SRC_LEN_REM_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x2c;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp1);
+		u32Addr12Bit = u32BaseAddr + 0x38;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		//fprintf(fp, "XRCH%d_DST_START_ADDR:%08x%08x ", i, u32Temp1,u32Temp);
+		fprintf(fp, "XRCH%d_DST_START_ADDRL:%08x ", i, u32Temp);
+		fprintf(fp, "XRCH%d_DST_START_ADDRH:%08x ", i, u32Temp1);
+
+		u32Addr12Bit = u32BaseAddr + 0x39;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_DST_LEN_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x3a;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_DST_ADDR_STEP:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x3b;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_DST_LEN_Y:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x3c;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_DST_CURR_ADDR:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x3d;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_DST_LEN_REM_X:%08x ", i, u32Temp);
+
+		u32Addr12Bit = u32BaseAddr + 0x3e;
+		rd_dmac_reg(u32Addr12Bit, &u32Temp);
+		fprintf(fp, "XRCH%d_DST_LEN_REM_Y:%08x ", i, u32Temp);
+	}
+
+	fprintf(fp, "\n");
+	fclose(fp);
+	return true;
+}
+
+
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogImafr()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/imafr.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open imafr.txt\n");
+		return false;
+	}
+
+	if (m_bolLogRegsDetail)
+	{
+		fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+
+	fprintf(fp, "imafr:%08x\n", (DSPU32)u32r_IMAFR);
+
+	fclose(fp);
+
+	return true;
+
+}
+
+//----------------------------------------------------------
+void sc_iss::LogMemForUVWTest(DSPU32 addr, int length)
+{
+	FILE *fp = NULL;
+	int i=0,j=0;
+
+	sprintf(g_arrFileName, "%s/memory.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open memory.txt\n");
+    	return;
+    }
+
+	fprintf(fp,"     ---------------------------Memory------------------------        \n");
+	fprintf(fp, "EPC: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+//	fprintf(fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+	
+	while( i<length)
+	{
+		if((i%8)==0)
+		{
+			fprintf(fp,"0x%08x: ",addr);
+		}
+		
+		
+		for(j = 0; j<8; j++)
+		{
+			DSPU32 u32MemAddr = addr+j;
+			DSPU32 u32Value = 0;
+			ReadCoreDataMem(u32MemAddr, &u32Value);
+			fprintf(fp,"0x%08x ",u32Value);
+			i++;
+		}
+		addr = addr + j;
+		
+		fprintf(fp,"\n");
+	}
+
+	fprintf(fp,"\n");
+	fclose(fp);
+}
+#endif		// #ifdef LOG_STEP_TESTING
+
+#ifdef BWSIM_CMP_100_104
+//----------------------------------------------------------
+bool  sc_iss::LogGenRegs_100_104(unsigned int p_u32PC_WB)
+{
+	FILE *fp = NULL;
+	DSPU32  u32Temp;
+
+	sprintf(g_arrFileName, "%s/GenRegs_100_104.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open GenRegs_100_104.txt\n");
+    	return false;
+    }
+
+  fprintf(fp, "pc:%08x\n", p_u32PC_WB);
+	for (int i = 0; i < 64; i++)
+	{
+		fprintf(fp, "XR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 * 0]);
+	}
+	fprintf(fp, "\n");
+	for (int i = 0; i < 64; i++)
+	{
+		fprintf(fp, "YR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 * 1]);
+	}
+	fprintf(fp, "\n");
+	for (int i = 0; i < 64; i++)
+	{
+		fprintf(fp, "ZR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 * 2]);
+	}
+	fprintf(fp, "\n");
+	for (int i = 0; i < 64; i++)
+	{
+		fprintf(fp, "TR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 * 3]);
+	}
+	fprintf(fp, "\n");
+
+	fprintf(fp, "\n");
+
+  	fclose(fp);
+
+	return true;
+}
+#endif		// #ifdef BWSIM_CMP_100_104
+
+
+#ifdef BWSIM_LOG_INFO
+//-----------------------------------------------------------------------------------
+bool sc_iss::LogINTRegs()
+{
+	FILE *fp = NULL;
+	DSPU32 u32Temp = 0;
+	DSP_BIT48 u48Temp;
+	char cName;
+	int i = 0;
+
+	sprintf(g_arrFileName, "%s/INTRegs.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open INTRegs.txt\n");
+		return false;
+	}
+
+	if (m_bolLogRegsDetail)
+	{
+		fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+
+	// 中断向量寄存器
+	for(i=61;i>=0;i--)
+	{
+		u32Temp  =  u32ro_IVT[i];
+		fprintf(fp,  "INTR%d_E:%08x ",i,u32Temp);
+	}
+	fprintf(fp, "\n");
+	for(i=61;i>=0;i--)
+	{
+		u32Temp  =  u32ro_IRA[i];
+		fprintf(fp,  "INTR%d_R:%08x ",i,u32Temp);
+	}
+	fprintf(fp, "\n");
+
+	// 中断控制寄存器
+	//ILATRl
+	u32Temp = u64ro_ILAT;
+	fprintf(fp, "ILATRl:%08x ", u32Temp);
+
+	//ILATRh
+	u32Temp = u64ro_ILAT >> 32;
+	fprintf(fp, "ILATRh:%08x ", u32Temp);
+
+	//IMASKRl
+	u32Temp = u64ro_IMASK;
+	fprintf(fp, "IMASKRl:%08x ", u32Temp);
+
+	//IMASKRh
+	u32Temp = u64ro_IMASK >> 32;
+	fprintf(fp, "IMASKRh:%08x ", u32Temp);
+
+	//PMASKRl
+	u32Temp = u64r_PMASK;
+	fprintf(fp, "PMASKRl:%08x ", u32Temp);
+
+	//PMASKRh
+	u32Temp = u64r_PMASK >> 32;
+	fprintf(fp, "PMASKRh:%08x ", u32Temp);
+
+	// SITR
+    u32Temp = (DSPU32)u32r_SITR;
+	fprintf(fp, "SITR:%02x ", u32Temp);
+
+	//ITMRl
+	u32Temp = u32ro_ITMRl;
+	fprintf(fp, "ITMR0:%08x ", u32Temp);
+
+	//ITMRh
+	u32Temp = u32ro_ITMRh;
+	fprintf(fp, "ITMR1:%08x ", u32Temp);
+
+	// ICGC
+	u32Temp = m_pICACHE->ICGC.read();
+	fprintf(fp, "ICGC:%08x ", u32Temp);
+
+	// ICACNT
+	u32Temp = m_pICACHE->ICACNT.read();
+	fprintf(fp, "ICACNT:%08x ", u32Temp);
+
+	// ICMCNT
+	u32Temp = m_pICACHE->ICMCNT.read();
+	fprintf(fp, "ICMCNT:%08x ", u32Temp);
+
+	// ICFLUSH
+	u32Temp = m_pICACHE->ICFLUSH_CON.read();
+	fprintf(fp, "ICFLUSH_CON:%08x ", u32Temp);
+
+	//ICDMA_CON
+	u32Temp = m_pICACHE->ICDMA_CON.read();
+	fprintf(fp, "ICDMA_CON:%08x ", u32Temp);
+
+	//register32 ICDMA_LEN;
+	u32Temp = m_pICACHE->ICDMA_LEN.read();
+	fprintf(fp, "ICDMA_LEN:%08x ", u32Temp);
+
+	//register32 ICDMA_DST_ADDR;
+	u32Temp = m_pICACHE->ICDMA_DST_ADDR.read();
+	fprintf(fp, "DST_ADDR:%08x ", u32Temp);
+
+	//register32 ICDMA_SRC_ADDR;
+	u32Temp = m_pICACHE->ICDMA_SRC_ADDR.read();
+	fprintf(fp, "ICDMA_SRC_ADDR:%08x ", u32Temp);
+
+	//register32 ICDMA_AUTOLEN;
+	u32Temp = m_pICACHE->ICDMA_AUTOLEN.read();
+	fprintf(fp, "ICDMA_AUTOLEN:%08x ", u32Temp);
+
+	fprintf(fp, "\n");
+
+	//CGCR 
+	//u32Temp = u32ro_CGCR;
+	//fprintf(fp, "CGCR:%08x ", u32Temp);
+
+	
+
+	//INT_SCR30 - INT_SCR0
+	for(i=30;i>=0;i--)
+	{
+		u32Temp  =  u32ro_INTSrc[i];
+		fprintf(fp,  "INT_SCR%d:%08x ",i,u32Temp);
+	}
+
+	fprintf(fp, "\n");
+	fclose(fp);
+	return true;
+/**************************************************************************************
+
+	// 中断向量寄存器
+	u32Temp  =  u32ro_IVT[63 - 0x2 ];
+	fprintf(fp,  "SWIR_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x4 ];
+	fprintf(fp,  "JIHR_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x5 ];
+	fprintf(fp,  "HIHR_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x9 ];
+	fprintf(fp,  "HINTR_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0xa ];
+	fprintf(fp,  "ITIHR0_E:%08x ",  u32Temp);
+	
+	u32Temp  =  u32ro_IVT[63 - 0xb ];
+	fprintf(fp,  "ITIHR1_E:%08x ",  u32Temp);
+	
+	u32Temp  =  u32ro_IVT[63 - 0xc ];
+	fprintf(fp,  "TIHR0_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0xd ];
+	fprintf(fp,  "TIHR1_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0xe ];
+	fprintf(fp,  "TIHR2_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0xf ];
+	fprintf(fp,  "TIHR3_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x10];
+	fprintf(fp,  "INTR0_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x11];
+	fprintf(fp,  "INTR1_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x12];
+	fprintf(fp,  "INTR2_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x13];
+	fprintf(fp,  "INTR3_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x14];
+	fprintf(fp,  "INTR4_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x15];
+	fprintf(fp,  "INTR5_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x16];
+	fprintf(fp,  "INTR6_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x17];
+	fprintf(fp,  "INTR7_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x19];
+	fprintf(fp,  "IINT_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x1c];
+	fprintf(fp,  "CDMA0_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x1d];
+	fprintf(fp,  "CDMA1_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x1e];
+	fprintf(fp,  "CDMA2_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x1f];
+	fprintf(fp,  "CDMA3_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x20];
+	fprintf(fp,  "CDMA4_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x21];
+	fprintf(fp,  "CDMA5_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x22];
+	fprintf(fp,  "CDMA6_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x23];
+	fprintf(fp,  "CDMA7_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x24];
+	fprintf(fp,  "CDMA8_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x25];
+	fprintf(fp,  "CDMA9_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x26];
+	fprintf(fp,  "CDMA10_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x27];
+	fprintf(fp,  "IODMA0_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x28];
+	fprintf(fp,  "IODMA1_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x29];
+	fprintf(fp,  "IODMA2_E:%08x ",  u32Temp);
+	
+	u32Temp  =  u32ro_IVT[63 - 0x2a];
+	fprintf(fp,  "IODMA3_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x2e];
+	fprintf(fp,  "SRIR_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x2f];
+	fprintf(fp,  "STIR_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x32];
+	fprintf(fp,  "ITILR0_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x33];
+	fprintf(fp,  "ITILR1_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x34];
+	fprintf(fp,  "TILR0_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x35];
+	fprintf(fp,  "TILR1_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x36];
+	fprintf(fp,  "TILR2_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x37];
+	fprintf(fp,  "TILR3_E:%08x ",  u32Temp);
+
+	u32Temp  =  u32ro_IVT[63 - 0x3a];
+	fprintf(fp,  "HILR_E:%08x ",  u32Temp);
+ 
+	u32Temp  =  u32ro_IVT[63 - 0x3c];
+	fprintf(fp,  "JILR_E:%08x ",  u32Temp);
+
+	fprintf(fp, "\n");
+
+	// 中断控制寄存器
+	//ILATRl
+	u32Temp = u64ro_ILAT;
+	fprintf(fp, "ILATRl:%08x ", u32Temp);
+
+	//ILATRh
+	u32Temp = u64ro_ILAT >> 32;
+	fprintf(fp, "ILATRh:%08x ", u32Temp);
+
+	//IMASKRl
+	u32Temp = u64ro_IMASK;
+	fprintf(fp, "IMASKRl:%08x ", u32Temp);
+
+	//IMASKRh
+	u32Temp = u64ro_IMASK >> 32;
+	fprintf(fp, "IMASKRh:%08x ", u32Temp);
+
+	//PMASKRl
+	u32Temp = u64r_PMASK;
+	fprintf(fp, "PMASKRl:%08x ", u32Temp);
+
+	//PMASKRh
+	u32Temp = u64r_PMASK >> 32;
+	fprintf(fp, "PMASKRh:%08x ", u32Temp);
+
+	
+	//中断设置寄存器ISR/ICR是虚拟寄存器，用于修改ILAT
+	//ISRl CGCR[0]=0
+	//ISRh
+	//ICRl
+	//ICRh
+
+	// SITR
+    u32Temp = (DSPU32)u32r_SITR;
+	fprintf(fp, "SITR:%02x ", u32Temp);
+
+	// ICGC
+	u32Temp = m_pICACHE->ICGC.read();
+	fprintf(fp, "ICGC:%08x ", u32Temp);
+
+	// ICACNT
+	u32Temp = m_pICACHE->ICACNT.read();
+	fprintf(fp, "ICACNT:%08x ", u32Temp);
+
+	// ICMCNT
+	u32Temp = m_pICACHE->ICMCNT.read();
+	fprintf(fp, "ICMCNT:%08x ", u32Temp);
+
+	// ICFLUSH
+	u32Temp = m_pICACHE->ICFLUSH_CON.read();
+	fprintf(fp, "ICFLUSH_CON:%08x ", u32Temp);
+
+	//ICDMA_CON
+	u32Temp = m_pICACHE->ICDMA_CON.read();
+	fprintf(fp, "ICDMA_CON:%08x ", u32Temp);
+
+	//register32 ICDMA_LEN;
+	u32Temp = m_pICACHE->ICDMA_LEN.read();
+	fprintf(fp, "ICDMA_LEN:%08x ", u32Temp);
+
+	//register32 ICDMA_DST_ADDR;
+	u32Temp = m_pICACHE->ICDMA_DST_ADDR.read();
+	fprintf(fp, "DST_ADDR:%08x ", u32Temp);
+
+	//register32 ICDMA_SRC_ADDR;
+	u32Temp = m_pICACHE->ICDMA_SRC_ADDR.read();
+	fprintf(fp, "ICDMA_SRC_ADDR:%08x ", u32Temp);
+
+	//register32 ICDMA_AUTOLEN;
+	u32Temp = m_pICACHE->ICDMA_AUTOLEN.read();
+	fprintf(fp, "ICDMA_AUTOLEN:%08x ", u32Temp);
+
+	fprintf(fp, "\n");
+
+	// 中断返回地址寄存器
+	u32Temp = u32ro_IRA[63 - 0x2];
+	fprintf(fp, "SWIR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x4];
+	fprintf(fp, "JIHR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x5];
+	fprintf(fp, "HIHR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x9];
+	fprintf(fp, "HINTR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0xa];
+	fprintf(fp, "ITIHR0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0xb];
+	fprintf(fp, "ITIHR1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0xc];
+	fprintf(fp, "TIHR0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0xd];
+	fprintf(fp, "TIHR1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0xe];
+	fprintf(fp, "TIHR2_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0xf];
+	fprintf(fp, "TIHR3_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x10];
+	fprintf(fp, "INTR0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x11];
+	fprintf(fp, "INTR1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x12];
+	fprintf(fp, "INTR2_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x13];
+	fprintf(fp, "INTR3_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x14];
+	fprintf(fp, "INTR4_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x15];
+	fprintf(fp, "INTR5_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x16];
+	fprintf(fp, "INTR6_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x17];
+	fprintf(fp, "INTR7_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x19];
+	fprintf(fp, "IINT_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x1c];
+	fprintf(fp, "CDMA0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x1d];
+	fprintf(fp, "CDMA1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x1e];
+	fprintf(fp, "CDMA2_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x1f];
+	fprintf(fp, "CDMA3_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x20];
+	fprintf(fp, "CDMA4_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x21];
+	fprintf(fp, "CDMA5_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x22];
+	fprintf(fp, "CDMA6_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x23];
+	fprintf(fp, "CDMA7_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x24];
+	fprintf(fp, "CDMA8_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x25];
+	fprintf(fp, "CDMA9_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x26];
+	fprintf(fp, "CDMA10_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x27];
+	fprintf(fp, "IODMA0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x28];
+	fprintf(fp, "IODMA1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x29];
+	fprintf(fp, "IODMA2_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x2a];
+	fprintf(fp, "IODMA3_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x2e];
+	fprintf(fp, "SRIR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x2f];
+	fprintf(fp, "STIR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x32];
+	fprintf(fp, "ITILR0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x33];
+	fprintf(fp, "ITILR1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x34];
+	fprintf(fp, "TILR0_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x35];
+	fprintf(fp, "TILR1_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x36];
+	fprintf(fp, "TILR2_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x37];
+	fprintf(fp, "TILR3_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x3a];
+	fprintf(fp, "HILR_R:%08x ", u32Temp);
+
+	u32Temp = u32ro_IRA[63 - 0x3c];
+	fprintf(fp, "JILR_R:%08x ", u32Temp);
+
+	fprintf(fp, "\n");
+	fclose(fp);
+	return true;
+	*/
+ }
+
+//----------------------------------------------------------
+void  sc_iss::LogDbgInfo()
+{
+// 寄存器翻转后打印输出
+	if ( GIsBitSet(m_u32LogMode, 0) )
+	{		
+		//LogDBGPR();
+		LogPipePC();
+		if(bolFirstEX)
+		{
+//			LogINTRegs();
+		}
+		//LogDBGRegs();
+		//LogPRComp();	
+	}
+
+	if ( GIsBitSet(m_u32LogMode, 1) )
+	{
+		//LogRegsCompX();
+		//LogRegsCompY();
+		//LogRegsCompZ();
+		//LogRegsCompT();
+
+		if ( (u32r_CyclesL & 0xF) == 0 )
+		{			
+			LogData1Comp();
+		}		
+	}
+
+	if ( GIsBitSet(m_u32LogMode, 3) )
+	{
+		//LogCtrlRegs();
+	}
+
+
+	if ( GIsBitSet(m_u32LogMode, 5) )
+	{
+		//LogResAlloc();
+	}
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogDBGRegs()
+{
+		FILE *fp = NULL;
+
+		sprintf(g_arrFileName, "%s/DBGRegs.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open DBGRegs.txt\n");
+			return false;
+		}
+
+		fprintf(fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+
+		// line 1
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.			
+			fprintf(fp, "XR%d:%08x", i, (unsigned int)u32ro_R[i]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 2
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{			
+			fprintf(fp, "YR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *1]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 3
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "ZR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *2]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 4
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "TR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *3]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		//---------------------------------------------------------------------
+		// line 1
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.			
+			fprintf(fp, "XR%d:%08x", i, (unsigned int)u32ro_R[i + 64*0 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 2
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{			
+			fprintf(fp, "YR%d:%08x", i, (unsigned int)u32ro_R[i + 64*1 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 3
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "ZR%d:%08x", i, (unsigned int)u32ro_R[i + 64*2 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 4
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "TR%d:%08x", i, (unsigned int)u32ro_R[i + 64*3 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		fprintf(fp, "\n");
+		fclose(fp);
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::LogCFG_Info()
+{
+	FILE *fp = NULL;
+	DSPU32 u32UVWStart, u32UVWEnd, u32GPRStart, u32GPREnd;
+	DSPU32 u32INTLvl = PIPE_EX.EX_WB.m_right.u32_NestLvl;
+	DSPU32 *arrAddrs = NULL;
+	char ch;
+
+	if ( (u32INTLvl >= 0x2d && u32INTLvl <= 0x30) || (u32INTLvl == 0) )
+	{
+		if(u32INTLvl > 0)
+		{
+			sprintf(g_arrFileName, "%s/CFG_INT%x.txt", g_arrIOPath, (u32INTLvl - 1));	
+		}
+		else
+		{
+			sprintf(g_arrFileName, "%s/CFG_Normal.txt", g_arrIOPath);
+		}
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("%s: Error occured when open %s\n", __FUNCTION__, g_arrFileName);
+			return false;
+		}
+
+		fprintf(fp, "EPC: %08x\n", (DSPU32)PIPE_EX.EX_WB.m_right.uint32r_pc);
+		switch(u32INTLvl)
+		{
+			case 0:
+				u32GPRStart = 0;
+				u32GPREnd = 31;
+				ch = 'U';
+				arrAddrs = u32ro_U;
+				u32UVWStart = 0;
+				u32UVWEnd = 15;
+				break;
+			case 0x30:
+				u32GPRStart = 32;
+				u32GPREnd = 39;
+				ch = 'V';
+				arrAddrs = u32ro_V;
+				u32UVWStart = 0;
+				u32UVWEnd = 7;
+				break;
+			case 0x2f:
+				u32GPRStart = 40;
+				u32GPREnd = 47;
+				ch = 'V';
+				arrAddrs = u32ro_V;
+				u32UVWStart = 8;
+				u32UVWEnd = 15;
+				break;
+			case 0x2e:
+				u32GPRStart = 48;
+				u32GPREnd = 55;
+				ch = 'W';
+				arrAddrs = u32ro_W;
+				u32UVWStart = 0;
+				u32UVWEnd = 7;
+				break;
+			case 0x2d:
+				u32GPRStart = 56;
+				u32GPREnd = 63;
+				ch = 'W';
+				arrAddrs = u32ro_W;
+				u32UVWStart = 8;
+				u32UVWEnd = 15;
+				break;				
+		}
+		
+	}
+	else
+	{
+		return false;
+	}
+	
+	// line 1
+	//X宏A面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "XR%d:%08x ", i, (unsigned int)u32ro_R[i]);
+	}
+	
+	//X宏B面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "XBR%d:%08x ", i, (unsigned int)u32ro_R[i+256]);
+	}
+	
+	fprintf(fp, "\n");
+
+	// line 2
+	//Y宏A面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "YR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 *1]);
+	}
+	
+	//Y宏B面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "YBR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 *1 +256]);
+	}
+	
+	fprintf(fp, "\n");
+
+	// line 3
+	//Z宏A面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "ZR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 *2]);
+	}
+	
+	//Z宏B面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "ZBR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 *2 +256]);
+	}
+	
+	fprintf(fp, "\n");
+
+	// line 4
+	//T宏A面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "TR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 *3]);
+	}
+	
+	//T宏B面寄存器
+	for (int i = u32GPRStart; i <= u32GPREnd; i++)
+	{
+		fprintf(fp, "TBR%d:%08x ", i, (unsigned int)u32ro_R[i + 64 *3 +256]);
+	}
+
+	fprintf(fp, "\n");
+	
+	// line 5
+	// 地址寄存器
+	for (int i = u32UVWStart; i <= u32UVWEnd; i++)
+	{
+		fprintf(fp, "%c%d:%08x ", ch, i, (unsigned int)arrAddrs[i]);
+	}
+	fprintf(fp, "\n");
+	fclose(fp);
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::LogPipePC()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/PipePC.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open PipePC.txt\n");
+		return false;
+	}
+
+	//-----------------------------------------------
+	bool bolCacheHit;
+	PIPE_FE_REG_CONTENT pipe_fe_reg_content;		
+	m_pICACHE->jtagReadCacheSlots(&bolCacheHit, &pipe_fe_reg_content);
+	//-----------------------------------------------
+	int i = 0;
+	DSPU32 u32PC = 0;
+	fprintf(fp, "PC:          ");
+	/*
+//	fprintf(fp, "  %08x", pipe_fe_reg_content.u32_LinePC);
+	for(i = 0; i < MAX_INUM_LINE; i++)
+	{
+		if(m_arrIABP1Out[i] != 0)
+		{
+			break;
+		}
+	}
+	if(i >= MAX_INUM_LINE)
+	{
+		u32PC = m_arrIABP1Out[16];
+	}
+	else
+	{
+		u32PC = m_arrIABP1Out[16] + i;
+	}
+	fprintf(fp, "  %08x", u32PC);
+	
+	for(i = 0; i < MAX_INUM_LINE; i++)
+	{
+		if(m_arrIABP0Out[i] != 0)
+		{
+			break;
+		}
+	}
+	if(i >= MAX_INUM_LINE)
+	{
+		u32PC = m_arrIABP0Out[16];
+	}
+	else
+	{
+		u32PC = m_arrIABP0Out[16] + i;
+	}
+	fprintf(fp, "  %08x", u32PC);
+	*/
+	
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.EMIT_DC1.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC1_DC2.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC2_DC3.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC3_DC4.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC4_AC.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.AC_EX.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (DSPU32)PIPE_EX.EX_WB.m_right.uint32r_pc);
+	fprintf(fp, "  %016llx", u64ro_ILAT);
+	fprintf(fp, "  %016llx", (DSPU64)u64r_PMASK);
+	fprintf(fp, "  %016llx", u64ro_IMASK);
+	fprintf(fp, "  %08x\n", u32ro_CGCR);
+//	fprintf(fp, "\nILAT:          0x%016Lx%\n", u64ro_ILAT);
+
+	fclose(fp);
+	return true;
+
+}
+//----------------------------------------------------------
+bool sc_iss::LogDBGPR()
+{
+	DSPU64 u64Temp;
+	DSPU32 u32ILATLow, u32ILATHigh, u32PMASKLow, u32PMASKHigh;
+
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/DBGPR.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open DBGPR.txt\n");
+    	return false;
+    }
+
+	//-----------------------------------------------
+	bool bolCacheHit;
+	PIPE_FE_REG_CONTENT pipe_fe_reg_content;
+		
+	m_pICACHE->jtagReadCacheSlots(&bolCacheHit, &pipe_fe_reg_content);
+
+	//-----------------------------------------------
+
+	u32ILATLow = u64ro_ILAT;
+	u32ILATHigh = u64ro_ILAT >> 32;
+
+	u64Temp = u64r_PMASK;
+	u32PMASKLow = u64Temp;
+	u32PMASKHigh = u64Temp >> 32;
+	
+
+	// cycle and EPC
+	fprintf(fp, "Cycles: %08x%08x      EPC: %08x      FPC: %08x      ILAT: %08x%08x      PMASK: %08x%08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC, (unsigned int)m_pICACHE->RdFPC(), u32ILATHigh, u32ILATLow, u32PMASKHigh, u32PMASKLow);
+
+//#ifdef PIPE_FE_TESTING
+//	fprintf(fp, "            FE1/FE2  FE2/PHV0    IAB1      IAB0    EMIT/DC1\n");
+//#else
+	fprintf(fp, "            FE1/FE2    IAB1      IAB0      EMIT/DC1  DC1/DC2   DC2/DC3   DC3/DC4   DC4/AC    AC/EX     EX/WB\n");
+//#endif
+
+
+	// PC
+	fprintf(fp, "PC:        ");
+	fprintf(fp, "  %08x", pipe_fe_reg_content.u32_LinePC);
+	fprintf(fp, "  %08x", (unsigned int)m_arrIABP1Out[16]);
+	fprintf(fp, "  %08x", (unsigned int)m_arrIABP0Out[16]);	
+
+//#ifndef PIPE_FE_TESTING
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EMIT_DC1.m_right.uint32r_pc);
+//#else
+//	fprintf(fp, "  %08x", m_arrEmittedLine[16]);
+//#endif
+
+//#ifndef PIPE_FE_TESTING
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC1_DC2.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC2_DC3.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC3_DC4.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC4_AC.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.AC_EX.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EX_WB.m_right.uint32r_pc);
+//#endif
+	fprintf(fp, "\n");	
+
+	// slots
+	for (int i = 0; i < MAX_INUM_LINE; i++)
+	{
+		fprintf(fp, "SLOT%2d:    ", i);
+		fprintf(fp, "  %08x", pipe_fe_reg_content.u32_slot[i]);
+		fprintf(fp, "  %08x", (unsigned int)m_arrIABP1Out[i]);
+		fprintf(fp, "  %08x", (unsigned int)m_arrIABP0Out[i]);		
+
+//#ifndef PIPE_FE_TESTING
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EMIT_DC1.m_right.uint32r_slot[i]);
+//#else
+//		fprintf(fp, "  %08x", m_arrEmittedLine[i]);
+//#endif
+		
+//#ifndef PIPE_FE_TESTING
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC1_DC2.m_right.uint32r_slot[i]);
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC2_DC3.m_right.uint32r_slot[i]);
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC3_DC4.m_right.uint32r_slot[i]);
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC4_AC.m_right.uint32r_slot[i]);
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.AC_EX.m_right.uint32r_slot[i]);
+		fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EX_WB.m_right.uint32r_slot[i]);
+//#endif
+		fprintf(fp, "\n");
+	} 	
+
+	// level
+	fprintf(fp, "Level:     ");
+	fprintf(fp, "  %08x", pipe_fe_reg_content.u32_NestLvl);
+	fprintf(fp, "  %08x", (m_arrIABP1Out[17] & 0xff));
+	fprintf(fp, "  %08x", (m_arrIABP0Out[17] & 0xff));	
+	
+//#ifndef PIPE_FE_TESTING
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EMIT_DC1.m_right.u32_NestLvl);
+//#else
+//	fprintf(fp, "  %08x", m_arrEmittedLine[17]);
+//#endif	
+
+//#ifndef PIPE_FE_TESTING
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC1_DC2.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC2_DC3.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC3_DC4.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC4_AC.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.AC_EX.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EX_WB.m_right.u32_NestLvl);
+//#endif
+	fprintf(fp, "\n");
+
+	fprintf(fp, "\n");
+
+    fclose(fp);
+	return true;
+}
+
+//----------------------------------------------------------
+bool sc_iss::LogTimerRegs()
+{
+	FILE *fp = NULL;
+	
+	sprintf(g_arrFileName, "%s/timer_log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open timer_log.txt\n");
+		return false;
+	}
+	fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	for(int i = 0; i < TIMER_NUM; i ++)
+	{
+		fprintf(fp, "LTCR%d:%08x LTPRLO%d:%08x LTPRHI%d:%08x LTCNTLO%d:%08x LTCNTHI%d:%08x\n", \
+			i, m_pTIMER->GetTCR(i), i, m_pTIMER->GetTPR(i, TIMER_LO), \
+			i, m_pTIMER->GetTPR(i, TIMER_HI), i, m_pTIMER->GetTCNT(i, TIMER_LO), i, m_pTIMER->GetTCNT(i, TIMER_HI));
+	}
+
+	fclose(fp);
+	return true;
+}
+
+//----------------------------------------------------------
+bool sc_iss::LogPRComp()
+{
+	FILE *fp = NULL;
+	int i;
+	DSPU32 u32HighWord, u32LowWord;
+
+	sprintf(g_arrFileName, "%s/PRComp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open PRComp.txt\n");
+    	return false;
+    }
+
+	// line 1
+   	fprintf(fp, "Cycles: %08x%08x        PC of DC1_DC2_R: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)PIPE_EX.DC1_DC2.m_right.uint32r_pc);
+
+	// line 2
+	fprintf(fp, "Slots: ");
+	for (i = 0; i < MAX_INUM_LINE; i++)
+	{
+		fprintf(fp, "%08x", (unsigned int)PIPE_EX.DC1_DC2.m_right.uint32r_slot[i]);
+		if (i < MAX_INUM_LINE - 1)
+		{
+			fprintf(fp, "  ");
+		}
+	}
+	fprintf(fp, "\n");
+
+	// line 3
+	fprintf(fp, "PC:    ");
+	//fprintf(fp, "%08x", (unsigned int)PIPE_FE.FE1_FE2.m_right.u32_LinePC);
+	fprintf(fp, "  %08x", (unsigned int)m_arrIABP1Out[16]);
+	fprintf(fp, "  %08x", (unsigned int)m_arrIABP0Out[16]);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC1_DC2.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC2_DC3.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC3_DC4.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC4_AC.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.AC_EX.m_right.uint32r_pc);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EX_WB.m_right.uint32r_pc);
+	fprintf(fp, "\n");
+
+	// line 4
+	fprintf(fp, "Level: ");
+	//fprintf(fp, "%08x", (unsigned int)PIPE_FE.FE1_FE2.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (m_arrIABP1Out[17] & 0xff));
+	fprintf(fp, "  %08x", (m_arrIABP0Out[17] & 0xff));
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC1_DC2.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC2_DC3.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC3_DC4.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.DC4_AC.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.AC_EX.m_right.u32_NestLvl);
+	fprintf(fp, "  %08x", (unsigned int)PIPE_EX.EX_WB.m_right.u32_NestLvl);
+	fprintf(fp, "\n");
+
+	// line 5
+	u32LowWord = u64ro_ILAT;
+	u32HighWord = u64ro_ILAT >> 32;
+	fprintf(fp, "ILATR: %08x%08x ", (unsigned int)u32HighWord, (unsigned int)u32LowWord);
+	u32LowWord = u64ro_IMASK;
+	u32HighWord = u64ro_IMASK >> 32;
+	fprintf(fp, "IMASKR: %08x%08x ", (unsigned int)u32HighWord, (unsigned int)u32LowWord);
+	u32LowWord = u64r_PMASK;
+	u32HighWord = u64r_PMASK >> 32;
+	fprintf(fp, "PMASKR: %08x%08x ", (unsigned int)u32HighWord, (unsigned int)u32LowWord);
+
+	fprintf(fp, "\n");
+
+    fclose(fp);
+	return true;
+}
+
+//----------------------------------------------------------
+bool  sc_iss::LogData1Comp()
+{
+	FILE *fp = NULL;
+	int i;
+	//DSPU32  u32Temp;
+
+	sprintf(g_arrFileName, "%s/Data1Comp.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open Data1Comp.txt\n");
+    	return false;
+    }
+
+	// line 1
+   	fprintf(fp, "Cycles: %08x%08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL);
+
+	// line 2
+	for (i = 0; i < 32; i++)
+	{
+		//ReadMem( (0x400000 + i), &u32Temp );
+		//fprintf(fp, "%08x", (unsigned int)u32Temp);
+		if (i != 31)
+		{
+			fprintf(fp, "  ");
+		}
+	}
+
+	fprintf(fp, "\n");
+
+    fclose(fp);
+	return true;
+}
+
+#endif		// #ifdef BWSIM_LOG_INFO
+
+#ifdef DECODER_TESTING
+//-----------------------------------------------------------------------------------------
+bool  sc_iss::log_res_use_info_new(DSPU32 p_u32SlotNum, unsigned int *p_pSLKIdxs, unsigned int *p_pSlot)
+{
+	DSPU32  u32SLKIdx, u32ResBits, u32Slot, u32Slot1;
+	FILE *fp = NULL;
+	FILE *fp1 = NULL;
+	FILE *fp2 = NULL;
+	FILE *fp3 = NULL;
+	int num = 0;
+	int slotnum = 0;
+	u32Slot1 = 0;
+
+	if (p_u32SlotNum > MAX_INUM_LINE)
+	{
+		PrintToCerr("log_res_use_info: parameter is error!\n");
+		return false;
+	}
+
+	if ( !GIsBitSet(m_u32LogMode, 1) )
+	{
+		// clear data structure
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			for (int j = 0; j < ALU_NUM_OF_UNIT; j++)
+			{
+				ResALU[i][j].mopcode = 0;
+				ResALU[i][j].mopcodeH = 0;
+				ResALU[i][j].slotnum = 0;
+				ResALU[i][j].en = 0;
+				ResALU[i][j].num = 0;
+				ResALU[i][j].slotnum_debug = 0;
+			}
+
+			for (int j = 0; j < MUL_NUM_OF_UNIT; j++)
+			{
+				ResMUL[i][j].mopcode = 0;
+				ResMUL[i][j].mopcodeH = 0;
+				ResMUL[i][j].slotnum = 0;
+				ResMUL[i][j].en = 0;
+				ResMUL[i][j].num = 0;
+				ResMUL[i][j].slotnum_debug = 0;
+			}
+
+			for (int j = 0; j < SHF_NUM_OF_UNIT; j++)
+			{
+				ResSHF[i][j].mopcode = 0;
+				ResSHF[i][j].mopcodeH = 0;
+				ResSHF[i][j].slotnum = 0;
+				ResSHF[i][j].en = 0;
+				ResSHF[i][j].num = 0;
+				ResSHF[i][j].slotnum_debug = 0;
+			}
+
+			for (int j = 0; j < SPU_NUM_OF_UNIT; j++)
+			{
+				ResSPU[i][j].mopcode = 0;
+				ResSPU[i][j].mopcodeH = 0;
+				ResSPU[i][j].slotnum = 0;
+				ResSPU[i][j].en = 0;
+				ResSPU[i][j].num = 0;
+				ResSPU[i][j].slotnum_debug = 0;
+			}
+		}
+
+		for (int i = 0; i < p_u32SlotNum; i++)
+		{
+			u32SLKIdx = p_pSLKIdxs[i];
+			u32Slot = p_pSlot[i];
+			if(i < (p_u32SlotNum-1))
+			{
+				u32Slot1 = p_pSlot[i+1];
+			}
+			//u32Slot = (0 | (1<<u32Slot));
+
+			if(IsExtSecondWord(u32Slot))
+			{
+				continue;
+			}
+			else
+			{
+				slotnum = slotnum + 1;
+			}
+			for (int j = 0; j < NUM_OF_UNITS; j++)
+			{
+				u32ResBits = m_arrResSLK[u32SLKIdx].slot_res_used.u8ALUs[ j ];
+				num = 1;
+				for (int k = 0; k < ALU_NUM_OF_UNIT; k++)
+				{
+					if ( GIsBitSet(u32ResBits, k) )
+					{
+						//m_arrLogResUse[ j ][ i ] = GSetBit(m_arrLogResUse[ j ][ i ], k);
+						
+						ResALU[j][k].mopcode = u32Slot;
+						if(IsExtFirstWord(u32Slot))
+						{
+							ResALU[j][k].mopcodeH = u32Slot1;
+						}
+						ResALU[j][k].slotnum = (0 | (1<<i));
+						ResALU[j][k].en = 1;
+						ResALU[j][k].num = num;
+						ResALU[j][k].slotnum_debug = slotnum;
+						num++;
+					}
+				}//end for (int k = 0; k < ALU_NUM_OF_UNIT; k++)
+
+				u32ResBits = m_arrResSLK[u32SLKIdx].slot_res_used.u8MULs[ j ];
+				num = 1;
+				for (int k = 0; k < MUL_NUM_OF_UNIT; k++)
+				{
+					if ( GIsBitSet(u32ResBits, k) )
+					{
+						ResMUL[j][k].mopcode = u32Slot;
+						ResMUL[j][k].slotnum = (0 | (1<<i));
+						ResMUL[j][k].en = 1;
+						ResMUL[j][k].num = num;
+						ResMUL[j][k].slotnum_debug = slotnum;
+						num++;
+					}
+				}
+
+				u32ResBits = m_arrResSLK[u32SLKIdx].slot_res_used.u8SHFs[ j ];
+				num = 1;
+				for (int k = 0; k < SHF_NUM_OF_UNIT; k++)
+				{
+					if ( GIsBitSet(u32ResBits, k) )
+					{
+						ResSHF[j][k].mopcode = u32Slot;
+						if(IsExtFirstWord(u32Slot))
+						{
+							ResSHF[j][k].mopcodeH = u32Slot1;
+						}
+						ResSHF[j][k].slotnum = (0 | (1<<i));
+						ResSHF[j][k].en = 1;
+						ResSHF[j][k].num = num;
+						ResSHF[j][k].slotnum_debug = slotnum;
+						num++;
+					}
+				}
+
+				u32ResBits = m_arrResSLK[u32SLKIdx].slot_res_used.u8SPUs[ j ];
+				num = 1;
+				for (int k = 0; k < SPU_NUM_OF_UNIT; k++)
+				{
+					if ( GIsBitSet(u32ResBits, k) )
+					{
+						ResSPU[j][k].mopcode = u32Slot;
+						ResSPU[j][k].slotnum = (0 | (1<<i));
+						ResSPU[j][k].en = 1;
+						ResSPU[j][k].num = num;
+						ResSPU[j][k].slotnum_debug = slotnum;
+						num++;
+					}
+				}
+
+			} //for (int j = 0; j < NUM_OF_UNITS; j++)
+
+		} // for (int i = 0; i < p_u32SlotNum; i++)
+
+		
+			sprintf(g_arrFileName, "%s/ResAluUseInfo.txt", g_arrIOPath);
+			//printf("%s\n", g_arrFileName);
+			if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    		{
+				PrintToCerr("Error occured when open ResUseInfo.txt\n");
+    			return false;
+			}
+			//fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+
+			for (int i = 0; i < NUM_OF_UNITS; i++)
+			{
+	
+				for (int j = 0; j < ALU_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp,"x");}
+					else if(i==1)
+					{fprintf(fp,"y");}
+					else if(i==2)
+					{fprintf(fp,"z");}
+					else if(i==3)
+					{fprintf(fp,"t");}
+
+					fprintf(fp,"alu%d:",j);
+					fprintf(fp, "%08x,", ResALU[ i ][ j ].mopcodeH);
+					fprintf(fp, "%08x,", ResALU[ i ][ j ].mopcode);
+					//fprintf(fp, "%04x,", ResALU[ i ][ j ].slotnum);
+					fprintf(fp, "%d,", ResALU[ i ][ j ].en);
+					fprintf(fp, "%d ", ResALU[ i ][ j ].num);
+					
+				} // for (int j = 0; j < MAX_INUM_LINE; j++)
+
+				for (int j = 0; j < SHF_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp,"x");}
+					else if(i==1)
+					{fprintf(fp,"y");}
+					else if(i==2)
+					{fprintf(fp,"z");}
+					else if(i==3)
+					{fprintf(fp,"t");}
+
+					fprintf(fp,"shf%d:",j);
+					fprintf(fp, "%08x,", ResSHF[ i ][ j ].mopcodeH);
+					fprintf(fp, "%08x,", ResSHF[ i ][ j ].mopcode);
+					//fprintf(fp, "%04x,", ResSHF[ i ][ j ].slotnum);
+					fprintf(fp, "%d,", ResSHF[ i ][ j ].en);
+					fprintf(fp, "%d ", ResSHF[ i ][ j ].num);
+					
+				} // for (int j = 0; j < MAX_INUM_LINE; j++)
+				fprintf(fp, "\n");
+			} // for (int i = 0; i < NUM_OF_UNITS; i++)
+			
+			//fprintf(fp, "\n");
+			fclose(fp);
+
+			sprintf(g_arrFileName, "%s/ResAluUseInfo_debug.txt", g_arrIOPath);
+			//printf("%s\n", g_arrFileName);
+			if ((fp1 = fopen(g_arrFileName, "a+")) == NULL)
+    		{
+				PrintToCerr("Error occured when open ResUseInfo_debug.txt\n");
+    			return false;
+			}
+
+			fprintf(fp1,"%d\n",dis_line_num);
+			for (int i = 0; i < NUM_OF_UNITS; i++)
+			{
+				
+				for (int j = 0; j < ALU_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp1,"x");}
+					else if(i==1)
+					{fprintf(fp1,"y");}
+					else if(i==2)
+					{fprintf(fp1,"z");}
+					else if(i==3)
+					{fprintf(fp1,"t");}
+
+					fprintf(fp1,"alu%d:",j);
+					fprintf(fp1, "%08x,", ResALU[ i ][ j ].mopcode);
+					fprintf(fp1, "%04x,", ResALU[ i ][ j ].slotnum_debug);
+					fprintf(fp1, "%d,", ResALU[ i ][ j ].en);
+					fprintf(fp1, "%d ", ResALU[ i ][ j ].num);
+					
+				} // for (int j = 0; j < MAX_INUM_LINE; j++)
+
+				for (int j = 0; j < SHF_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp1,"x");}
+					else if(i==1)
+					{fprintf(fp1,"y");}
+					else if(i==2)
+					{fprintf(fp1,"z");}
+					else if(i==3)
+					{fprintf(fp1,"t");}
+
+					fprintf(fp1,"shf%d:",j);
+					fprintf(fp1, "%08x,", ResSHF[ i ][ j ].mopcode);
+					fprintf(fp1, "%04x,", ResSHF[ i ][ j ].slotnum_debug);
+					fprintf(fp1, "%d,", ResSHF[ i ][ j ].en);
+					fprintf(fp1, "%d ", ResSHF[ i ][ j ].num);
+					
+				} // for (int j = 0; j < MAX_INUM_LINE; j++)
+				fprintf(fp1, "\n");
+			} // for (int i = 0; i < NUM_OF_UNITS; i++)
+			
+			fclose(fp1);
+
+			sprintf(g_arrFileName, "%s/ResMulUseInfo.txt", g_arrIOPath);
+			//printf("%s\n", g_arrFileName);
+			if ((fp2 = fopen(g_arrFileName, "a+")) == NULL)
+    		{
+				PrintToCerr("Error occured when open ResMulUseInfo.txt\n");
+    			return false;
+			}
+
+			//fprintf(fp2, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+
+			for (int i = 0; i < NUM_OF_UNITS; i++)
+			{
+				for (int j = 0; j < MUL_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp2,"x");}
+					else if(i==1)
+					{fprintf(fp2,"y");}
+					else if(i==2)
+					{fprintf(fp2,"z");}
+					else if(i==3)
+					{fprintf(fp2,"t");}
+
+					fprintf(fp2,"mul%d:",j);
+					fprintf(fp2, "%08x,", ResMUL[ i ][ j ].mopcode);
+					fprintf(fp2, "%04x,", ResMUL[ i ][ j ].slotnum);
+					fprintf(fp2, "%d,", ResMUL[ i ][ j ].en);
+					fprintf(fp2, "%d ", ResMUL[ i ][ j ].num);
+					
+				} 
+
+				for (int j = 0; j < SPU_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp2,"x");}
+					else if(i==1)
+					{fprintf(fp2,"y");}
+					else if(i==2)
+					{fprintf(fp2,"z");}
+					else if(i==3)
+					{fprintf(fp2,"t");}
+
+					fprintf(fp2,"spu%d:",j);
+					fprintf(fp2, "%08x,", ResSPU[ i ][ j ].mopcode);
+					fprintf(fp2, "%04x,", ResSPU[ i ][ j ].slotnum);
+					fprintf(fp2, "%d ", ResSPU[ i ][ j ].en);
+					//fprintf(fp2, "%d  ", ResSPU[ i ][ j ].num);
+					
+				} 
+
+				fprintf(fp2, "\n");
+			} // for (int i = 0; i < NUM_OF_UNITS; i++)
+			//fprintf(fp2, "\n");
+			fclose(fp2);
+
+			sprintf(g_arrFileName, "%s/ResMulUseInfo_debug.txt", g_arrIOPath);
+			//printf("%s\n", g_arrFileName);
+			if ((fp3 = fopen(g_arrFileName, "a+")) == NULL)
+    		{
+				PrintToCerr("Error occured when open ResMulUseInfo_debug.txt\n");
+    			return false;
+			}
+
+			fprintf(fp3,"%d\n",dis_line_num);
+			for (int i = 0; i < NUM_OF_UNITS; i++)
+			{
+				for (int j = 0; j < MUL_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp3,"x");}
+					else if(i==1)
+					{fprintf(fp3,"y");}
+					else if(i==2)
+					{fprintf(fp3,"z");}
+					else if(i==3)
+					{fprintf(fp3,"t");}
+
+					fprintf(fp3,"mul%d:",j);
+					fprintf(fp3, "%08x,", ResMUL[ i ][ j ].mopcode);
+					fprintf(fp3, "%04x,", ResMUL[ i ][ j ].slotnum_debug);
+					fprintf(fp3, "%d,", ResMUL[ i ][ j ].en);
+					fprintf(fp3, "%d ", ResMUL[ i ][ j ].num);
+					
+				} 
+				for (int j = 0; j < SPU_NUM_OF_UNIT; j++)
+				{
+					if(i==0)
+					{fprintf(fp3,"x");}
+					else if(i==1)
+					{fprintf(fp3,"y");}
+					else if(i==2)
+					{fprintf(fp3,"z");}
+					else if(i==3)
+					{fprintf(fp3,"t");}
+
+					fprintf(fp3,"spu%d:",j);
+					fprintf(fp3, "%08x,", ResSPU[ i ][ j ].mopcode);
+					fprintf(fp3, "%04x,", ResSPU[ i ][ j ].slotnum_debug);
+					fprintf(fp3, "%d ", ResSPU[ i ][ j ].en);
+					//fprintf(fp3, "%d  ", ResSPU[ i ][ j ].num);
+					
+				} 
+				fprintf(fp3, "\n");
+			} // for (int i = 0; i < NUM_OF_UNITS; i++)
+			
+			fclose(fp3);
+
+			dis_line_num++;
+
+	} // if ( GIsBitSet(m_u32LogMode, 1) )
+
+
+	return true;
+
+}
+
+//----------------------------------------------------------
+void sc_iss::LogBusTest(DSPU32 p_u32SlotNum, unsigned int *p_pSLKIdxs, unsigned int *p_pSlot)
+{
+	DSPU32  u32SLKIdx, u32Slot, u32Slot1;
+	DSPU32 u32RdBusMask, u32WrBusMask, u32RdAddrBusMask, u32WrAddrBusMask, u32UVWImm;
+	DSP_BIT64 RdBus[2];
+	DSP_BIT64 WrBus[2];
+	DSPU32 RdAddrBus[NUM_OF_UNITS][2] = {0,0,0,0,0,0,0,0};
+	DSPU32 WrAddrBus[NUM_OF_UNITS][2] = {0,0,0,0,0,0,0,0};
+	DSP_BIT64 UVWImmBus[4];
+	bool bolUAdd,bolVAdd,bolWAdd;
+	DSPU32 UAddSlot = 0, VAddSlot = 0, WAddSlot = 0;
+	
+
+	FILE *fp = NULL;
+	FILE *fp1 = NULL;
+
+	sprintf(g_arrFileName, "%s/BusUseOne.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open BusUseOne.txt\n");
+    	return;
+    }
+	sprintf(g_arrFileName, "%s/BusUseTwo.txt", g_arrIOPath);
+	if ((fp1 = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open BusUseOne.txt\n");
+    	return;
+    }
+
+	for(int j=0;j<2;j++)
+	{
+		RdBus[j].u32High = 0;
+		RdBus[j].u32Low = 0;
+		WrBus[j].u32High = 0;
+		WrBus[j].u32Low = 0;
+	}
+	for(int j=0;j<4;j++)
+	{
+		UVWImmBus[j].u32High = 0;
+		UVWImmBus[j].u32Low = 0;
+	}
+	
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{
+			u32SLKIdx = p_pSLKIdxs[i];
+			u32Slot = p_pSlot[i];
+			if(i < (p_u32SlotNum-1))
+			{
+				u32Slot1 = p_pSlot[i+1];
+			}
+			//u32Slot = (0 | (1<<u32Slot));
+
+			if(IsExtSecondWord(u32Slot))
+			{
+				continue;
+			}
+
+			//读数据总线
+			u32RdBusMask = m_arrResSLK[u32SLKIdx].slot_res_used.u32InnerRdBusMask;
+			if(u32RdBusMask)
+			{
+				for(int j=0;j<2;j++)
+				{
+					if(IsExtFirstWord(u32Slot))  //双子指令
+					{
+						if(GIsBitSet(u32RdBusMask, j))
+						{
+							RdBus[j].u32High = u32Slot;
+							RdBus[j].u32Low = u32Slot1;
+						}
+					}
+					else  //单字指令
+					{
+						if(GIsBitSet(u32RdBusMask, j))
+						{
+							RdBus[j].u32High = u32Slot;
+							RdBus[j].u32Low = 0;
+						}
+					}
+				}
+			}
+			
+
+			//写数据总线
+			u32WrBusMask = m_arrResSLK[u32SLKIdx].slot_res_used.u32InnerWrBusMask;
+			if(u32WrBusMask)
+			{
+				for(int j=0;j<2;j++)
+				{
+					if(IsExtFirstWord(u32Slot))  //双子指令
+					{
+						if(GIsBitSet(u32WrBusMask, j))
+						{
+							WrBus[j].u32High = u32Slot;
+							WrBus[j].u32Low = u32Slot1;
+						}
+					}
+					else  //单字指令
+					{
+						if(GIsBitSet(u32WrBusMask, j))
+						{
+							WrBus[j].u32High = u32Slot;
+							WrBus[j].u32Low = 0;
+						}
+					}
+				}	
+			}
+
+			//地址寄存器读总线			
+			u32RdAddrBusMask = m_arrResSLK[u32SLKIdx].slot_res_used.u32AddrRegRdBusMask;
+			if(u32RdAddrBusMask)
+			{
+				DSPU8 u8Units = m_arrResSLK[u32SLKIdx].slot_res_used.u8UnitsUseCalc;
+				for (int n = 0; n < NUM_OF_UNITS; n++)	// four units
+				{
+					if ((u8Units & (0x1 << n)) != 0)
+					{
+						// 若涉及当前宏
+						for(int j=0;j<2;j++)
+						{
+							if(GIsBitSet(u32RdAddrBusMask, j+n*2))
+							{
+								RdAddrBus[n][j] = u32Slot;
+							}
+						}						
+					}
+				}
+			}			
+			
+			//地址寄存器写总线
+			u32WrAddrBusMask = m_arrResSLK[u32SLKIdx].slot_res_used.u32AddrRegWrBusMask;
+			if(u32WrAddrBusMask)
+			{
+				DSPU8 u8Units = m_arrResSLK[u32SLKIdx].slot_res_used.u8UnitsUseCalc;
+				for (int n = 0; n < NUM_OF_UNITS; n++)	// four units
+				{
+					if ((u8Units & (0x1 << n)) != 0)
+					{
+						// 若涉及当前宏
+						for(int j=0;j<2;j++)
+						{
+							if(GIsBitSet(u32WrAddrBusMask, j+n*2))
+							{
+								WrAddrBus[n][j] = u32Slot;
+							}
+						}						
+					}
+				}
+			}
+
+			//UVW立即数总线
+			u32UVWImm = m_arrResSLK[u32SLKIdx].slot_res_used.u32UVWImm;
+			if(u32UVWImm)
+			{
+				for (int n = 0; n < 4; n++)	
+				{
+					if(GIsBitSet(u32UVWImm, n))
+					{
+						UVWImmBus[n].u32High = u32Slot;
+						UVWImmBus[n].u32Low = u32Slot1;
+					}
+				}
+			}
+
+			//U地址寄存器的加法/移位部件
+			bolUAdd = m_arrDCResNeeded[i].bolUAdd;
+			if(bolUAdd)
+			{
+				UAddSlot = u32Slot;
+			}
+			//V地址寄存器的加法/移位部件
+			bolVAdd = m_arrDCResNeeded[i].bolVAdd;
+			if(bolVAdd)
+			{
+				VAddSlot = u32Slot;
+			}
+			//W地址寄存器的加法/移位部件
+			bolWAdd = m_arrDCResNeeded[i].bolWAdd;
+			if(bolWAdd)
+			{
+				WAddSlot = u32Slot;
+			}
+			
+	}
+			
+
+			//打印地址总线读写
+			//fprintf(fp1, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"xRdAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", RdAddrBus[0][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"xWrAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", WrAddrBus[0][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"yRdAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", RdAddrBus[1][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"yWrAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", WrAddrBus[1][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"zRdAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", RdAddrBus[2][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"zWrAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", WrAddrBus[2][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"tRdAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", RdAddrBus[3][j]);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp1,"tWrAddrBus%d:",j);
+				fprintf(fp1,"%08x; ", WrAddrBus[3][j]);
+			}
+			
+			//打印数据总线读写
+			//fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp,"RdBus%d: ",j);
+				fprintf(fp,"%08x%08x; ", RdBus[j].u32Low,RdBus[j].u32High);
+				//fprintf(fp,"%08x; ", RdBus[j].u32High);
+			}
+			for(int j=0;j<2;j++)
+			{
+				fprintf(fp,"WrBus%d: ",j);
+				fprintf(fp,"%08x%08x; ", WrBus[j].u32Low, WrBus[j].u32High);
+				//fprintf(fp,"%08x; ", WrBus[j].u32High);
+			}
+			
+			//打印UVW立即数总线
+			for(int j=0;j<4;j++)
+			{
+				fprintf(fp,"ImmBus%d:",j);
+				fprintf(fp,"%08x%08x; ", UVWImmBus[j].u32Low,UVWImmBus[j].u32High);
+			}
+			fprintf(fp,"Udata:%08x; ",UAddSlot);
+			fprintf(fp,"Vdata:%08x; ",VAddSlot);
+			fprintf(fp,"Wdata:%08x; ",WAddSlot);
+			
+
+	fprintf(fp,"\n");
+	fprintf(fp1,"\n");
+	fclose(fp);
+	fclose(fp1);
+}
+
+#endif		// #ifdef DECODER_TESTING
+
+//----------------------------------------------------------
+#ifdef INTERRUPT_TESTING
+bool sc_iss::LogIRQTestAREG()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/DBGIRQTest_AREG.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open DBGIRQTest_AREG.txt\n");
+    	return false;
+    }
+
+	// cycle and EPC
+	// fprintf(fp, "Cycles: %08x%08x        ", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL);
+	fprintf(fp, "AC_PC: %08x\n", m_u32ACPostPC);
+	
+    // line 1
+		for (int i = 0; i < 16; i++)
+		{	
+			fprintf(fp, "U%d:%08x", i, (unsigned int)u32ro_U[i]);
+			if ( i != 15 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 2
+		for (int i = 0; i < 16; i++)
+		{	
+			fprintf(fp, "V%d:%08x", i, (unsigned int)u32ro_V[i]);
+			if ( i != 15 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 3
+		for (int i = 0; i < 16; i++)
+		{	
+			fprintf(fp, "W%d:%08x", i, (unsigned int)u32ro_W[i]);
+			if ( i != 15 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+	  fprintf(fp, "\n");
+
+    fclose(fp);
+    
+	  return true;
+}
+#endif		// #ifdef INTERRUPT_TESTING
+//----------------------------------------------------------
+#ifdef INTERRUPT_TESTING
+bool sc_iss::LogIRQTestGREG()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/DBGIRQTest.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open DBGIRQTest.txt\n");
+    	return false;
+    }
+
+	// cycle and EPC
+	// fprintf(fp, "Cycles: %08x%08x        ", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL);
+	fprintf(fp, "WB_PC: %08x\n", m_u32WBPC);
+	
+	// line 1
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{	
+			fprintf(fp, "XR%d:%08x", i, (unsigned int)u32ro_R[i]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 2
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{			
+			fprintf(fp, "YR%d:%08x", i, (unsigned int)u32ro_R[i + 64]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 3
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "ZR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *2]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 4
+		fprintf(fp, "PAGE0: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "TR%d:%08x", i, (unsigned int)u32ro_R[i + 64 *3]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		//---------------------------------------------------------------------
+		// line 1
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "XR%d:%08x", i, (unsigned int)u32ro_R[i + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 2
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{			
+			fprintf(fp, "YR%d:%08x", i, (unsigned int)u32ro_R[i + 64*1 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 3
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "ZR%d:%08x", i, (unsigned int)u32ro_R[i + 64*2 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+		// line 4
+		fprintf(fp, "PAGE1: ");
+		for (int i = 0; i < 64; i++)
+		{
+			fprintf(fp, "TR%d:%08x", i, (unsigned int)u32ro_R[i + 64*3 + 256]);
+			if ( i != 63 )
+			{
+				fprintf(fp, " ");
+			}
+		}
+		fprintf(fp, "\n");
+
+	  fprintf(fp, "\n");
+
+    fclose(fp);
+    
+	  return true;
+}
+#endif		// #ifdef INTERRUPT_TESTING
+//----------------------------------------------------------
+#ifdef PIPE_FE_TESTING
+bool sc_iss::LogIAB()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/IAB.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open IAB.txt\n");
+    	return false;
+    }
+	
+	fprintf(fp, "PC:0x%08x\n", (unsigned int)m_arrEmittedLine[16]);
+	for(int i=0; i<16; i++)
+	{
+		fprintf(fp, "0x%08x", (unsigned int)m_arrEmittedLine[i]);	
+		if(i<15)
+		{
+			fprintf(fp, " || ");
+		}
+	}
+	fprintf(fp,"\n");
+
+	fclose(fp);
+	return true;
+}
+#endif		// #ifdef PIPE_FE_TESTING
+
+
+/**************************************** May not use ****************************************/
+//----------------------------------------------------------------------------------
+bool sc_iss::LogALUACC()
+{
+	int i;
+	DSPU32  u32Temp;
+	DSP_BIT40 b40Temp;
+	FILE *p_fp = NULL;
+
+	sprintf(g_arrFileName, "%s/ALUACC.txt", g_arrIOPath);
+	if ((p_fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+			PrintToCerr("Error occured when open ALUACC.txt\n");
+			return false;
+	}
+
+	fprintf(p_fp, "Cycles: %08x%08x        EPC: %08x\n", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL, (unsigned int)u32r_EPC);
+	//line1
+	for (i = 0; i < ALU_NUM_OF_UNIT; i++)
+	{
+		u32Temp = ReadACCExp(0, i);
+		fprintf(p_fp, "xACC%d: %02x", i, (unsigned int)u32Temp);
+		b40Temp = ReadACC(0, i);
+		fprintf(p_fp, "%02x",  (unsigned int)b40Temp.u8High);
+		fprintf(p_fp, "%08x",  (unsigned int)b40Temp.u32Low);
+		if (i != (ALU_NUM_OF_UNIT - 1))
+		{
+			fprintf(p_fp, " ");
+		}
+	}
+	fprintf(p_fp, "\n");
+
+	fclose(p_fp);
+	return true;
+
+}
+
+//----------------------------------------------------------
+bool sc_iss::LogSLKElem(DSPU32 p_u32SLKIdx)
+{
+	FILE *fp = NULL;
+	int i;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("LogSLKElem: parameter is invalid\n");
+		return false;
+	}	
+
+	sprintf(g_arrFileName, "%s/SLKLog.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open SLKLog.txt\n");
+    	return false;
+    }
+    fprintf(fp, "/*-----------------------Content of m_arrResSLK[%d]-----------------------*/\n", (int)p_u32SLKIdx);
+	fprintf(fp, "u8UnitsUseCalc: 0x%x\n", m_arrResSLK[p_u32SLKIdx].slot_res_used.u8UnitsUseCalc);
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "u8ALUs[%d]: 0x%x      ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8ALUs[i]);
+	}
+	fprintf(fp, "\n");
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "u8MULs[%d]: 0x%x      ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i]);
+	}
+	fprintf(fp, "\n");
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "u8SHFs[%d]: 0x%x      ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SHFs[i]);
+	}
+	fprintf(fp, "\n");
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "u8SPUs[%d]: 0x%x      ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SPUs[i]);
+	}
+	fprintf(fp, "\n\n");
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "arrSrcGenRegs[%d]: 0x%x    ", i, (unsigned int)m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+	}
+	fprintf(fp, "\n");
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "arrDestGenRegs[%d]: 0x%x    ", i, (unsigned int)m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+	}
+	fprintf(fp, "\n");
+
+/*
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "arrSrcAddrRegs[%d]: 0x%x    ", i, (unsigned int)m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcAddrRegs[i]);
+	}
+	fprintf(fp, "\n");
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		fprintf(fp, "arrDestAddrRegs[%d]: 0x%x    ", i, (unsigned int)m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestAddrRegs[i]);
+	}
+	fprintf(fp, "\n\n");
+
+	fprintf(fp, "bolGenRegHzd: %d\n", m_arrResSLK[p_u32SLKIdx].slot_res_used.bolGenRegHzd);
+*/
+	//fprintf(fp, "bolAddrRegHzd: %d\n", m_arrResSLK[p_u32SLKIdx].slot_res_used.bolAddrRegHzd);
+
+
+
+/*
+	for (i = 0; i < HZD_ADDR_BUFF_LEN; i++)
+	{
+		if (!m_arrResSLK[p_u32SLKIdx].slot_res_used.arrAddrRegHazd[i].bolInUse)
+		{
+			break;
+		}
+
+		fprintf(fp, "arrAddrRegHazd[%d].bolInUse: %d    ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrAddrRegHazd[i].bolInUse);
+		fprintf(fp, "arrAddrRegHazd[%d].u8Slot: %d    ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrAddrRegHazd[i].u8Slot);
+		fprintf(fp, "arrAddrRegHazd[%d].u8Unit: %d    ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrAddrRegHazd[i].u8Unit);
+		fprintf(fp, "arrAddrRegHazd[%d].u8RegIdx: %d    ", i, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrAddrRegHazd[i].u8RegIdx);
+		fprintf(fp, "\n");
+	}
+	fprintf(fp, "\n");
+*/
+
+	fprintf(fp, "\n\n");
+    fclose(fp);
+  
+	return true;
+}
+/**************************************** End of May not use ****************************************/
+#endif		// #ifndef BWSIM_PUB_MODE
+/**************************************** End of #ifndef BWSIM_PUB_MODE ****************************************/
+
+
+/***************************************************************************************************************/
+//-----------------------------------------------------------------------------------
+void sc_iss::SetDefaultPath()
+{
+#ifdef DSP_WIN32
+	strcpy(g_arrIOPath, "C:\\DSP104Log");
+#elif defined(DSP_LINUX)
+	strcpy(g_arrIOPath, "/tmp/DSP104Log");
+#endif
+}
+//-----------------------------------------------------------------------------------
+// caution: On the Windows platform, the messages printed by printf or cout, do not appear
+// in the output panels of the debugger
+//-----------------------------------------------------------------------------------
+void sc_iss::PrintToCout(const char *p_pMsg)
+{
+#ifdef  DSP_DBG_COUT
+	char arrCycleMsg[100];
+
+	sprintf(arrCycleMsg, "Cycle 0x%08x%08x:    ", (unsigned int)u32r_CyclesH, (unsigned int)u32r_CyclesL);
+	//cout << arrCycleMsg;
+	//cout << p_pMsg;
+#endif
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::PrintToCerr(char *p_pMsg, ...)
+{	
+#ifdef  DSP_DBG_CERR
+	char arrCycleMsg[100];
+	va_list ap;
+	va_start(ap, p_pMsg);
+	vsprintf(arrCycleMsg, p_pMsg, ap);
+	
+	iss_err << "Cycles: 0x" << (DSPU32)u32r_CyclesH << (DSPU32)u32r_CyclesL << ": ";
+	iss_err << arrCycleMsg;
+	iss_err << std::endl;
+#endif
+}
+//----------------------------------------------------------
+bool sc_iss::ClrTestResult()
+{
+	FILE *fp = NULL;
+#ifndef LOG_PXP	
+	sprintf(g_arrFileName, "%s/TestResult.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open TestResult.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/WrIRQs.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open WrIRQs.txt\n");
+		return false;
+	}
+	fclose(fp);
+	
+	sprintf(g_arrFileName, "%s/datamem.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open datamem.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/dspmem.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open dspmem.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/pio_mem.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open pio_mem.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/dul_pio_mem.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open dul_pio_mem.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/StateOnCall_ForLib.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open StateOnCall_ForLib.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/StateOnRet_ForLib.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open StateOnRet_ForLib.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/StateOnCall.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open StateOnCall.txt\n");
+		return false;
+	}
+	fclose(fp);
+
+	sprintf(g_arrFileName, "%s/StateOnRet.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open StateOnRet.txt\n");
+		return false;
+	}
+	fclose(fp);	
+
+	sprintf(g_arrFileName, "%s/strap_log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("ClrTestResult: Error occured when open strap_log.txt\n");
+		return false;
+	}
+	fclose(fp);
+#endif
+	return true;
+}
+/***************************************** SimService ***********************************************/
+//-----------------------------------------------------------------------------------
+bool sc_iss::InitNewIntSignals()
+{
+	int i;
+	bool bolUseSignal;
+
+	for (i = 0; i < 2048; i++)  // new irqs: 2048
+	{
+		g_arrNewIRQs[i] = 0;
+	}
+
+	sprintf(g_arrFileName, "%s/IRQs.txt", g_arrIOPath);
+	bolUseSignal = RdNewIRQsFile(g_arrFileName, g_arrNewIRQs);
+	if (bolUseSignal)
+	{
+		printf("BWSim: begin to use new INT signals!\n");
+	}
+	else
+	{
+		printf("BWSim: failed to init new INT signals!\n");
+	}
+
+	return bolUseSignal;
+}
+//----------------------------------------------------------
+bool sc_iss::LogTraceCases()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/TraceCases.txt", g_arrIOPath);
+
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open TraceCases.txt\n");
+		return false;
+	}
+	fprintf(fp, "Case1: %d\n", m_u32TraceCase1);
+	fprintf(fp, "Case3: %d\n", m_u32TraceCase3);
+	for(int i = 0 ; i < 4; i++) {
+		fprintf(fp, "PC-%dByte: %d\n", i+1, m_arrDeltaPC[i]);
+		fprintf(fp, "Time-%dByte: %d\n", i+1, m_arrDeltaTime[i]);		
+	}
+	fclose(fp);
+	return true;
+
+}
+
+//----------------------------------------------------------
+bool sc_iss::LogTestResult(DSPU32 p_u32Addr, DSPU32 p_u32Num, DSPU32 p_u32Columns)
+{
+	FILE *fp = NULL;
+	DSPU32 i, j;//, u32Content;
+
+	sprintf(g_arrFileName, "%s/TestResult.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("LogTestResult: Error occured when open TestResult.txt\n");
+    	return false;
+    }
+ 
+	for (i = p_u32Addr, j = 0; i < (p_u32Addr + p_u32Num); i++ )
+	{
+		//ReadMem(i, &u32Content);
+		//fprintf(fp, "%08x", (unsigned int)u32Content);
+		// fprintf(fp, "%08X", u32Content);
+		if (j < (p_u32Columns - 1))
+		{
+			fprintf(fp, "      ");
+			j++;
+		}
+		else
+		{
+			fprintf(fp, "\n");
+			j = 0;
+		}
+	}
+
+    fclose(fp);
+	return true;
+}
+//----------------------------------------------------------
+bool  sc_iss::LogDataMem()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/datamem.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open datamem.txt\n");
+    	return false;
+    }
+
+	for (int i = 0; i < 6; i++)
+	{
+		fprintf(fp, "----------------------------------BLOCK%d----------------------------------\n", i);
+		for (int j = 0; j < INNER_DATA_BLK_SIZE; j++)
+		{
+			fprintf(fp, "%08x", u32_data_mem[i][j]);
+			if ((j + 1) % 8 == 0)
+			{
+				fprintf(fp, "\n");
+			}
+			else
+			{
+				fprintf(fp, " ");
+			}
+		} //for (int i = 0; i < INNER_DATA_BLK_SIZE; i++)
+	} //for (int i = 0; i < 6; i++)	
+		
+    fclose(fp);
+	return true;
+}
+//----------------------------------------------------------
+bool  sc_iss::LogPIOMem()
+{
+	FILE *fpSrc = NULL;
+	FILE *fpDest = NULL;
+	int i, intCESpaceSel;
+	DSPU32  u32Temp;
+	bool bolRtn = true;
+
+	sprintf(g_arrFileName, "%s/pio_mem.txt", g_arrIOPath);
+	if ((fpDest = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("LogPIOMem: Error occured when open pio_mem.txt\n");
+    	return false;
+    }
+
+	for (intCESpaceSel = 0; intCESpaceSel < 5; intCESpaceSel++)
+	{
+		sprintf(g_arrFileName, "%s/ce%d_ram.dat", g_arrIOPath, intCESpaceSel);
+		if ((fpSrc = fopen(g_arrFileName, "rb")) == NULL)
+	    {
+			PrintToCerr("LogPIOMem: Error occured when open CE RAM file\n");
+  		  	bolRtn = false;
+			break;
+	    }
+
+		fprintf(fpDest, "----------------------------------CE%dA----------------------------------\n", intCESpaceSel);
+		for (i = 0; i < (64 * 1024); i++)
+		{
+			fread(&u32Temp, 4, 1, fpSrc);
+			fprintf(fpDest, "%08x \n", (unsigned int)u32Temp);
+			fread(&u32Temp, 4, 1, fpSrc);
+		}
+		
+		fprintf(fpDest, "----------------------------------CE%dB----------------------------------\n", intCESpaceSel);
+		fseek(fpSrc, 0, SEEK_SET);
+		for (i = 0; i < (64 * 1024); i++)
+		{
+			fread(&u32Temp, 4, 1, fpSrc);
+			fread(&u32Temp, 4, 1, fpSrc);
+			fprintf(fpDest, "%08x \n", (unsigned int)u32Temp);		
+		}
+
+		fclose(fpSrc);
+	}
+
+    fclose(fpDest);
+	return bolRtn;
+}
+//----------------------------------------------------------
+bool  sc_iss::LogDulPIOMem()
+{
+	FILE *fpSrc = NULL;
+	FILE *fpDest = NULL;
+	int i, intCESpaceSel;
+	DSPU32  u32Temp;
+	bool bolRtn = true;
+
+	sprintf(g_arrFileName, "%s/dul_pio_mem.txt", g_arrIOPath);
+	if ((fpDest = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("LogPIOMem: Error occured when open dul_pio_mem.txt\n");
+    	return false;
+    }
+
+	for (intCESpaceSel = 0; intCESpaceSel < 5; intCESpaceSel++)
+	{
+		sprintf(g_arrFileName, "%s/ce%d_ram.dat", g_arrIOPath, intCESpaceSel);
+		if ((fpSrc = fopen(g_arrFileName, "rb")) == NULL)
+	    {
+			PrintToCerr("LogDulPIOMem: Error occured when open CE RAM file\n");
+			bolRtn = false;
+  		  	break;
+	    }
+
+		fprintf(fpDest, "----------------------------------CE%d----------------------------------\n", intCESpaceSel);
+		for (i = 0; i < (64 * 1024); i++)
+		{
+			fread(&u32Temp, 4, 1, fpSrc);
+			fprintf(fpDest, "%08x  ", (unsigned int)u32Temp);
+			fread(&u32Temp, 4, 1, fpSrc);
+			fprintf(fpDest, "%08x\n", (unsigned int)u32Temp);
+		}
+		
+		fclose(fpSrc);
+	}
+
+    fclose(fpDest);
+	return bolRtn;
+}
+
+
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogStateOnCall()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/StateOnCall.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open StateOnCall.txt\n");
+    	return false;
+    }
+
+	//LogDSPState(fp);
+
+	 fclose(fp);
+	 return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogStateOnRet()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/StateOnRet.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+    {
+		PrintToCerr("Error occured when open StateOnRet.txt\n");
+    	return false;
+    }
+
+	//LogDSPState(fp);
+
+	 fclose(fp);
+	 return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogStateOnCall_ForLib()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/StateOnCall_ForLib.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open StateOnCall_ForLib.txt\n");
+    	return false;
+    }
+
+	//LogDSPState_ForLib(fp);
+
+	 fclose(fp);
+	 return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogStateOnRet_ForLib()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/StateOnRet_ForLib.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+    {
+		PrintToCerr("Error occured when open StateOnRet_ForLib.txt\n");
+    	return false;
+    }
+
+	//LogDSPState_ForLib(fp);
+
+	 fclose(fp);
+	 return true;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogOnStrap(DSPU32 p_u32StartAddr, DSPU32 p_u32WordsNum)
+{
+	FILE *fp = NULL;
+	DSPU32 u32Value;
+	int i;
+
+	sprintf(g_arrFileName, "%s/strap_log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open strap_log.txt\n");
+    	return false;
+    }
+
+	for (i = 0; i < p_u32WordsNum; i++)
+	{
+		if ( ReadCoreDataMem( (p_u32StartAddr + i), &u32Value) )
+		{
+			fprintf(fp, "%08x\n", u32Value);
+		}
+		else
+		{
+			PrintToCerr("Invalid memory address when write strap_log.txt\n");
+			break;
+		}
+		
+	}
+
+	fprintf(fp, "////\n");
+
+	fclose(fp);	
+
+	return true;
+}
+
+//---------------------------------------------------------------------------------------------------
+bool  sc_iss::LogStateForISR(FILE *p_fp)
+{
+	int i,j;
+	DSPU32  u32Temp;
+	DSP_BIT48 u48Temp;
+	char cName;
+
+	fprintf(p_fp, "LC0:%08x  LC1:%08x  LC2:%08x  LC3:%08x\n", u32ro_LC[0], u32ro_LC[1], u32ro_LC[2], u32ro_LC[3]);
+
+	for(i = 0; i < NUM_OF_UNITS; i++)
+	{
+		cName = GetMacroName(i);
+		//line1 
+		for (j = 0; j < 64; j++)
+		{
+			// caution: (unsigned int)must be used, or APP will crash. 
+			// because u32r_R is an object, not a value.
+			fprintf(p_fp, "%cAR%d:%08x", cName, j, (unsigned int)u32ro_R[j]);
+			if ( j != 63 )
+			{
+				fprintf(p_fp, " ");
+			}
+		}
+		for (j = 0; j < 64; j++)
+		{
+			fprintf(p_fp, " %cBR%d:%08x", cName, j, (unsigned int)u32ro_R[j+64*i+256]);
+		}
+		fprintf(p_fp, "\n");
+		//line2 ACC
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)	
+		{		
+			ReadACC_48(i, j, u48Temp);
+			fprintf(p_fp, "%cACC%d:%02x%02x%08x", cName, j, u48Temp.u8High, u48Temp.u8Mid, u48Temp.u32Low);	
+			if (j != (ALU_NUM_OF_UNIT - 1))
+			{
+				fprintf(p_fp, " ");
+			}
+		}
+		fprintf(p_fp, "\n");
+		// line 3 MACC
+		for(j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u128ro_MUL_MACC[i][j].u32LL;
+			fprintf(p_fp, "%cMACC%d_LL:%08x ",cName, j, (unsigned int)u32Temp);
+			u32Temp = u128ro_MUL_MACC[i][j].u32HL;
+			fprintf(p_fp, "%cMACC%d_HL:%08x ",cName, j, (unsigned int)u32Temp);
+			u32Temp = u128ro_MUL_MACC[i][j].u32LH;
+			fprintf(p_fp, "%cMACC%d_LH:%08x ",cName, j, (unsigned int)u32Temp);
+			u32Temp = u128ro_MUL_MACC[i][j].u32HH;
+			fprintf(p_fp, "%cMACC%d_HH:%08x",cName, j, (unsigned int)u32Temp);
+			if (j != (MUL_NUM_OF_UNIT - 1))
+			{
+				fprintf(p_fp, " ");
+			}
+		}
+		fprintf(p_fp, "\n");
+		// line 4
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u32r_ALU_ACF[i][j];
+			fprintf(p_fp, "%cACF%d: %08x ", cName, j, (unsigned int)u32Temp);
+			fprintf(p_fp, " ");
+		}
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u32ro_ALU_CON[i][j];
+			fprintf(p_fp, "%cCON%d: %08x ", cName, j, (unsigned int)u32Temp);
+			fprintf(p_fp, " ");
+		}
+		//u32Temp = u32r_ALU_BKFlag[i];
+		u32Temp = (u32r_ALU_BKFlag[i]>u32r_SHF_BKFlag[i])? u32r_ALU_BKFlag[i]: u32r_SHF_BKFlag[i];
+		fprintf(p_fp, "%cABFPR: %08x ", cName, (unsigned int)u32Temp);
+		u32Temp = u32ro_ALUCR[i];
+		fprintf(p_fp, "%cALUCR: %08x ", cName, (unsigned int)u32Temp);
+		u32Temp = u32ro_MULCR[i];
+		fprintf(p_fp, "%cMULCR: %08x ", cName, (unsigned int)u32Temp);
+		u32Temp = u32ro_SHFCR[i];
+		fprintf(p_fp, "%cSHFCR: %08x ", cName, (unsigned int)u32Temp);
+		u32Temp = u32ro_SPUCR[i];
+		fprintf(p_fp, "%cSPUCR: %08x", cName, (unsigned int)u32Temp);
+		fprintf(p_fp, "\n");
+		//line5
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u32ro_ALUFR[i][j];
+			fprintf(p_fp, "%cALUFR%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		for (j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u32ro_MULFR[i][j];
+			fprintf(p_fp, "%cMULFR%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		for (j = 0; j < SHF_NUM_OF_UNIT; j++)
+		{
+			u32Temp = u32ro_SHFFR[i][j];
+			fprintf(p_fp, "%cSHFFR%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		u32Temp = u32ro_SPUFR[i];
+		fprintf(p_fp, "%cSPUFR%d: %08x ", cName, (unsigned int)u32Temp);
+		u32Temp = u32ro_CPredReg[i];
+		fprintf(p_fp, "%cCPred%d: %08x\n", cName, (unsigned int)u32Temp);
+		//line6
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)  //ALUCAFR
+		{
+			u32Temp = u32ro_ALU_CA[i][j];
+			fprintf(p_fp, "%cALUCAFR%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)  //ALUDFER
+		{
+			u32Temp = u32ro_ALU_DFER[i][j];
+			fprintf(p_fp, "%cALUDFER%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)  //ALUDFMR
+		{
+			DSP_BIT64 u64Temp = ReadALUDFMR(i, j);
+			fprintf(p_fp, "%cALUDFMR%d: %08x%08x ", cName, j, (unsigned int)u64Temp.u32High, (unsigned int)u64Temp.u32Low);
+		}
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)   //ALUDFIRR
+		{
+			DSP_BIT64 u64Temp = ReadALUDFIRR(i, j);
+			fprintf(p_fp, "%cALUDFIRR%d: %08x%08x ", cName, j, (unsigned int)u64Temp.u32High, (unsigned int)u64Temp.u32Low);
+		}
+		fprintf(p_fp, "\n");
+
+		//line7
+		for (j = 0; j < SHF_NUM_OF_UNIT; j++)  //SLTAR
+		{
+			u32Temp = u32r_SHF_SLTAR[i][j];
+			fprintf(p_fp, "%cSLTAR%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		for (j = 0; j < SHF_NUM_OF_UNIT; j++)  //SCF
+		{
+			u32Temp = u32_SHF_SCF[i][j];
+			fprintf(p_fp, "%cSCF%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		for (j = 0; j < SHF_NUM_OF_UNIT; j++)  //SHFER
+		{
+			u32Temp = u32r_SHFER[i][j];
+			fprintf(p_fp, "%cSHFER%d: %08x ", cName, j, (unsigned int)u32Temp);
+		}
+		
+		u32Temp = u32r_SHFCUTR[i]; //SHFCUTR
+		fprintf(p_fp, "%cSHFCUTR: %08x ", cName, (unsigned int)u32Temp);
+		
+		u32Temp = u32ro_GPLYR[i];   //GPLYR32
+		fprintf(p_fp, "%cGPLYR%d: %08x\n", cName, (unsigned int)u32Temp);
+		//line8
+		for(int j=0; j<SHF_NUM_OF_UNIT; j++)
+		{
+			DSPU32 u32SACCLow,u32SACCHigh;
+			u32SACCLow = u64ro_SHF_SACC[i][j].u32Low;
+			u32SACCHigh = u64ro_SHF_SACC[i][j].u32High;
+			fprintf(p_fp, "%cSACC%d:%08x%08x ", cName, j, u32SACCHigh,u32SACCLow);	
+		}
+		u32Temp = u32r_MULCUTR[i]; //MULCUTR
+		fprintf(p_fp, "%cSHFCUTR: %08x ", cName, (unsigned int)u32Temp);		
+		fprintf(p_fp, "\n");
+	}
+
+	//-----------------------------------------------------------------------------
+	for (i = 0; i < 16; i++)
+	{
+		u32Temp = u32ro_U[i];
+		fprintf(p_fp, "U%d: %08x", i, (unsigned int)u32Temp);
+		if (i != 15)
+		{
+			fprintf(p_fp, " ");
+		}
+	}
+	fprintf(p_fp, "\n");
+
+	for (i = 0; i < 16; i++)
+	{
+		u32Temp = u32ro_V[i];
+		fprintf(p_fp, "V%d: %08x", i, (unsigned int)u32Temp);
+		if (i != 15)
+		{
+			fprintf(p_fp, " ");
+		}
+	}
+	fprintf(p_fp, "\n");
+
+	for (i = 0; i < 16; i++)
+	{
+		u32Temp = u32ro_W[i];
+		fprintf(p_fp, "W%d: %08x", i, (unsigned int)u32Temp);
+		if (i != 15)
+		{
+			fprintf(p_fp, " ");
+		}
+	}
+
+	fprintf(p_fp, "\n");
+
+	fprintf(p_fp, "SR: %08x BA: %08x SER: %08x ", u32ro_SRP, u32ro_BAR, u32ro_CJMP);
+	u32Temp = u32r_IMACR;
+	fprintf(p_fp, "IMACR: %08x ", u32Temp);
+	u32Temp = u32r_IMAFR;
+	fprintf(p_fp, "IMAFR: %08x", u32Temp);
+
+	//-----------------------------------------------------------------------------
+
+	fprintf(p_fp, "\n\n");
+
+	return true;
+}
+
+//---------------------------------------------------------------------------------
+bool  sc_iss::LogStateForISR_Enter()
+{
+	FILE *fp = NULL;
+	int i;
+	DSPU32  u32Temp;
+
+	sprintf(g_arrFileName, "%s/StateOnEnterISR.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open StateOnEnterISR.txt\n");
+		return false;
+	}
+
+	LogStateForISR(fp);
+
+	fclose(fp);
+}
+
+bool sc_iss::ModelLogFrameInfo(char *p_pFrameInfo)
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/FrameInfo.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		printf("Error occured when open FrameInfo.txt\n");
+		return false;
+	}
+
+	fprintf(fp, p_pFrameInfo);
+
+	fclose(fp);
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+bool  sc_iss::LogStateForISR_Leave()
+{
+	FILE *fp = NULL;
+	int i;
+	DSPU32  u32Temp;
+
+	sprintf(g_arrFileName, "%s/StateOnLeaveISR.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		PrintToCerr("Error occured when open StateOnLeaveISR.txt\n");
+		return false;
+	}
+
+	LogStateForISR(fp);
+
+	fclose(fp);
+}
+
+#ifdef LIBTEST
+bool sc_iss::GetFuncInfoFromFile()
+{
+	bool bflag = true;
+	FILE *fp = NULL;
+	int linenum = 1;
+	
+	//if ((fp = fopen("./sim_consistent_test_config.txt", "r")) == NULL)
+	if ((fp = fopen("./simulator_test.cfg", "r")) == NULL)
+	{
+		printf("Error occured when open sim_consistent_test_config.txt\n");
+		return 0;
+	}
+
+	char tempbuf[80];
+	char *endptr;
+	char *p;
+	AreaAddr tempaddr;
+
+	for(linenum=1;linenum<5;linenum++)
+	{
+		memset(tempbuf,0,80);
+		if(fgets(tempbuf,80,fp)==NULL)
+		{
+			printf("Error occured when get data info from sim_consistent_test_config.txt\n");
+			bflag = false;
+			return 0;
+		}
+
+		switch (linenum)
+		{
+		case 1:
+			m_TestLibInput.StackSize = strtol(tempbuf,&endptr,16);
+			break;
+		case 2:
+			m_TestLibInput.IntTime = strtol(tempbuf,&endptr,16);
+			break;
+		case 3:
+			m_TestLibInput.MallocAddr = strtol(tempbuf,&endptr,16);
+			break;
+		default:
+			p = strtok(tempbuf, " ");
+			m_TestLibInput.INTLockAddr = strtol(p,&endptr,16);
+			p = strtok(NULL, " ");
+			m_TestLibInput.INTUnLockAddr = strtol(p,&endptr,16);
+		}
+	}
+	//获取 .data信息
+	while(bflag)
+	{
+		memset(tempbuf,0,80);
+		if(fgets(tempbuf,80,fp)==NULL)
+		{
+			printf("Error occured when get data info from sim_consistent_test_config.txt\n");
+			bflag = false;
+			return 0;
+		}
+
+		p = strtok(tempbuf, " ");
+		tempaddr.StartAddr = strtol(p,&endptr,16);
+		p = strtok(NULL, " ");
+		tempaddr.EndAddr = strtol(p,&endptr,16);
+		if((tempaddr.StartAddr == 0) && (tempaddr.EndAddr == 0))
+		{
+			break;
+		}
+		else
+		{
+			m_TestLibInput.DataPagList.push_back(tempaddr);
+		}		
+	}
+
+	//获取内存空间信息
+	while(bflag)
+	{
+		memset(tempbuf,0,80);
+		if(fgets(tempbuf,80,fp)==NULL)
+		{
+			break;
+		}
+
+		p = strtok(tempbuf, " ");
+		tempaddr.StartAddr = strtol(p,&endptr,16);
+		p = strtok(NULL, " ");
+		tempaddr.EndAddr = strtol(p,&endptr,16);
+
+		m_TestLibInput.InParaMemList.push_back(tempaddr);
+		
+	}
+	
+	/*while (1)
+	{
+		char tempbuf[80];
+		char *endptr;
+		char *p;
+		AreaAddr tempaddr;
+		memset(tempbuf,0,80);
+		if(fgets(tempbuf,80,fp)==NULL)
+			break;
+
+		switch (linenum)
+		{
+		case 1:
+			p = strtok(tempbuf, "\n");
+			m_TestLibInput.Vendor = p;
+			//p = strtok(NULL, " ");
+			//m_TestLibInput.module = p;
+			//p = strtok(NULL, " ");
+			//m_TestLibInput.identify = p;
+			break;
+		case 2:
+			m_TestLibInput.StackSize = strtol(tempbuf,&endptr,10);
+			break;
+		case 3:
+			m_TestLibInput.IntTime = strtol(tempbuf,&endptr,10);
+			break;
+		case 4:
+			m_TestLibInput.MallocAddr = strtol(tempbuf,&endptr,10);
+			break;
+		case 5:
+			p = strtok(tempbuf, " ");
+			m_TestLibInput.INTLockAddr = strtol(p,&endptr,10);
+			p = strtok(NULL, " ");
+			m_TestLibInput.INTUnLockAddr = strtol(p,&endptr,10);
+			break;
+		default:
+			p = strtok(tempbuf, " ");
+			tempaddr.StartAddr = strtol(p,&endptr,10);
+			p = strtok(NULL, " ");
+			tempaddr.EndAddr = strtol(p,&endptr,10);
+			m_TestLibInput.InParaMemList.push_back(tempaddr);
+		}
+		linenum++;
+	}*/
+
+	fclose(fp);
+	return true;
+}
+
+void sc_iss::GetAccessStackStatus()
+{
+	DSPU32 u32Addr = u32ro_U[8];
+	//栈是向下增长的
+	if (u32Addr < m_TestLibOutput.StackEndAddr)
+	{
+		m_TestLibOutput.StackEndAddr = u32Addr;
+		m_TestLibOutput.StackSize = m_TestLibOutput.StackStartAddr - m_TestLibOutput.StackEndAddr;
+	}
+}
+
+void sc_iss::PrintTestStatus()
+{
+	FILE *fp = NULL;
+	
+	if ((fp = fopen("./simulator_result.txt", "a+")) == NULL)
+	{
+		printf("Error occured when open simulator_result.txt\n");
+		return;
+	}
+	int i=0;
+
+	//fprintf(fp,"%s %s %s\n",m_TestLibInput.Vendor, m_TestLibInput.module, m_TestLibInput.identify);
+	//fprintf(fp,"%s use time: %d\n", m_TestLibInput.Vendor.c_str(), m_TestLibOutput.FuncUseTime);
+	//fprintf(fp,"Use time: %d\n", m_TestLibOutput.FuncUseTime);
+	
+	if(m_TestLibOutput.StackSize > m_TestLibInput.StackSize)
+	{
+		fprintf(fp,"ERROR: violate rule 21, actual StackSize %d, reference StackSize %d\n",m_TestLibOutput.StackSize,m_TestLibInput.StackSize);
+	}	
+
+	if (m_TestLibOutput.IntTime > m_TestLibInput.IntTime)
+	{
+		fprintf(fp,"ERROR: violate rule 27, actual IntTime: %d, reference IntTime %d\n",m_TestLibOutput.IntTime,m_TestLibInput.IntTime);
+	}
+
+	if(m_TestLibOutput.ReadExtAddr.size() != 0)
+	{
+		//fprintf(fp, "ERROR: violate rule 26, Read peripherals addr: 0x%08x\n", m_TestLibOutput.ReadExtAddr);
+		fprintf(fp, "ERROR: violate rule 26, Read peripherals addr(12bit): ");
+		list<RWAddrError>::iterator iter = m_TestLibOutput.ReadExtAddr.begin();
+		list<RWAddrError>::iterator iter_end = m_TestLibOutput.ReadExtAddr.end();
+		for (; iter!=iter_end; ++iter)
+		{
+			//fprintf(fp,"0x%03x\t",*iter);
+			fprintf(fp,"PC: 0x%08x, 0x%03x\t",(*iter).PC,(*iter).Addr);
+		}
+		fprintf(fp,"\n");
+	}
+
+	if(m_TestLibOutput.WriteExtAddr.size() != 0)
+	{
+		//fprintf(fp, "ERROR: violate rule 26, Write peripherals addr: 0x%08x\n", m_TestLibOutput.WriteExtAddr);
+		fprintf(fp, "ERROR: violate rule 26, Write peripherals addr(12bit): ");
+		list<RWAddrError>::iterator iter = m_TestLibOutput.WriteExtAddr.begin();
+		list<RWAddrError>::iterator iter_end = m_TestLibOutput.WriteExtAddr.end();
+		for (; iter!=iter_end; ++iter)
+		{
+			fprintf(fp,"PC: 0x%08x, 0x%03x\t",(*iter).PC,(*iter).Addr);
+		}
+		fprintf(fp,"\n");
+	}
+
+	if (m_TestLibOutput.ReadIllegalAddr.size() != 0)
+	{
+		//fprintf(fp, "ERROR: violate rule 19, Read illegal Addr: 0x%08x\n", m_TestLibOutput.ReadIllegalAddr);
+	
+		list<WrtStackError>::iterator iter = m_TestLibOutput.ReadIllegalAddr.begin();
+		list<WrtStackError>::iterator iter_end = m_TestLibOutput.ReadIllegalAddr.end();
+		for (; iter!=iter_end; ++iter)
+		{
+			fprintf(fp, "ERROR: violate rule 19, Read illegal addr, PC: 0x%08x, u8: 0x%08x, ReadAddr: 0x%08x\n",(*iter).PC,(*iter).AddrU8,(*iter).WriteAddr);
+		}
+		
+	}
+
+	if (m_TestLibOutput.WriteIllegalAddr.size() != 0)
+	{
+		//fprintf(fp, "ERROR: violate rule 19, Write illegal Addr: 0x%08x\n", m_TestLibOutput.WriteIllegalAddr);
+		list<WrtStackError>::iterator iter = m_TestLibOutput.WriteIllegalAddr.begin();
+		list<WrtStackError>::iterator iter_end = m_TestLibOutput.WriteIllegalAddr.end();
+		for (; iter!=iter_end; ++iter)
+		{
+			fprintf(fp, "ERROR: violate rule 19, Write illegal addr, PC: 0x%08x, u8: 0x%08x, WriteAddr: 0x%08x\n",(*iter).PC,(*iter).AddrU8,(*iter).WriteAddr);
+		}
+	}
+
+	if (m_TestLibOutput.WriteIllegalDataPagAddr.size() != 0)
+	{
+		//fprintf(fp, "ERROR: violate rule 19, Write illegal Addr: 0x%08x\n", m_TestLibOutput.WriteIllegalDataPagAddr);
+		fprintf(fp, "ERROR: violate rule 19, Write illegal datapag addr: ");
+		list<RWAddrError>::iterator iter = m_TestLibOutput.WriteIllegalDataPagAddr.begin();
+		list<RWAddrError>::iterator iter_end = m_TestLibOutput.WriteIllegalDataPagAddr.end();
+		for (; iter!=iter_end; ++iter)
+		{
+			fprintf(fp,"PC: 0x%08x, 0x%08x\t",(*iter).PC,(*iter).Addr);
+		}
+		fprintf(fp,"\n");
+	}
+
+	if(m_TestLibOutput.UseMalloc)
+	{
+		fprintf(fp,"ERROR: violate rule 19, Use Malloc\n");
+	}
+
+	fprintf(fp,"\n\n\n");
+
+	fclose(fp);
+
+}
+#endif
+
+#ifdef LOG_STEP_TESTING
+void  sc_iss::LogSHFTAB()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/SHTStab.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open SHTStab.txt\n");
+		return;
+	}
+
+	if ( m_bolLogRegsDetail )
+	{
+		fprintf(fp, "pc_ex: %08x\n", PIPE_EX.EX_WB.m_right.uint32r_pc);
+	}
+
+	DSPU32 u32unit = 0;
+	DSPU32 u32SHFIdx = 1;
+	DSPU32 u32STABIdx = 1;
+	DSPU32 u32STABAddr = 0x64;
+	DSPU32 u32Temp = rd_SHF_Tab(u32unit,u32SHFIdx,u32STABIdx,u32STABAddr);
+	
+	fprintf(fp, "Z SHF%d STAB%d ADDR%04x: %08x\n", u32SHFIdx, u32STABIdx,u32STABAddr,(unsigned int)u32Temp);
+
+	fclose(fp);
+	return;
+}
+#endif
+
+
+

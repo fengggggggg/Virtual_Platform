@@ -1,0 +1,69 @@
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+SHARED_PROG      0x00000000         0x00018000         xr
+LOCAL_SRAM       0x00e20000         0x00010000         xr
+DATA0            0x00200000         0x00040000         rw
+DATA1            0x00400000         0x00040000         rw
+DATA2            0x00600000         0x00040000         rw
+DATA3            0x00800000         0x00040000         rw
+DATA4            0x00a00000         0x00040000         rw
+DATA5            0x00c00000         0x0003fffe         rw
+DEBUG_INFO       0x00000000         0x01900000
+DEBUG_ARANGES    0x00000000         0x01900000
+DEBUG_PUBNAMES   0x00000000         0x01900000
+DEBUG_LINE       0x00000000         0x01900000
+DEBUG_ABBREV     0x00000000         0x01900000
+DEBUG_STR        0x00000000         0x01900000
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+LOAD ./dmactest.o
+
+.text           0x00000000      0x210
+ *(.text)
+ .text          0x00000000      0x210 ./dmactest.o
+                0x00000000                __main
+                0x00000000                _entry_point
+
+.data           0x00200000        0x0
+ *(.data)
+ .data          0x00200000        0x0 ./dmactest.o
+
+.bss            0x00200000        0x0
+                0x00200000                ____bss_start = .
+ *(.bss)
+ .bss           0x00200000        0x0 ./dmactest.o
+                0x00200000                ____bss_end = .
+
+.debug_info     0x00000000       0x6d
+ *(.debug_info)
+ .debug_info    0x00000000       0x6d ./dmactest.o
+
+.debug_aranges  0x00000000       0x20
+ *(.debug_aranges)
+ .debug_aranges
+                0x00000000       0x20 ./dmactest.o
+
+.debug_pubnames
+ *(.debug_pubnames)
+
+.debug_line     0x00000000       0xc7
+ *(.debug_line)
+ .debug_line    0x00000000       0xc7 ./dmactest.o
+
+.debug_abbrev   0x00000000       0x14
+ *(.debug_abbrev)
+ .debug_abbrev  0x00000000       0x14 ./dmactest.o
+
+.debug_str
+ *(.debug_str)
+OUTPUT(dmactest.out elf32-bwdsp100)
+
+Cross Reference Table
+
+Symbol                                            File
+__main                                            ./dmactest.o
+_entry_point                                      ./dmactest.o

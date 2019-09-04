@@ -1,0 +1,76 @@
+ #include "sc_iss.h"
+
+#ifdef DSP_WIN32
+    #pragma warning( disable : 4554 )
+#endif
+
+/*-------------------------------------- implimention -------------------------------------*/
+void sc_iss::InitMPSLK()
+{
+	memset(m_arrMemPipeSLK, 0, sizeof(m_arrMemPipeSLK));
+	for (int i = 0; i < MEM_PIPE_SLK_SIZE - 1; i++)
+	{
+		m_arrMemPipeSLK[i].bolInUse = false;
+		m_arrMemPipeSLK[i].u32Next = i + 1;
+	}
+
+	m_arrMemPipeSLK[MEM_PIPE_SLK_SIZE - 1].bolInUse = false;
+	m_arrMemPipeSLK[MEM_PIPE_SLK_SIZE - 1].u32Next = 0;
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::MallocMPSLK()
+{
+	DSPU32 u32SLKIdx;
+
+	// m_arrResSLK[0] is the head of SLK.
+	u32SLKIdx = m_arrMemPipeSLK[0].u32Next;
+	if (u32SLKIdx != 0)
+	{
+		m_arrMemPipeSLK[0].u32Next = m_arrMemPipeSLK[u32SLKIdx].u32Next;
+		m_arrMemPipeSLK[u32SLKIdx].bolInUse = true;
+		m_arrMemPipeSLK[u32SLKIdx].u32WrElemNum = 0;
+	}
+	else
+	{
+		printf("MallocMPSLK failed\n");
+	}
+
+	//printf("MallocMPSLK: SLK index %d freed\n", u32SLKIdx);
+	return u32SLKIdx;
+}
+//----------------------------------------------------------
+bool sc_iss::FreeMPSLK(DSPU32 p_u32SLKIdx)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx > (MEM_PIPE_SLK_SIZE - 1)) )
+	{
+		return false;
+	}
+
+	if (m_arrMemPipeSLK[p_u32SLKIdx].bolInUse)
+	{
+		memset(&m_arrMemPipeSLK[p_u32SLKIdx], 0, sizeof(MEM_PIPE_SLK_ELEM));
+		m_arrMemPipeSLK[p_u32SLKIdx].u32Next = m_arrMemPipeSLK[0].u32Next;
+		m_arrMemPipeSLK[0].u32Next = p_u32SLKIdx;
+	}
+
+	return true;
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::GetMPSLKNumInUse()
+{
+	DSPU32 u32ElemNum = 0;
+
+	for (int i = 1; i < MEM_PIPE_SLK_SIZE; i++)
+	{
+		if (m_arrMemPipeSLK[i].bolInUse)
+		{
+			u32ElemNum++;
+		}
+	}
+
+	return u32ElemNum;
+}
+
+
+
+

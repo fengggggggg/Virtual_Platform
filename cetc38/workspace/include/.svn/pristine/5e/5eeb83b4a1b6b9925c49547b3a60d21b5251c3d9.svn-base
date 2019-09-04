@@ -1,0 +1,1173 @@
+
+#include "sc_iss.h"
+
+//-----------------------------------------------------------------------------------
+// 根据12位地址读 [addr]型寄存器
+// 内核用该接口
+//
+bool sc_iss::RdSpecificReg(DSPU32 p_u32SpecRegAddr, DSPU32 p_units,DSPU32 *p_pValue)
+{
+	DSPU32 u32Group, u32Index, u32GAddr, u32MacroIdx, u32Temp;
+	bool bolFound = false;
+	DSPU64  u64Temp;
+
+	u32Group = (p_u32SpecRegAddr >> 10) & 3;       // [11..10]
+	u32Index = p_u32SpecRegAddr & 0x3FF;     // [9..0]
+	switch (u32Group)
+	{
+		case 0:  //0x0120_0000 ~ 0x0120_03ff
+			// 有掩码要求，或寄存器更新受控的部分
+			u32GAddr = GRP0_SPEC_REG_GADDR + u32Index;
+			if (p_u32SpecRegAddr==0x000)
+			{
+				*p_pValue = ReadALUCR(p_units);
+				bolFound = true;
+			}
+			else if (p_u32SpecRegAddr==0x004)
+			{
+				*p_pValue = RdALUFAR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x008)
+			{
+				*p_pValue = RdALUFOR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x130)
+			{
+				*p_pValue = u32ro_CPredReg[p_units];
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x2c0)
+			{
+				*p_pValue = ReadSPUCR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x200)
+			{
+				*p_pValue = ReadSHFCR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x204)
+			{
+				*p_pValue = RdSHFFAR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x208)
+			{
+				*p_pValue = RdSHFFOR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x274)
+			{
+				*p_pValue = u32r_SHFCUTR[p_units];
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x260)
+			{
+				*p_pValue = ReadGPLYR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x300)
+			{
+				*p_pValue = ReadMULCR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x304)
+			{
+				*p_pValue = RdMULFAR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x308)
+			{
+				*p_pValue = RdMULFOR(p_units);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x3b0)
+			{
+				*p_pValue = u32r_MULCUTR[p_units];
+				bolFound = true;	
+			}
+			
+
+			if (!bolFound)
+			{			
+					switch (p_u32SpecRegAddr)
+					{
+						case 0x3C0:	//CC0
+							*p_pValue = u32r_CyclesL;
+//#ifdef LOG_STEP_TESTING
+//							*p_pValue = 0;  
+ //#endif
+							bolFound = true;
+							break;
+						case 0x3C1:	//CC1
+							*p_pValue = u32r_CyclesH;
+// #ifdef LOG_STEP_TESTING
+ //							*p_pValue = 0;  
+// #endif
+							bolFound = true;
+							break;
+						case 0x3C2:	//BA 
+							*p_pValue = u32ro_BAR;
+							bolFound = true;
+							break;
+						case 0x3C3:	//SRP
+							*p_pValue = u32ro_SRP;
+							bolFound = true;
+							break;
+						case 0x3C4:	//LC0
+							*p_pValue = u32ro_LC[0];
+							bolFound = true;
+							break;
+						case 0x3C5:	//LC1
+							*p_pValue = u32ro_LC[1];
+							bolFound = true;
+							break;
+						case 0x3C6:	//LC2
+							*p_pValue = u32ro_LC[2];
+							bolFound = true;
+							break;
+						case 0x3C7:	//LC3
+							*p_pValue = u32ro_LC[3];
+							bolFound = true;
+							break;
+						case 0x3C8:	//SER 
+							*p_pValue = u32ro_CJMP;
+							bolFound = true;
+							break;
+						case 0x3C9:	//IMACR (宏间传输加法器控制寄存器, zx)
+							*p_pValue = u32r_IMACR;
+							bolFound = true;
+							break;
+						//case 0x00E003CA:  // IMAFR(宏间传输加法器标志寄存器）
+						//	*p_pValue = u32r_IMAFR;
+						//	bolFound = true;
+						//	break;
+						case 0x3CB:	//REGFS 
+							*p_pValue = u32r_REGFS;
+							bolFound = true;
+							break;
+						case 0x3CC:	//CINF (内核信息寄存器, grui, 20130718)
+							*p_pValue = u32r_CINF;
+							break;
+						case 0x3CD:  //0x12003D0:	//CGCR内核全局控制寄存器
+							*p_pValue = u32ro_CGCR;
+							bolFound = true;
+							break;
+							
+					} // switch (p_u32Addr)
+
+			}
+						
+			break;
+		case 1:  //0x0120_1000 ~ 0x0120_13ff
+
+			u32GAddr = GRP1_SPEC_REG_GADDR + u32Index;
+			if ((u32GAddr >= INT_GADDR) && (u32GAddr <= INT_GADDR + MAX_INT_LVL))
+			{
+				//因为u32ro_IVT[0]存放0x0120103f对应的中断
+				//u32ro_IVT[63]存放0x01201000对应的中断
+				//所以这里需要做MAX_INT_LVL减
+				u32Temp = MAX_INT_LVL - (u32GAddr - INT_GADDR);
+				*p_pValue = rd_u32r_IVT(u32Temp);
+				bolFound = true;
+			}
+			else if ((u32GAddr >= INTR_GADDR) && (u32GAddr <= INTR_GADDR + MAX_INT_LVL))
+			{
+				//因为u32ro_IRA[0]存放0x012010bf对应的中断返回地址
+				//u32ro_IRA[63]存放0x01201080对应的中断返回地址
+				//所以这里需要做MAX_INT_LVL减
+				u32Temp = MAX_INT_LVL - (u32GAddr - INTR_GADDR);
+				*p_pValue = rd_u32r_IRA(u32Temp);
+				bolFound = true;
+			}
+			else if(u32GAddr == 0xE0110A)
+			{
+				*p_pValue = u32ro_ITMRl;
+				bolFound = true;
+			}
+			else if(u32GAddr == 0xE0110B)
+			{
+				*p_pValue = u32ro_ITMRh;
+				bolFound = true;
+			}
+			else if( (u32GAddr >= INT_SRC_REG_START) && (u32GAddr <= INT_SRC_REG_END) )
+			{
+				*p_pValue = u32ro_INTSrc[INT_SRC_REG_END - u32GAddr];
+				bolFound = true;
+			}
+			
+			if (!bolFound)
+			{
+				//switch (u32GAddr)
+				switch (p_u32SpecRegAddr)
+					{
+					case 0x500: // ILATRL
+						*p_pValue = u64ro_ILAT;
+						bolFound = true;
+						break;
+					case 0x501: // ILATRH
+						*p_pValue = u64ro_ILAT >> 32;
+						bolFound = true;
+						break;			
+					case 0x502: // IMASKRL
+						*p_pValue = u64ro_IMASK;
+						bolFound = true;
+						break;
+					case 0x503: // IMASKRH
+						*p_pValue = u64ro_IMASK >> 32;
+						bolFound = true;
+						break;	
+					case 0x504: // PMASKRL
+						u64Temp = u64r_PMASK;
+						*p_pValue = u64Temp;
+						bolFound = true;
+						break;
+					case 0x505: // PMASKRH
+						u64Temp = u64r_PMASK;
+						*p_pValue = u64Temp >> 32;
+						bolFound = true;
+						break;	
+
+						//0x1201106 ~ 0x1201107: 中断设置寄存器ISR是虚拟寄存器，用于修改ILAT。只能写，不能读。
+						//0x1201108 ~ 0x1201109: 中断设置寄存器ICR是虚拟寄存器，用于修改ILAT。只能写，不能读。
+					case 0x50A: // IINT_TxEN
+						//暂未实现20130904
+						*p_pValue = u32ro_IINT_TxEN;
+						bolFound = true;
+						break;
+					case 0x50B: //IINTN_Tx
+						//暂未实现20130904
+						*p_pValue = u32ro_IINTN_Tx;
+						bolFound = true;
+						break;
+					case 0x514: //SITR
+						*p_pValue = u32r_SITR;
+						bolFound = true;
+						break;
+					}
+			}
+
+			//DMA: 0xE01200 ~ 0xE017FF
+			if (!bolFound)     
+			{				
+				if(rd_dmac_reg(p_u32SpecRegAddr, p_pValue))
+				{
+#ifdef LIBTEST
+					if(m_bolTestForLib)
+					{
+						RWAddrError tmpRdError;
+						tmpRdError.PC = u32r_EPC;
+						tmpRdError.Addr = p_u32SpecRegAddr;
+						m_TestLibOutput.ReadExtAddr.push_back(tmpRdError);
+					}
+#endif					
+					bolFound = true;
+				}					
+			}
+			break;
+		case 2:  //0x0120_b800 ~ 0x0120_bbff
+			switch (p_u32SpecRegAddr)
+			{
+				case 0x800: //ICGC
+				case 0x801: //ICACNT
+				case 0x802: //ICMCNT
+				case 0x803: //ICFLUSH_CON
+				case 0x804: //ICDMA_CON
+				case 0x805: //ICDMA_LEN
+				case 0x806: //ICDMA_DST_ADDR
+				case 0x807: //ICDMA_SRC_ADDR
+				case 0x808: //ICDMA_LEN
+					if(m_pICACHE->RdCacheReg_dbg(p_u32SpecRegAddr, p_pValue))
+					{
+#ifdef LIBTEST
+						if(m_bolTestForLib)
+						{
+							RWAddrError tmpRdError;
+							tmpRdError.PC = u32r_EPC;
+							tmpRdError.Addr = p_u32SpecRegAddr;
+							m_TestLibOutput.ReadExtAddr.push_back(tmpRdError);
+						}
+#endif
+						bolFound = true;
+					}
+					break;
+				case 0xa00:
+				case 0xa03:
+				case 0xa04:
+				case 0xa05:
+				case 0xa06:
+				case 0xa10:
+				case 0xa13:
+				case 0xa14:
+				case 0xa15:
+				case 0xa16:
+					if(m_pTIMER->RdTimerRegs((p_u32SpecRegAddr&0xff), *p_pValue))
+					{
+						bolFound = true;
+					}
+					break;
+			}
+			
+			break;
+		
+		case 3: 
+			//12位编址中第4类，占用特殊的资源实现
+			break;
+	}
+
+	if (!bolFound)
+	{
+		PrintToCerr("RdSpecificReg: invalid parameter!");
+		return false;
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+// 根据12位地址写 [addr]型寄存器
+// 该接口仅供 内核使用
+// todo: 需要补充考虑掩码位，如写ALUCR
+bool sc_iss::WrSpecificReg(DSPU32 p_u32SpecRegAddr,DSPU32 p_units,DSPU32 p_u32Value)
+{
+	DSPU32 u32Group, u32Index, u32GAddr, u32MacroIdx, u32Temp;
+	bool bolFound = false;
+	DSPU64 u64Temp;
+
+	u32Group = (p_u32SpecRegAddr >> 10) & 3;       // [11..10]
+	u32Index = p_u32SpecRegAddr & 0x3FF;     // [9..0]
+	switch (u32Group)
+	{
+		case 0:	//0x0120_0000 ~ 0x0120_03ff
+			// 有掩码要求，或寄存器更新受控的部分
+			u32GAddr = GRP0_SPEC_REG_GADDR + u32Index;
+			if (p_u32SpecRegAddr==0x000)
+			{
+				WriteALUCR(p_units, p_u32Value & 0xE, false); //[1]、[2]、[3]位有效
+				bolFound = true;
+			}
+			else if (p_u32SpecRegAddr==0x130)
+			{
+				u32ri_CPredReg[p_units] = p_u32Value & 0xFF; //cpred仅[7-0]有效
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x2c0)
+			{
+				WriteSPUCR(p_units, p_u32Value, false);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x200)
+			{
+				WriteSHFCR(p_units, p_u32Value & 0xA,false);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x274)
+			{
+				u32r_SHFCUTR[p_units] = p_u32Value & 0x7FF;
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x260)
+			{
+				WriteGPLYR(p_units, p_u32Value,false);
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x300)
+			{
+				WriteMULCR(p_units, p_u32Value,false); 
+				bolFound = true;	
+			}
+			else if (p_u32SpecRegAddr==0x3b0)
+			{ 
+				u32r_MULCUTR[p_units] = p_u32Value & 0x3f;
+				bolFound = true;	
+			}
+			
+
+			if (!bolFound)
+			{
+				switch (p_u32SpecRegAddr)
+					{
+						case 0x3C2:	//BA 
+							u32ri_BAR = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C3:	//SRP
+							u32ri_SRP = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C4:	//LC0
+							u32ri_LC[0] = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C5:	//LC1
+							u32ri_LC[1] = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C6:	//LC2
+							u32ri_LC[2] = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C7:	//LC3
+							u32ri_LC[3] = p_u32Value;
+							bolFound = true;
+							break;
+
+						case 0x3C8:	//SER 
+							u32ri_CJMP = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C9:	//IMACR (宏间传输加法器控制寄存器, zx)
+							u32r_IMACR = p_u32Value & 0x2; // 仅[1]有效
+							bolFound = true;
+							break;
+						//case 0x00E003CA:  // IMAFR(宏间传输加法器标志寄存器）
+						//	u32r_IMAFR = p_u32Value;
+						//	bolFound = true;
+						//	break;
+						case 0x3CB:	//REGFS 
+							u32r_REGFS = p_u32Value & 0xFF;  // 仅[7-0]有效
+							bolFound = true;
+							break;
+						//0x12003CC:	//CINF为只读寄存器
+							
+						case 0x3CD:   //0x12003D0:	//CGCR内核全局控制寄存器
+							WrCGCR(p_u32Value, false);
+							bolFound = true;
+							break;
+							
+					} // switch (p_u32Addr)
+			}			
+			break;
+		case 1:  //0x0120_1000 ~ 0x0120_13ff
+			u32GAddr = GRP1_SPEC_REG_GADDR + u32Index;
+			if ((u32GAddr >= (INT_GADDR+2)) && (u32GAddr <= INT_GADDR + MAX_INT_LVL))
+			{
+				//因为u32ro_IVT[0]存放0x0120103f对应的中断
+				//u32ro_IVT[63]存放0x01201000对应的中断
+				//所以这里需要做MAX_INT_LVL减
+				u32Temp = MAX_INT_LVL - (u32GAddr - INT_GADDR);
+				wr_u32r_IVT(u32Temp, p_u32Value, false);
+				bolFound = true;
+			}
+			else if ((u32GAddr >= (INTR_GADDR+2)) && (u32GAddr <= INTR_GADDR + MAX_INT_LVL))
+			{
+				//因为u32ro_IRA[0]存放0x012010bf对应的中断返回地址
+				//u32ro_IRA[63]存放0x01201080对应的中断返回地址
+				//所以这里需要做MAX_INT_LVL减
+				u32Temp = MAX_INT_LVL - (u32GAddr - INTR_GADDR);
+				wr_u32r_IRA(u32Temp, p_u32Value, false);
+				bolFound = true;
+			}
+			else if(u32GAddr == 0xE0110A)
+			{
+				u32ri_ITMRl = (p_u32Value & 0xFFFFFFFFU);
+				bolFound = true;
+			}
+			else if(u32GAddr == 0xE0110B)
+			{
+				u32ri_ITMRh = (p_u32Value & 0x3FFFFFFFU);
+				bolFound = true;
+			}
+			else if( (u32GAddr >= INT_SRC_REG_START) && (u32GAddr <= INT_SRC_REG_END) )
+			{
+				DSPU32 u32IntLvl = (INT_SRC_REG_END - u32GAddr);
+				DSPU32 u32HEvt = ((p_u32Value & INT_SRC_MASK) >> 16);
+				DSPU32 u32LEvt = ((p_u32Value & 0xffffU) & INT_SRC_MASK);
+				DSPU32 u32LInt = (2*u32IntLvl);
+				DSPU32 u32HInt = (2*u32IntLvl + 1);
+				
+				u32ri_INTSrc[u32IntLvl] = (p_u32Value & INT_SRC_MASK);
+				// One IntLvl can only be bound to ONE Event
+				for(int i = 0; i < MAX_EVT_NUM; i++) {
+					if(EvtSrc2Int_Map[i] == u32LInt) {
+						EvtSrc2Int_Map[i] = MAX_INT_LVL + 1;
+					}
+					if(EvtSrc2Int_Map[i] == u32HInt) {
+						EvtSrc2Int_Map[i] = MAX_INT_LVL + 1;
+					}
+				}
+				EvtSrc2Int_Map[u32LEvt] = u32LInt;
+				EvtSrc2Int_Map[u32HEvt] = u32HInt;
+				
+				bolFound = true;
+			}
+
+			/*else if ((u32GAddr >= IINTN_Rx_GADDR) && (u32GAddr <= IINTN_Rx_GADDR + 7)) //IINTN_Rx
+			{
+				u32Temp = u32GAddr - IINTN_Rx_GADDR;
+				u32ri_IINTN_Rx[u32Temp] = p_u32Value & 0xff;
+				bolFound = true;
+			}*/
+			
+			if (!bolFound)
+			{
+				switch (p_u32SpecRegAddr)
+				{
+					//0x1201100~ 0x1201101: 中断锁存寄存器，内核不能使用指令写。
+					
+					case 0x502: // IMASKRL
+						WrIMASK(p_u32Value, false, true);
+						bolFound = true;
+						break;
+					case 0x503: // IMASKRH
+						WrIMASK(p_u32Value, false, false);
+						bolFound = true;
+						break;	
+
+					//0x1201104~ 0x1201105: PMASKR，内核不能使用指令写。
+						
+					case 0x506:  //ISRl
+						u64Temp = p_u32Value;
+						m_u64ILATSet = (m_u64ILATSet | u64Temp) & GenILATMask();
+						bolFound = true;
+						break;
+					case 0x507:  //ISRh
+						u64Temp = p_u32Value;
+						u64Temp = u64Temp << 32;
+						m_u64ILATSet = (m_u64ILATSet | u64Temp) & GenILATMask();
+						bolFound = true;
+						break;
+					case 0x508:  //ICRl
+						u64Temp = p_u32Value;
+						m_u64ILATClr= (m_u64ILATClr | u64Temp) & GenILATMask();
+						bolFound = true;				
+						break;
+					case 0x509:  //ICRh
+						u64Temp = p_u32Value;
+						u64Temp = u64Temp << 32;
+						m_u64ILATClr= (m_u64ILATClr | u64Temp) & GenILATMask();
+						bolFound = true;					
+						break;
+					case 0x50A: // IINT_TxEN
+						u32ri_IINT_TxEN = p_u32Value & 0xff;
+						bolFound = true;
+						break;
+					case 0x50B: //IINTN_Tx
+						u32ri_IINTN_Tx = p_u32Value & 0xff;
+						bolFound = true;
+						break;
+					case 0x514: //SITR
+						u32r_SITR = p_u32Value & 0x3f;
+						bolFound = true;
+						break;
+					}
+				
+			}
+
+			//DMA: 0x01201180 ~ 0x012013ff
+			if (!bolFound)     
+			{
+				if(wr_dmac_reg(p_u32SpecRegAddr, p_u32Value))
+				{
+#ifdef LIBTEST
+					if(m_bolTestForLib)
+					{
+						RWAddrError tmpWtError;
+						tmpWtError.PC = u32r_EPC;
+						tmpWtError.Addr = p_u32SpecRegAddr;
+						m_TestLibOutput.WriteExtAddr.push_back(tmpWtError);
+					}
+#endif
+					bolFound = true;
+				}					
+			}
+			
+			break;
+		case 2:  //0x0120_b800 ~ 0x0120_bbff
+			switch (p_u32SpecRegAddr)
+			{
+				case 0x800: //ICGC
+				case 0x801: //ICACNT
+				case 0x802: //ICMCNT
+				case 0x803: //ICFLUSH_CON
+				case 0x804: //ICDMA_CON
+				case 0x805: //ICDMA_LEN
+				case 0x806: //ICDMA_DST_ADDR
+				case 0x807: //ICDMA_SRC_ADDR
+				case 0x808: //ICDMA_LEN
+					if(m_pICACHE->WrCacheReg_dbg(p_u32SpecRegAddr, p_u32Value))
+					{
+#ifdef LIBTEST
+						if(m_bolTestForLib)
+						{
+							RWAddrError tmpWtError;
+							tmpWtError.PC = u32r_EPC;
+							tmpWtError.Addr = p_u32SpecRegAddr;
+							m_TestLibOutput.WriteExtAddr.push_back(tmpWtError);
+						}
+#endif
+						bolFound = true;
+					}
+					break;
+				case 0xa01:
+				case 0xa02:
+				case 0xa03:
+				case 0xa04:
+				case 0xa11:
+				case 0xa12:
+				case 0xa13:
+				case 0xa14:
+
+					if(m_pTIMER->WrTimerRegs((p_u32SpecRegAddr&0xffU), p_u32Value))
+					{
+						bolFound = true;
+					}
+					break;
+			}
+			
+			break;		
+			
+		default: 
+			return false;
+	}
+
+	if (!bolFound)
+	{
+		PrintToCerr("WrSpecificReg: invalid parameter!");
+		return false;
+	}
+	
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+// JTAG read [addr], addr is 12 bit
+// 该接口仅供JTAG使用
+//
+// p_u32SpecRegAddr: [addr], 12 bit
+// JTAG读[addr]寄存器同RdSpecificReg()
+// p_units表示宏信息
+bool sc_iss::JTAGRdSpecificReg(DSPU32 p_u32SpecRegAddr, DSPU32 p_units, DSPU32 *p_pValue)
+{
+	DSPU32 u32Group, u32GAddr, u32MacroIdx, u32Temp;
+	DSPU64  u64Temp;
+
+	u32Group = p_u32SpecRegAddr >> 10;       // [11..10]
+	//u32Index = p_u32SpecRegAddr & 0x3FF;     // [9..0]
+
+	if( (u32Group & 0x3) == 0x3)   
+	{
+		if( p_u32SpecRegAddr == 0xd0c  )  //ABFPR
+		{
+			//从ALU 和SHF中取大的
+			*p_pValue = (u32r_ALU_BKFlag[p_units]>u32r_SHF_BKFlag[p_units])? u32r_ALU_BKFlag[p_units]: u32r_SHF_BKFlag[p_units];            
+		}
+		else if( (p_u32SpecRegAddr >= 0xc10) && (p_u32SpecRegAddr <= 0xc17) ) //ALUFR
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xc10;
+			*p_pValue = u32ro_ALUFR[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xc30) && (p_u32SpecRegAddr <= 0xc37) ) //ACF
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xc30;
+			*p_pValue = u32r_ALU_ACF[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xc50) && (p_u32SpecRegAddr <= 0xc57) ) //CON
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xc50;
+			*p_pValue = u32ro_ALU_CON[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xc70) && (p_u32SpecRegAddr <= 0xc77) ) //ALUCAFR
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xc70;
+			*p_pValue = u32ro_ALU_CA[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xc90) && (p_u32SpecRegAddr <= 0xc97) ) //ALUDFER
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xc90;
+			*p_pValue = u32ro_ALU_DFER[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xcb0) && (p_u32SpecRegAddr <= 0xcb7) ) //ALUDFMRl
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcb0;
+			*p_pValue = u64ro_ALU_DFMR[p_units][u32MacroIdx].u32Low;
+		}
+		else if( (p_u32SpecRegAddr >= 0xcb8) && (p_u32SpecRegAddr <= 0xcbf) ) //ALUDFMRh
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcb8;
+			*p_pValue = u64ro_ALU_DFMR[p_units][u32MacroIdx].u32High;
+		}
+		else if( (p_u32SpecRegAddr >= 0xcf0) && (p_u32SpecRegAddr <= 0xcf7) ) //ALUDFIRRl
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcf0;
+			*p_pValue = u64ro_ALU_DFIRR[p_units][u32MacroIdx].u32Low;
+		}
+		else if( (p_u32SpecRegAddr >= 0xcf8) && (p_u32SpecRegAddr <= 0xcff) ) //ALUDFIRRh
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcf8;
+			*p_pValue = u64ro_ALU_DFIRR[p_units][u32MacroIdx].u32High;
+		}
+		else if( (p_u32SpecRegAddr >= 0xcc0) && (p_u32SpecRegAddr <= 0xcc7) ) //ACCl
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcc0;
+			*p_pValue = u40ro_ALU_ACC[p_units][u32MacroIdx].u32Low;
+		}
+		else if( (p_u32SpecRegAddr >= 0xcc8) && (p_u32SpecRegAddr <= 0xccf) ) //ACCm
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcc8;
+			*p_pValue = u40ro_ALU_ACC[p_units][u32MacroIdx].u8High;
+		}
+		else if( (p_u32SpecRegAddr >= 0xcd0) && (p_u32SpecRegAddr <= 0xcd7) ) //ACCh
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xcd0;
+			*p_pValue = u8ro_ALU_EXP[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xe10) && (p_u32SpecRegAddr <= 0xe13) ) //SHFFR
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xe10;
+			*p_pValue = u32ro_SHFFR[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xe20) && (p_u32SpecRegAddr <= 0xe23) ) //SLTAR
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xe20;
+			*p_pValue = u32r_SHF_SLTAR[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xe30) && (p_u32SpecRegAddr <= 0xe33) ) //SCF
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xe30;
+			*p_pValue = u32_SHF_SCF[p_units][u32MacroIdx];
+		}
+		else if( (p_u32SpecRegAddr >= 0xe64) && (p_u32SpecRegAddr <= 0xe67) ) //SHFER
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xe64;
+			*p_pValue = u32r_SHFER[p_units][u32MacroIdx];
+		}
+		else if( p_u32SpecRegAddr == 0xdc4  ) //SPUFR
+		{
+			*p_pValue = u32ro_SPUFR[p_units];
+		}
+		else if( (p_u32SpecRegAddr >= 0xf10) && (p_u32SpecRegAddr <= 0xf17) ) //MULFR
+		{
+			u32MacroIdx = p_u32SpecRegAddr - 0xf10;
+			*p_pValue = u32ro_MULFR[p_units][u32MacroIdx];
+		}
+		return true;
+	}
+	else
+	{
+		//return RdSpecificReg(p_u32SpecRegAddr,0, p_pValue);
+		return RdSpecificReg(p_u32SpecRegAddr,p_units, p_pValue);
+	}
+}
+//-----------------------------------------------------------------------------------
+// JTAG write [addr], addr is 12 bit
+// 该接口仅供JTAG使用
+//
+// p_u32SpecRegAddr: [addr], 12 bit
+// JTAG读[addr]寄存器同RdSpecificReg()
+//
+bool sc_iss::JTAGWrSpecificReg(DSPU32 p_u32SpecRegAddr, DSPU32 p_units, DSPU32 p_u32Value)
+{
+	DSPU32 u32Group, u32Index, u32GAddr, u32MacroIdx, u32Temp;
+	bool bolFound = false;
+	DSPU64 u64Temp;
+
+	u32Group = (p_u32SpecRegAddr >> 10) & 3;       // [11..10]
+	u32Index = p_u32SpecRegAddr & 0x3FF;     // [9..0]
+	switch (u32Group)
+	{
+		case 0: //0x0120_0000 ~ 0x0120_03ff
+			u32GAddr = GRP0_SPEC_REG_GADDR + u32Index;
+			
+			if (u32GAddr == ALUCR_GADDR) 
+			{
+				WriteALUCR(p_units, p_u32Value, true);
+				bolFound = true;
+			}
+			else if(u32GAddr == SPUCR_GADDR)
+			{
+				WriteSPUCR(p_units, p_u32Value, true);
+				bolFound = true;	
+			}
+			else if(u32GAddr == SHFCR_GADDR) 
+			{
+				WriteSHFCR(p_units, p_u32Value,true);
+				bolFound = true;	
+			}
+			else if(u32GAddr == MULCR_GADDR) 
+			{
+				WriteMULCR(p_units, p_u32Value,true); 
+				bolFound = true;	
+			}
+			else if(u32GAddr == GPLYR_GADDR) 
+			{
+				WriteGPLYR(p_units, p_u32Value,true);
+				bolFound = true;	
+			}
+			else if(u32GAddr == ALUCPred_GADDR)    //CPred
+			{
+				u32ri_CPredReg[p_units] = p_u32Value & 0xFF; //cpred仅[7-0]有效
+				u32ro_CPredReg[p_units] = p_u32Value & 0xFF; //cpred仅[7-0]有效
+				bolFound = true;	
+			}
+			else if(u32GAddr == SHFCUTR_GADDR)    
+			{
+				u32r_SHFCUTR[p_units].SetValue((p_u32Value & 0x7FF));
+				bolFound = true;	
+			}
+			else if(u32GAddr == MULCUTR_GADDR)    
+			{
+				u32r_MULCUTR[p_units].SetValue((p_u32Value & 0x3FF));
+				bolFound = true;	
+			}
+
+			if (!bolFound)
+			{
+				switch (p_u32SpecRegAddr)
+					{
+						case 0x3C2:	//BA 
+							u32ro_BAR = p_u32Value;
+							u32ri_BAR = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C3:	//SRP
+							u32ro_SRP = p_u32Value;
+							u32ri_SRP = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C4:	//LC0
+							u32ro_LC[0] = p_u32Value;
+							u32ri_LC[0] = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C5:	//LC1
+							u32ro_LC[1] = p_u32Value;
+							u32ri_LC[1] = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C6:	//LC2
+							u32ro_LC[2] = p_u32Value;
+							u32ri_LC[2] = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C7:	//LC3
+							u32ro_LC[3] = p_u32Value;
+							u32ri_LC[3] = p_u32Value;
+							bolFound = true;
+							break;
+						//case 0x12003C8:	//IER (中断入口地址寄存器, 实现方案待讨论, 20130718)
+							// = p_pValue;
+						//	break;
+						case 0x3C8:	//SER 
+							u32ro_CJMP = p_u32Value;
+							u32ri_CJMP = p_u32Value;
+							bolFound = true;
+							break;
+						case 0x3C9:	//IMACR (宏间传输加法器控制寄存器, zx)
+							u32r_IMACR.SetValue(p_u32Value & 0x2);
+							bolFound = true;
+							break;
+						case 0x3CB:	//REGFS 
+							u32r_REGFS.SetValue(p_u32Value);
+							bolFound = true;
+							break;						
+						case 0x3CD:	//CGCR 内核全局控制寄存器
+							WrCGCR(p_u32Value, true);
+							bolFound = true;
+							break;
+							
+					} // switch (p_u32Addr)
+			}
+						
+			break;
+		case 1: //0x0120_1000 ~ 0x0120_13ff
+			u32GAddr = GRP1_SPEC_REG_GADDR + u32Index;
+			if ((u32GAddr >= (INT_GADDR+2)) && (u32GAddr <= INT_GADDR + MAX_INT_LVL))
+			{
+				// 0x01201000 ~ 0x0120103f
+			
+				//因为u32ro_IVT[0]存放0x0120103f对应的中断
+				//u32ro_IVT[63]存放0x01201000对应的中断
+				//所以这里需要做MAX_INT_LVL减
+				u32Temp = MAX_INT_LVL - (u32GAddr - INT_GADDR);
+				wr_u32r_IVT(u32Temp, p_u32Value, true);
+				bolFound = true;
+			}
+			else if ((u32GAddr >= (INTR_GADDR+2)) && (u32GAddr <= INTR_GADDR + MAX_INT_LVL))
+			{
+				// 0x01201080 ~ 0x012010BF
+			
+				//因为u32ro_IRA[0]存放0x012010bf对应的中断返回地址
+				//u32ro_IRA[63]存放0x01201080对应的中断返回地址
+				//所以这里需要做MAX_INT_LVL减
+				u32Temp = MAX_INT_LVL - (u32GAddr - INTR_GADDR);
+				wr_u32r_IRA(u32Temp, p_u32Value, true);
+				bolFound = true;
+			}
+			else if(u32GAddr == 0xE0110A)
+			{
+				u32ri_ITMRl = u32ro_ITMRl= (p_u32Value & 0xFFFFFFFFU);
+ 				bolFound = true;
+			}
+			else if(u32GAddr == 0xE0110B)
+			{
+				u32ri_ITMRh= u32ro_ITMRh = (p_u32Value & 0x3FFFFFFFU);
+ 				bolFound = true;
+			}
+			else if( (u32GAddr >= INT_SRC_REG_START) && (u32GAddr <= INT_SRC_REG_END) )
+			{
+				u32ri_INTSrc[INT_SRC_REG_END - u32GAddr] = (p_u32Value & INT_SRC_MASK);
+				u32ro_INTSrc[INT_SRC_REG_END - u32GAddr] = (p_u32Value & INT_SRC_MASK);
+				bolFound = true;
+			}
+			if (!bolFound)
+			{
+				switch (p_u32SpecRegAddr)
+				{
+					//0x1201100~ 0x1201101: 中断锁存寄存器，JTAG不能写。
+				
+					case 0x502: // IMASKRL
+						WrIMASK(p_u32Value, true, true);
+						bolFound = true;
+						break;
+					case 0x503: // IMASKRH
+						WrIMASK(p_u32Value, true, false);
+						bolFound = true;
+						break;	
+
+						//0x1201104~ 0x1201105: PMASKR，JTAG不能写。
+						//0x1201106~ 0x1201107: ISR，JTAG不能写。
+						//0x1201108~ 0x1201109: ICR，JTAG不能写。
+					case 0x506:  //ISRl
+						u64Temp = p_u32Value;
+						u64ri_ILAT = (u64ro_ILAT | u64Temp) & GenILATMask();
+						u64ro_ILAT = u64ri_ILAT;
+						bolFound = true;
+						break;
+					case 0x507:  //ISRh
+						u64Temp = p_u32Value;
+						u64Temp = u64Temp << 32;
+						u64ri_ILAT = (u64ro_ILAT | u64Temp) & GenILATMask();
+						u64ro_ILAT = u64ri_ILAT;
+						bolFound = true;
+						break;
+					case 0x508:  //ICRl
+						u64Temp = p_u32Value;
+						u64ri_ILAT = (u64ro_ILAT & (~u64Temp)) & GenILATMask();
+						u64ro_ILAT = u64ri_ILAT;
+						bolFound = true;				
+						break;
+					case 0x509:  //ICRh
+						u64Temp = p_u32Value;
+						u64Temp = u64Temp << 32;
+						u64ri_ILAT = (u64ro_ILAT & (~u64Temp)) & GenILATMask();
+						u64ro_ILAT = u64ri_ILAT;
+						bolFound = true;					
+						break;
+					case 0x50A: // IINT_TxEN
+						u32ro_IINT_TxEN = p_u32Value & 0xff;
+						u32ri_IINT_TxEN = p_u32Value & 0xff;
+						bolFound = true;
+						break;
+					case 0x50B: //IINTN_Tx
+						u32ro_IINTN_Tx = p_u32Value & 0xff;
+						u32ri_IINTN_Tx = p_u32Value & 0xff;
+						bolFound = true;
+						break;
+											
+					}
+			
+			}
+
+			//DMA: 0xE01200 ~ 0xE017FF
+			if (!bolFound)     
+			{
+				if(jtag_wr_dmac_reg(p_u32SpecRegAddr, p_u32Value))
+				{
+					bolFound = true;
+				}					
+			}
+			break;
+		case 2: //0x0120_b800 ~ 0x0120_bbff
+			u32GAddr = GRP2_SPEC_REG_GADDR + u32Index;
+			if(m_pICACHE->WrCacheReg_Jtag(p_u32SpecRegAddr, p_u32Value))
+			{
+				bolFound = true;
+			}				
+			break;		
+			
+		case 3:
+			if( p_u32SpecRegAddr == 0xd0c  )  //ABFPR
+			{
+				//从ALU 和SHF中取大的
+				u32r_ALU_BKFlag[p_units].SetValue(p_u32Value & 0x00000003);
+				u32r_SHF_BKFlag[p_units].SetValue(p_u32Value & 0x00000003);   
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xc10) && (p_u32SpecRegAddr <= 0xc17) ) //ALUFR
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xc10;
+				////该寄存器只用14~8, 6~0位
+				u32ro_ALUFR[p_units][u32MacroIdx] = p_u32Value & 0x00007f7f;
+				u32ri_ALUFR[p_units][u32MacroIdx] = p_u32Value & 0x00007f7f;
+				
+				DSPU32 u32FAR = 0xFFFFFFFF;
+				DSPU32 u32FOR = 0;
+				DSPU32 u32Mask = 0x00007F7F;
+				for (int i = 0; i < ALU_NUM_OF_UNIT; i++)
+				{
+					u32FOR |= u32ri_ALUFR[p_units][ i ];
+					u32FAR &= u32ri_ALUFR[p_units][ i ];
+				}
+				u32r_ALUFOR[p_units].SetValue(u32FOR & u32Mask);
+				u32r_ALUFAR[p_units].SetValue(u32FAR & u32Mask);
+				
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xc30) && (p_u32SpecRegAddr <= 0xc37) ) //ACF
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xc30;
+				u32r_ALU_ACF[p_units][u32MacroIdx].SetValue(p_u32Value);  
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xc50) && (p_u32SpecRegAddr <= 0xc57) ) //CON
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xc50;
+				u32ro_ALU_CON[p_units][u32MacroIdx] = p_u32Value;
+				u32ri_ALU_CON[p_units][u32MacroIdx] = p_u32Value;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xc70) && (p_u32SpecRegAddr <= 0xc77) ) //ALUCAFR
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xc70;
+				u32ro_ALU_CA[p_units][u32MacroIdx] = p_u32Value & 0x1;
+				u32ri_ALU_CA[p_units][u32MacroIdx] = p_u32Value & 0x1;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xc90) && (p_u32SpecRegAddr <= 0xc97) ) //ALUDFER
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xc90;
+				//该寄存器只用10~0位
+				u32ro_ALU_DFER[p_units][u32MacroIdx] = p_u32Value & 0x000007ff;
+				u32ri_ALU_DFER[p_units][u32MacroIdx] = p_u32Value & 0x000007ff;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcb0) && (p_u32SpecRegAddr <= 0xcb7) ) //ALUDFMRl
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcb0;
+				u64ro_ALU_DFMR[p_units][u32MacroIdx].u32Low = p_u32Value;
+				u64ri_ALU_DFMR[p_units][u32MacroIdx].u32Low = p_u32Value;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcb8) && (p_u32SpecRegAddr <= 0xcbf) ) //ALUDFMRh
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcb8;
+				//ALUDFMR该寄存器只用55~0位
+				u64ro_ALU_DFMR[p_units][u32MacroIdx].u32High = p_u32Value & 0x00ffffff;
+				u64ri_ALU_DFMR[p_units][u32MacroIdx].u32High = p_u32Value & 0x00ffffff;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcf0) && (p_u32SpecRegAddr <= 0xcf7) ) //ALUDFIRRl
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcf0;
+				//ALUDFIRR该寄存器只用63~0位
+				u64ro_ALU_DFIRR[p_units][u32MacroIdx].u32Low = p_u32Value;
+				u64ri_ALU_DFIRR[p_units][u32MacroIdx].u32Low = p_u32Value;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcf8) && (p_u32SpecRegAddr <= 0xcff) ) //ALUDFIRRh
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcf8;
+				u64ro_ALU_DFIRR[p_units][u32MacroIdx].u32High = p_u32Value & 0x7fffffff;
+				u64ri_ALU_DFIRR[p_units][u32MacroIdx].u32High = p_u32Value & 0x7fffffff;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcc0) && (p_u32SpecRegAddr <= 0xcc7) ) //ACCl
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcc0;
+				u40ro_ALU_ACC[p_units][u32MacroIdx].u32Low = p_u32Value;
+				u40ri_ALU_ACC[p_units][u32MacroIdx].u32Low = p_u32Value;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcc8) && (p_u32SpecRegAddr <= 0xccf) ) //ACCm
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcc8;
+				u40ro_ALU_ACC[p_units][u32MacroIdx].u8High = p_u32Value & 0xff;
+				u40ri_ALU_ACC[p_units][u32MacroIdx].u8High = p_u32Value & 0xff;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xcd0) && (p_u32SpecRegAddr <= 0xcd7) ) //ACCh
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xcd0;
+				u8ro_ALU_EXP[p_units][u32MacroIdx] = p_u32Value & 0xff;
+				u8ri_ALU_EXP[p_units][u32MacroIdx] = p_u32Value & 0xff;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xe10) && (p_u32SpecRegAddr <= 0xe13) ) //SHFFR
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xe10;
+				//该寄存器只用14~8, 6~0位
+				u32ro_SHFFR[p_units][u32MacroIdx] = p_u32Value & 0x00007f7f;
+				u32ri_SHFFR[p_units][u32MacroIdx] = p_u32Value & 0x00007f7f;
+
+				DSPU32 u32FAR = 0xFFFFFFFF;
+				DSPU32 u32FOR = 0;
+				DSPU32 u32Mask = 0x00007F7F;
+				for (int i = 0; i < SHF_NUM_OF_UNIT; i++)
+				{
+					u32FOR |= u32ri_SHFFR[p_units][ i ];
+					u32FAR &= u32ri_SHFFR[p_units][ i ];
+				}
+				u32r_SHFFOR[p_units].SetValue(u32FOR & u32Mask);
+				u32r_SHFFAR[p_units].SetValue(u32FAR & u32Mask);
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xe20) && (p_u32SpecRegAddr <= 0xe23) ) //SLTAR
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xe20;
+				p_u32Value &= 0xff;
+				u32r_SHF_SLTAR[p_units][u32MacroIdx].SetValue(p_u32Value);
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xe30) && (p_u32SpecRegAddr <= 0xe33) ) //SCF
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xe30;
+				p_u32Value &= 0x0000000f;
+				u32_SHF_SCF[p_units][u32MacroIdx].SetValue(p_u32Value);
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xe64) && (p_u32SpecRegAddr <= 0xe67) ) //SHFER
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xe64;
+				p_u32Value &= 0x3;
+				u32r_SHFER[p_units][u32MacroIdx].SetValue(p_u32Value);
+				bolFound = true;
+			}
+			else if( p_u32SpecRegAddr == 0xdc4  ) //SPUFR
+			{
+				u32ro_SPUFR[p_units] = p_u32Value & 0x00000f0f;
+				u32ri_SPUFR[p_units] = p_u32Value & 0x00000f0f;
+				bolFound = true;
+			}
+			else if( (p_u32SpecRegAddr >= 0xf10) && (p_u32SpecRegAddr <= 0xf17) ) //MULFR
+			{
+				u32MacroIdx = p_u32SpecRegAddr - 0xf10;
+				//该寄存器只用14~8, 6~0位
+				u32ro_MULFR[p_units][u32MacroIdx] = p_u32Value & 0x00007f7f;
+				u32ri_MULFR[p_units][u32MacroIdx] = p_u32Value & 0x00007f7f;
+				DSPU32 u32FAR = 0xFFFFFFFF;
+				DSPU32 u32FOR = 0;
+				DSPU32 u32Mask = 0x00007F7F;
+				for (int i = 0; i < MUL_NUM_OF_UNIT; i++)
+				{
+					u32FOR |= u32ri_MULFR[p_units][ i ];
+					u32FAR &= u32ri_MULFR[p_units][ i ];
+				}
+				u32r_MULFOR[p_units].SetValue(u32FOR & u32Mask);
+				u32r_MULFAR[p_units].SetValue(u32FAR & u32Mask);
+				bolFound = true;
+			}
+			break;
+	}
+
+	if (!bolFound)
+	{
+		PrintToCerr("JTAGWrSpecificReg: invalid parameter!");
+		return false;
+	}
+	
+	return true;
+}
+
+

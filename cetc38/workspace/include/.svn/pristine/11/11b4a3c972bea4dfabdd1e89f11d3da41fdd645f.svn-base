@@ -1,0 +1,117 @@
+#Makefile for Kernel simulator  by wangqiang 2014.1.24
+CC=/usr/bin/g++
+CXX=/usr/bin/g++
+#CC=g++ -O3 -static  
+#CC=/usr/bin/gcc -O3 
+LIB=src/AlgoriLib/
+JTAG=jtag/
+SRC=src/
+ICACHE=icache_sim/
+PMEM=core_share_sim/share_progmem/
+MMAC=core_share_sim/share_mmac/
+SHAREMODULES=core_share_sim/share_modules/
+DMAC=dmac_sim/
+TIMER=timer/
+FILE_PATH_105=/home/datashare/KernelShare
+FILE_PATH_107=/home/KernelShare
+FILE_PATH_109=/home/share
+FILE_PATH_103=/home/datashare/KernelShare
+FILE_PATH_115=/home/share/KernelShare/Compile_tools
+FILE_PATH_117=/home/KernelShare
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER3)
+       	FILE_PATH=${FILE_PATH_105}
+endif
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER4)
+       	FILE_PATH=${FILE_PATH_107}
+endif
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER5)
+       	FILE_PATH=${FILE_PATH_109}
+endif
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER2)
+       	FILE_PATH=${FILE_PATH_103}
+endif
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER8)
+       	FILE_PATH=${FILE_PATH_115}
+endif
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER9)
+       	FILE_PATH=${FILE_PATH_117}
+endif
+
+SYSTEMC_INCLUDE=${FILE_PATH}/systemc-2.3.1/include/
+TLM_INCLUDE=${FILE_PATH}/TLM-2009-07-15/include/tlm
+export IC=-I$(SYSTEMC_INCLUDE) -I$(TLM_INCLUDE) -I${ICACHE} -I. 
+BOOST_INCLUDE=-I${FILE_PATH}/boost_1_51_0
+BOOST_L_OPTION=-L${FILE_PATH}/boost_1_51_0/stage/lib
+SC_L_OPTION=-L${FILE_PATH}/systemc-2.3.1/lib-linux64
+BFD_L_OPTION=-L${FILE_PATH}/binutils/lib
+BFD_L_OPTION_64=-L${FILE_PATH}/binutils/lib64
+ifeq ($(strip $(HOSTNAME)),JCDL-SERVER3)
+      BFD_L_OPTION= 
+      BFD_L_OPTION_64=
+endif
+OBJ=IOServer.o CommProtocol.o LoadELFFile.o jtag.o JTAGLog.o TCPRemoteComm.o CALU.o Cfloat32.o CMUL.o CSHF.o CSPU.o DSPU40.o DSPU80.o IMA.o \
+    dsp_top.o  mp_bus.o sc_dmac.o sc_iss.o alu_new.o BPB.o breakpoint.o bus_arbitr.o ctrl.o CustomINT.o dsp_res.o \
+    ExecSlots.o ext_new.o frm_main.o funcs.o iss_dmac.o JITCache.o MemAcsReq.o mem_new.o mem_pipe.o mul_new.o \
+    multi_core.o no_calc_new.o OMFuncs.o ResAcs.o shf_new.o spu_new.o user_data.o watchpoint.o icma.o log_info.o\
+	iss_timer.o\
+	${ICACHE}icache_module_new.o\
+	${ICACHE}icache_ram_new.o\
+	${ICACHE}L2_mmc_new.o\
+	${ICACHE}register32.o\
+	$(PMEM)pmem.o\
+	$(PMEM)ddr.o\
+	$(PMEM)share_sram.o\
+	$(MMAC)mmac.o\
+    assistant_function.o DMAC.o reg_file.o\
+	$(SHAREMODULES)AHB_BUS_MODULE.o\
+	$(SHAREMODULES)APB_BUS_MODULE.o\
+	$(SHAREMODULES)Bridge_MODULE.o\
+	$(SHAREMODULES)DDR_MODULE.o\
+	$(SHAREMODULES)ParaPort_MODULE.o\
+	$(SHAREMODULES)SystemConfigReg.o\
+	$(SHAREMODULES)Timer_MODULE.o\
+	$(SHAREMODULES)UART_MODULE.o
+
+
+VPATH= dmac_sim core_share_sim/share_mmac core_share_sim/share_modules core_share_sim/share_progmem\
+	   icache_sim jtag src src/AlgoriLib timer
+
+#CPPFLAGS=$(IC)${BOOST_INCLUDE}        #if use all, this should be open
+CPPFLAGS=$(IC)${BOOST_INCLUDE} -fPIC	#if use so, this should be open	
+
+
+
+###################################################################################################VAL define over
+
+#all: ${OBJ} main.o
+#	${CC} -o simulator $^ ${BOOST_L_OPTION} ${SC_L_OPTION} ${BFD_L_OPTION} ${BFD_L_OPTION_64} -lboost_system -lboost_chrono -lboost_thread -lsystemc -lbfd -liberty  -lz
+
+so:  ${OBJ}
+	$(CC) -shared  -o libbwdsp104x.so	$^ ${BOOST_L_OPTION} ${SC_L_OPTION} ${BFD_L_OPTION} ${BFD_L_OPTION_64} -lboost_system -lboost_chrono -lboost_thread -lsystemc -lbfd -liberty  -lz
+
+
+
+main.o:main.cpp
+
+
+
+#icache src comp
+${ICACHE}icache_sim.a:
+	$(MAKE) --directory=${ICACHE}
+#$(PMEM)pmem.o:
+#	$(MAKE) pmem --directory=${PMEM} 
+#$(PMEM)ddr.o:
+#	$(MAKE) ddr --directory=${PMEM}
+#mmac
+#$(MMAC)mmac.o:
+#	$(MAKE) --directory=${MMAC}
+						
+
+	
+.PHONY:clean	
+clean:
+	$(MAKE) clean --directory=${ICACHE}
+	$(MAKE) clean --directory=${MMAC}
+	$(MAKE) clean --directory=${PMEM}
+	rm -rf *.o DSPLog_core*/* simulator src/*.o src/AlgoriLib/*.o jtag/*.o dmac_sim/*.o core_share_sim/share_mmac/*.o core_share_sim/share_modules/*.o core_share_sim/share_progmem/*.o libbwdsp104x.so
+

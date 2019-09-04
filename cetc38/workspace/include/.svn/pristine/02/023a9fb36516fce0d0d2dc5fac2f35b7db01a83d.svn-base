@@ -1,0 +1,2308 @@
+
+/*************************************************
+  Copyright (C), 
+  File name:      CASPU.cpp
+  Author:       Version: 
+                Date: 
+  Description:    // 用于详细说明此程序文件完成的主要功能，与其他模块
+                  // 或函数的接口，输出值、取值范围、含义及参数间的控
+                  // 制、顺序、独立或依赖等关系
+  Others:         // 其它内容的说明
+  Function List:  // 主要函数列表，每条记录应包括函数名及功能简要说明
+    1. ....
+  History:        // 修改历史记录列表，每条修改记录应包括修改日期、修改
+                  // 者及修改内容简述  
+    1. Date:	2007-11-20 
+       Author:	Yufenglin 
+       Modification: add getSqr_tab0(), getSqr_tab1(), bw_sqrtf32(),
+                     getRec_tab0(), getRec_tab1(), bw_reciprocal(),
+                     bw_divf32(), getArctg_tab0(), getArctg_tab1(),
+                     bw_atan(), getbuma32(),getbuma16(),getmyx0_x1_32(),
+                     getmyx0_x1_16()
+                     
+    2. Date:	2007-11-23 
+       Author:	Zhaoxiang
+       Modification: add  get_sin16(),get_cos16(), getSin_tab(), getCos_tab(),
+                     getSinCos_x1(), getSinCos_negx1()
+       
+    3. Date:	2007-11-26 
+       Author:	Zhaoxiang 
+       Modification: add get_sin16to32(), get_cos16to32(), bw_sin32(), bw_cos32(),
+                     bw_sin16(),bw_cos16(), getbuma18()
+       
+	4. Date:	2007-11-28 
+       Author:	Zhaoxiang 
+       Modification: add  bw_log(), getln_tab(), u32tof32()  
+       				
+	5. Date:	2007-11-30 
+       Author:	Zhaoxiang 
+       Modification: add bw_sqrt32()
+
+    6. Date:	2007-12-10
+       Author:	baohua
+       Modification: must transfor "^" to "^" because in vc it will be error .
+
+    7. Date:	2007-12-17
+       Author:	baohua
+       Modification: transfor 11 tab to 11 array to reduce the total lines
+
+    8. Date:	2007-12-17
+       Author:	baohua
+       Modification: cancel the bitset<32> b  becasue the simulator does not support it .
+       
+    9. Data:    2007-12-20
+       Author:  Zhaoxiang
+       Modification: move all founction of CSupOper to CSPU.cpp; delete CSupOper.h 
+                    and CSpuOper.cpp; modify all the reading table founction (get_tab()) 
+                    to get_tab[]; 
+                    
+    11. Date:	2007-12-20 
+       Author:	Yufenglin 
+       Modification: add union RECI_F32, struct DSP_BIT80, struct DSP_BIT40,
+                        union DSP_CFix16, struct DSP_CFix32, struct DSP_CFlo32
+                        
+    12. Date:	2007-12-20 
+        Author:	Zhaoxiang 
+        Modification: add union LogMidResult_64, union LogResult_32, 
+                        union Sinsrc_32, union SIN_16, union CUSTOM_F32
+    
+    13. Date:	2008-08-15 
+        Author:	Zhaoxiang 
+        Modification: modify SqrtAbsF32() (add two new tables for odd_src)
+        
+    14. Date:	2009-09-23 
+        Author:	Zhaoxiang 
+        Modification: modify bw_reciprocal()
+                 
+                     
+*********************************************************************************************/
+#include "dsptypes.h" 
+#include "GlobleDef.h" 
+#include "Cfloat32.h"
+#include "sputype.h"
+#include <cmath>
+#include <iostream>
+#include "CSPU.h"
+
+
+using namespace std;
+
+
+const long ln2 = 0x162e4;
+
+#ifdef DSP_WIN32
+    #pragma warning( disable : 4800 ) 
+#endif
+
+
+
+
+////内部函数声明
+// SPU  add by zhaoxiang 
+//---------------------------------------------------------------------------
+typedef union LogMidResult_64	//32位浮点数据类型(DSP浮点数据类型)
+{
+	DSPU64 u64Value;
+    struct SPLIT_F32 
+    {
+    	DSPU64    	u17res: 17;	 
+    	DSPU64      u18res: 18;
+    	DSPU64    	u29res: 29;		  	     	
+  	} split_f32;
+} LogMidResult_64;
+//---------------------------------------------------------------------------
+typedef union LogResult_32	//32位浮点数据类型(DSP浮点数据类型)
+{
+	DSPU32 u32Value;
+    struct SPLIT_F32 
+    {
+    	DSPU32    	u24res: 24;	 
+    	DSPU32      u1Nega: 1;
+    	DSPU32    	u7: 7;		  	     	
+  	} split_f32;
+} LogResult_32;
+//---------------------------------------------------------------------------
+typedef union Sinsrc_32	//32位浮点数据类型(DSP浮点数据类型)
+{
+	DSPU32 u32Value;
+    struct SPLIT_F32 
+    {
+    	DSPU16    	L16: 16;	//低16位 
+    	DSPU16    	H16: 16;		//高16位  	     	
+  	} split_f32;
+} Sinsrc_32;
+//---------------------------------------------------------------------------
+typedef union SIN_16	//16位定点数据类型
+{
+	DSPU16 u16Value;
+    struct SPLIT_16 
+    {
+    	DSPU16    	u5x1: 5;	//不处理 
+    	DSPU16    	u8x0: 8;	//x0
+    	DSPU16   	u3Nega: 3;		//最高3位  作为判断用  	     	
+  	} split_16;
+} SIN_16;
+////内部函数声明
+
+//for sqrt(x)
+
+	 DSPU32 bw_sqrtf32(Cfloat32 f32src);
+	 DSPU32 bw_sqrt32(Cfloat32 f32src);                          //32位定点开方   add by zhaoxiang  
+
+
+//for 1/x y/x
+
+	 DSPU32 bw_reciprocal(Cfloat32 f32src);
+	 DSPU32 bw_divf32(Cfloat32 op_x,Cfloat32 op_y,bool bolSatu);
+//-------for arctg---------------------------------------------------------- 
+
+	 DSPU16 bw_atan(DSPU32 uix0, DSPU32 uix1,DSPU16 uisneg);
+	 DSPU32 getbuma32(DSPU32 u32src);
+	 DSPU16 getbuma16(DSPU16 u16src);
+	 DSPU16 getmyx0_x1_32(DSPU32 u32src,DSPU32 *umyx0,DSPU32 *umyx1);
+	 DSPU16 getmyx0_x1_16(DSPU16 u16src,DSPU16 *umyx0,DSPU16 *umyx1);
+
+
+//---------for sin cos           add by zhaoxiang---------------------------- 
+     DSPU16 get_sin16(DSPU16 p_u16Src);                           //根据不同情况取得16位操作数的x0,x1，并调用核心函数bw_sin16 
+     DSPU16 get_cos16(DSPU16 p_u16Src);                           //根据不同情况取得16位操作数的x0,x1，并调用核心函数bw_cos16 
+     DSPU32 get_sin16to32(DSPU16 p_u16Src);                       //根据不同情况取得16位操作数的x0,x1，并调用核心函数bw_sin16to32 
+     DSPU32 get_cos16to32(DSPU16 p_u16Src);                       //根据不同情况取得16位操作数的x0,x1，并调用核心函数bw_cos16to32 
+     DSPU32 bw_sin32(DSPU16 u8x0, DSPU16 u5x1);                   //根据x0,x1查表计算32位正弦结果 
+     DSPU32 bw_cos32(DSPU16 u8x0, DSPU16 u5x1);                   //根据x0,x1查表计算32位余弦结果 
+     DSPU16 bw_sin16(DSPU16 u8x0, DSPU16 u5x1);                   //根据x0,x1查表计算16位正弦结果 
+     DSPU16 bw_cos16(DSPU16 u8x0, DSPU16 u5x1);                   //根据x0,x1查表计算32位余弦结果 
+         
+     DSPU32 getbuma18(DSPU32 uItem);                             //对18位数据取补码，因有的读表结果为负 
+    
+//------------for log-----------add by zhaoxiang-------------------------------
+     DSPU64 bw_log(Cfloat32 f32src);
+     DSPU32 u32tof32(DSPU32 uItem);                              //32位定点数转浮点数 
+
+     DSPU16 Sin16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR);
+     DSPU16 Cos16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR);
+
+/******************************************************************
+	函数名：		Arctg32To16
+
+	描述:			求32位定点数的反正切，返回16位定点数。
+
+	参数:			p_u32Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU16 Arctg32To16(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO); 
+    //输入16位有符号小数,[-1,1)       
+    DSPU32 u32Src = p_u32Src;  
+    DSPU32 umyx0;
+    DSPU32 umyx1;
+    DSPU16 isneg=0;
+    
+	isneg = getmyx0_x1_32(u32Src,&umyx0,&umyx1);
+    
+    DSPU32 ix0=umyx0 / (DSPU32)pow(2.0,23.0);  
+    DSPU32 ix1=umyx1 / (DSPU32)pow(2.0,14.0);
+    
+ 	DSPU16 u16Result = bw_atan(ix0,ix1,isneg);
+    return u16Result; 
+    	
+}
+
+/******************************************************************
+	函数名：		Arctg16
+
+	描述:			求16位定点数的反正切，返回16位定点数。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+
+DSPU16 Arctg16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+   *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO); 
+    //输入16位有符号小数,[-1,1)       
+    DSPU16 u16Src = p_u16Src;  
+    DSPU16 isneg=0;    
+    DSPU16 umyx0;
+    DSPU16 umyx1;
+    
+    isneg=getmyx0_x1_16(u16Src,&umyx0,&umyx1);
+    
+    DSPU32 ix0=umyx0 / (DSPU32)pow(2.0,7.0);  
+    DSPU32 ix1=umyx1*4;
+
+ 	DSPU16 u16Result = bw_atan(ix0,ix1,isneg);
+    return u16Result;  
+ 	       
+}
+/******************************************************************
+	函数名：		RecipF32
+
+	描述:			求32位浮点数的倒数。
+
+	参数:			p_u32Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 RecipF32(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+       
+       Cfloat32 Op_x (p_u32Src);
+                
+       if (Op_x.IsDNORM()|| Op_x.IsZero())
+       {               
+           Op_x.SetZero();
+           bool bolSatu   = TestFlag(p_u32SPUCR, SPU_Ctl_Saturation);
+           if (bolSatu)
+             {
+                if (Op_x.IsNega())
+                {
+                    Op_x.SetU32(MIN_NORM);
+                }
+                else{
+                    Op_x.SetU32(MAX_NORM);
+                }
+             }else{
+			 	   if (Op_x.cf32value.split_f32.u1Nega)
+		   	            Op_x.SetU32(NEG_INF);
+			   	   else 
+			   	   		Op_x.SetU32(POS_INF);
+					
+             }     
+		   SetFlag(*p_pStatReg, SPU_SFO);
+           SetFlag(*p_pStatReg, SPU_SSFO);
+		   return  Op_x.GetU32();                        
+       }
+	   if (Op_x.IsNAN())
+        {
+            Op_x.SetU32(N_A_N);  
+            //ClearFlag(*p_pStatReg, SPU_SZ);
+            //ClearFlag(*p_pStatReg, SPU_SN);
+            SetFlag(*p_pStatReg, SPU_SI);
+            SetFlag(*p_pStatReg, SPU_SSI);
+            return  Op_x.GetU32();
+        }
+		 
+       Cfloat32 oper_x;
+       oper_x =Op_x;
+       
+       DSPU32 u32Rec_Result=bw_reciprocal(oper_x);
+	           
+       Cfloat32 u32result (u32Rec_Result);
+        
+       if (u32result.IsDNORM())
+       {               
+           u32result.SetZero();                        
+       }              
+      
+
+        if (u32result.IsNega())    
+        {
+//           SetFlag(*p_pStatReg, SPU_SN);
+        }                
+
+        if (u32result.IsZero())       
+        {
+           //正负0输出清为正0输出 
+           u32result.SetZero();                           
+//           SetFlag(*p_pStatReg, SPU_SZ);
+           if (Op_x.IsNORM())       
+           {                 
+               SetFlag(*p_pStatReg, SPU_SFU);
+               SetFlag(*p_pStatReg, SPU_SSFU);
+           }                  
+        }           
+        
+        
+        return u32result.GetU32();  
+           
+}
+
+/******************************************************************
+	函数名：		DivF32
+
+	描述:			32位浮点数相除。
+
+	参数:			p_u32Src1 -- 被除数。
+					p_u32Src2 -- 除数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+
+//运算结果是 p_u32Src2 / p_u32Src1,  y/x
+
+DSPU32 DivF32(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+       Cfloat32 Op_y (p_u32Src2);
+       Cfloat32 Op_x (p_u32Src1);
+       bool bolSatu(false);
+	   if ( Op_y.IsNAN() 
+            || Op_x.IsNAN() 
+            || (Op_y.IsZero() && Op_x.IsZero())
+            || (Op_y.IsINF() && Op_x.IsINF()) )
+        {
+            Op_y.SetU32(N_A_N);  
+//            ClearFlag(*p_pStatReg, SPU_SZ);
+ //           ClearFlag(*p_pStatReg, SPU_SN);
+            SetFlag(*p_pStatReg, SPU_SI);
+            SetFlag(*p_pStatReg, SPU_SSI);
+            //return Op_y.GetU32();  
+            return N_A_N;
+        }
+        
+       if (Op_y.IsDNORM()|| Op_y.IsZero()){
+            
+            if (Op_x.IsDNORM()|| Op_x.IsZero()){
+//		   	  		ClearFlag(*p_pStatReg, SPU_SZ);
+ //           		ClearFlag(*p_pStatReg, SPU_SN);
+            		SetFlag(*p_pStatReg, SPU_SI);
+            		SetFlag(*p_pStatReg, SPU_SSI);
+			        return N_A_N;			
+           }
+           
+	   	   if (Op_x.IsNega() ^ Op_y.IsNega())
+		   	  return NEG_ZERO;
+           else
+   	          return POS_ZERO;
+		   	   								 
+       }
+       
+       if (Op_x.IsDNORM()|| Op_x.IsZero())
+       {               
+           Op_x.SetZero();
+           bolSatu   = TestFlag(p_u32SPUCR, SPU_Ctl_Saturation);
+           if (bolSatu)
+             {
+                if (Op_x.IsNega() ^ Op_y.IsNega())
+                {
+                    Op_x.SetU32(MIN_NORM);
+                }
+                else{
+                    Op_x.SetU32(MAX_NORM);
+                }
+             }else{
+			 	   if (Op_x.IsNega() ^ Op_y.IsNega())
+		   	            Op_x.SetU32(NEG_INF);
+			   	   else 
+			   	   		Op_x.SetU32(POS_INF);
+					
+             }     
+		   SetFlag(*p_pStatReg, SPU_SFO);
+           SetFlag(*p_pStatReg, SPU_SSFO);
+		   return  Op_x.GetU32();                        
+       }
+       if ( Op_y.IsINF() )
+        { bolSatu   = TestFlag(p_u32SPUCR, SPU_Ctl_Saturation);
+		  	if (bolSatu)
+             {
+                if (Op_x.IsNega() ^ Op_y.IsNega())
+                {
+                    Op_y.SetU32(MIN_NORM);
+                }
+                else{
+                    Op_y.SetU32(MAX_NORM);
+                }
+             }else{
+			 	   if (Op_x.IsNega() ^ Op_y.IsNega())
+		   	            Op_y.SetU32(NEG_INF);
+			   	   else 
+			   	   		Op_y.SetU32(POS_INF);
+					
+             }
+           SetFlag(*p_pStatReg, SPU_SFO);
+           SetFlag(*p_pStatReg, SPU_SSFO);
+           return Op_y.GetU32();  
+        }
+         if ( Op_x.IsINF() )
+        { 
+            if (Op_x.IsNega() ^ Op_y.IsNega())
+            {
+                Op_x.SetU32(NEG_ZERO);
+            }
+            else{
+                Op_x.SetU32(POS_ZERO);
+            }
+            
+//           SetFlag(*p_pStatReg, SPU_SZ);
+           return Op_x.GetU32();  
+        }
+        
+	   DSPU32 u32Rec_Result = bw_divf32(Op_x,Op_y,bolSatu) ;       
+       Cfloat32 u32result(u32Rec_Result);
+	   //Cfloat32 u32result (Op_y.GetF32() / Op_x.GetF32());
+         
+       if (u32result.IsDNORM())
+       {               
+           u32result.SetZero();                        
+       }              
+      
+       bolSatu   = TestFlag(p_u32SPUCR, SPU_Ctl_Saturation);
+       //if (Op_y.IsNORM() && Op_x.IsNORM() && u32result.IsINF())
+       if (u32result.IsINF())
+       {
+             SetFlag(*p_pStatReg, SPU_SFO);
+             SetFlag(*p_pStatReg, SPU_SSFO);
+             if (bolSatu)
+             {
+                if (u32result.IsNega())
+                {
+                    u32result.SetU32(MIN_NORM);
+                }
+                else
+                {
+                    u32result.SetU32(MAX_NORM);
+                }
+             }              
+        }
+       
+        if (u32result.IsNega())    
+        {
+//           SetFlag(*p_pStatReg, SPU_SN);
+        }                
+
+        if (u32result.IsZero())       
+        {
+           u32result.SetZero();                           
+//           SetFlag(*p_pStatReg, SPU_SZ);
+           if (Op_y.IsNORM() && Op_x.IsNORM())       
+           {                 
+               SetFlag(*p_pStatReg, SPU_SFU);
+               SetFlag(*p_pStatReg, SPU_SSFU);
+           }                  
+        }      
+        
+        
+        
+        return u32result.GetU32();  
+           
+}
+/******************************************************************
+	函数名：		SqrtF32
+
+	描述:			对32位浮点数p_u32Src的绝对值进行开方运算。
+
+	参数:			p_u32Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+
+DSPU32 SqrtAbsF32(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR){
+	   *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+       
+       Cfloat32 cf32Op_x(p_u32Src);
+       if (cf32Op_x.IsDNORM() || cf32Op_x.IsZero())
+       {               
+           cf32Op_x.SetZero();
+		   return POS_ZERO  ;                      
+       }       
+        if (cf32Op_x.IsINF())
+       {
+	   	   bool bolSatu   = TestFlag(p_u32SPUCR, SPU_Ctl_Saturation);
+		  	if (bolSatu)
+             {
+                cf32Op_x.SetU32(MAX_NORM);
+             }else{
+			 	   
+  	   		   cf32Op_x.SetU32(POS_INF);	
+             }
+             SetFlag(*p_pStatReg, SPU_SFO);
+           SetFlag(*p_pStatReg, SPU_SSFO);
+             
+             return cf32Op_x.GetU32();
+       }
+       
+       DSPU32 u32Rec_Result = bw_sqrtf32(cf32Op_x) ;       
+       Cfloat32 u32result(u32Rec_Result);
+       //Cfloat32 u32result ((float)(sqrt(abs(cf32Op_x.GetF32()))));
+       
+       if (u32result.IsDNORM())
+       {               
+           u32result.SetZero();                        
+       } 
+       
+       if (u32result.IsINF())
+       {
+           SetFlag(*p_pStatReg, SPU_SFO);
+           SetFlag(*p_pStatReg, SPU_SSFO);
+       }          
+       
+       bool bolSatu   = TestFlag(p_u32SPUCR, SPU_Ctl_Saturation); 
+       if (u32result.IsINF() && bolSatu)
+       {               
+           u32result.SetU32(MAX_NORM);                     
+       }          
+              
+        if (u32result.IsZero())       
+        {
+//           SetFlag(*p_pStatReg, SPU_SZ);
+           u32result.SetZero();
+           if (cf32Op_x.IsNORM())       
+           {                 
+               SetFlag(*p_pStatReg, SPU_SFU);
+               SetFlag(*p_pStatReg, SPU_SSFU);
+           }                  
+        }
+       
+       if (u32result.IsNega())
+       {
+//           SetFlag(*p_pStatReg, SPU_SN);
+       }    
+       
+        if (cf32Op_x.IsNAN())
+        {
+            u32result.SetU32(N_A_N);  
+//            ClearFlag(*p_pStatReg, SPU_SZ);
+//            ClearFlag(*p_pStatReg, SPU_SN);
+            SetFlag(*p_pStatReg, SPU_SI);
+            SetFlag(*p_pStatReg, SPU_SSI);
+        }              
+        return u32result.GetU32();
+	   
+}
+
+//zhaoxiang
+/******************************************************************
+	函数名：		Sin16
+
+	描述:			对16位定点数p_u16Src进行正弦运算。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU16 Sin16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO); 
+    
+    DSPU16 u16Result = get_sin16(p_u16Src);    
+    
+    if (u16Result == 0)       
+    {
+//        SetFlag(*p_pStatReg, SPU_SZ);              
+    }       
+    
+    if (u16Result & 0x8000)    
+    {
+//        SetFlag(*p_pStatReg, SPU_SN);
+    }
+    return u16Result;         
+}
+
+/******************************************************************
+	函数名：		Cos16
+
+	描述:			对16位定点数p_u16Src进行正弦运算。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+
+DSPU16 Cos16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO); 
+    
+       DSPU16 u16Result = get_cos16(p_u16Src); 
+      
+       if (u16Result == 0)       
+        {
+//            SetFlag(*p_pStatReg, SPU_SZ);              
+        }       
+        
+       if (u16Result & 0x8000)    
+        {
+//            SetFlag(*p_pStatReg, SPU_SN);
+        }
+       return u16Result ;       
+       
+}
+
+/******************************************************************
+	函数名：		Sin16To32
+
+	描述:			求16位定点数的正弦，返回32位定点数。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 Sin16To32(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO); 
+    
+    DSPU32 u32Result = get_sin16to32(p_u16Src);    
+    
+    if (u32Result == 0)       
+    {
+//        SetFlag(*p_pStatReg, SPU_SZ);              
+    }       
+    
+    if (u32Result & 0x80000000)    
+    {
+//        SetFlag(*p_pStatReg, SPU_SN);
+    }
+    return u32Result;
+       
+}
+/******************************************************************
+	函数名：		Cos16To32
+
+	描述:			求16位定点数的余弦，返回32位定点数。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 Cos16To32(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO); 
+    
+    DSPU32 u32Result = get_cos16to32(p_u16Src);
+        
+    if (u32Result == 0)       
+    {
+//        SetFlag(*p_pStatReg, SPU_SZ);              
+    }       
+    
+    if (u32Result & 0x80000000)    
+    {
+//        SetFlag(*p_pStatReg, SPU_SN);
+    }
+    return u32Result;
+}
+
+/******************************************************************
+	函数名：		SinD16
+
+	描述:			求高低16位定点数的正弦。
+
+	参数:			p_u32Src -- 源操作数，包括高低16位定点数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 SinD16(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    DSPU16 u16UpperSrc = p_u32Src >> 16;
+    DSPU16 u16LowerSrc = p_u32Src;
+    
+    DSPU32 UpperReg = *p_pStatReg;
+    DSPU32 LowerReg = *p_pStatReg;
+    
+    DSPU16 u16UpperResult = Sin16(u16UpperSrc, &UpperReg, p_u32SPUCR);
+    DSPU16 u16LowerResult = Sin16(u16LowerSrc, &LowerReg, p_u32SPUCR); 
+    
+    *p_pStatReg = UpperReg | LowerReg;
+     
+    DSPU32 u32Result = (((DSPU32)u16UpperResult) << 16) | ((DSPU32)u16LowerResult);
+
+    return  u32Result;         
+}
+
+/******************************************************************
+	函数名：		CosD16
+
+	描述:			求高低16位定点数的余弦。
+
+	参数:			p_u32Src -- 源操作数，包括高低16位定点数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 CosD16(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    DSPU16 u16UpperSrc = p_u32Src >> 16;
+    DSPU16 u16LowerSrc = p_u32Src;
+    
+    DSPU32 UpperReg = *p_pStatReg;
+    DSPU32 LowerReg = *p_pStatReg;
+    
+    DSPU16 u16UpperResult = Cos16(u16UpperSrc, &UpperReg, p_u32SPUCR);               
+    DSPU16 u16LowerResult = Cos16(u16LowerSrc, &LowerReg, p_u32SPUCR); 
+    
+    *p_pStatReg = UpperReg | LowerReg;
+     
+    DSPU32 u32Result = (((DSPU32)u16UpperResult) << 16) | ((DSPU32)u16LowerResult);
+
+    return  u32Result;
+       
+}
+
+/******************************************************************
+	函数名：		CosSin16
+
+	描述:			求16位定点数p_u16Src的余弦和正弦，余弦放结果的 
+					高16位，正弦放结果的低16位。
+
+	参数:			p_u32Src -- 源操作数，包括高低16位定点数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 CosSin16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+    DSPU16 u16UpperSrc = p_u16Src;
+    DSPU16 u16LowerSrc = p_u16Src;
+    
+    DSPU32 UpperReg = *p_pStatReg;
+    DSPU32 LowerReg = *p_pStatReg;
+    
+    //余弦放目的寄存器HRs的高16位，正弦放目的寄存器HRs的低16位
+    DSPU16 u16UpperResult = Cos16(u16UpperSrc, &UpperReg, p_u32SPUCR);
+    DSPU16 u16LowerResult = Sin16(u16LowerSrc, &LowerReg, p_u32SPUCR); 
+    
+    *p_pStatReg = UpperReg | LowerReg;
+     
+    DSPU32 u32Result = (((DSPU32)u16UpperResult) << 16) | ((DSPU32)u16LowerResult);
+
+    return  u32Result;
+}
+/******************************************************************
+	函数名：		LogF32
+
+	描述:			32位浮点数求对数。
+
+	参数:			p_u32Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 LogAbsF32(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR, DSPU8 u4CutNum)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+    
+       Cfloat32 cf32Op_x(p_u32Src);
+    
+       if (cf32Op_x.IsDNORM() || cf32Op_x.IsZero())
+       {               
+           SetFlag(*p_pStatReg, SPU_SO);   
+           SetFlag(*p_pStatReg, SPU_SSO);        
+           return MIN_SN_32;                        
+       }  
+       
+       if (cf32Op_x.IsINF())
+       { 
+           SetFlag(*p_pStatReg, SPU_SO);   
+           SetFlag(*p_pStatReg, SPU_SSO);                            
+           return MAX_SN_32;                        
+       }  
+       if (cf32Op_x.IsNAN())
+       {              
+           SetFlag(*p_pStatReg, SPU_SI);   
+           SetFlag(*p_pStatReg, SPU_SSI);                        
+           return N_A_N;                        
+       }    
+            
+       DSPU64 f64Result = bw_log(cf32Op_x)<<15;               //将返回的64位结果左移15位，得到原64位结果的48位后的数据 
+       DSPU8 fCutNum = u4CutNum & 0x0f;                       //处理截断值 
+       f64Result <<= fCutNum;                                 //截断值为多少，截取结果时往右移多少 
+       f64Result >>= 32;                                      //取高32位作为最终结果 
+     
+       DSPU32 u32Result = (DSPU32)f64Result;
+  
+       if (u32Result == 0)
+       {               
+//           SetFlag(*p_pStatReg, SPU_SZ);                       
+       }    
+              
+   
+
+       if (u32Result & 0x80000000)
+       {
+//           SetFlag(*p_pStatReg, SPU_SN);
+       }
+       return u32Result;
+}
+/******************************************************************
+	函数名：		Log32
+
+	描述:			32位定点数求对数。
+
+	参数:			p_u32Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 LogAbs32(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR,  DSPU8 u4CutNum)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+     
+        if (p_u32Src == 0)
+        {
+            SetFlag(*p_pStatReg, SPU_SO);      
+            SetFlag(*p_pStatReg, SPU_SSO);                    
+            return MIN_SN_32;
+        }
+        
+        
+       DSPU32 u32Src = u32tof32(p_u32Src);                         //将32位定点数转换位32位浮点数 
+      
+       DSPU32 u32Result = LogAbsF32(u32Src,p_pStatReg,p_u32SPUCR,u4CutNum);
+   
+       
+       if (u32Result == 0)
+        {               
+//            SetFlag(*p_pStatReg, SPU_SZ);                       
+        }    
+            
+         
+       if (u32Result & 0x80000000)
+        {
+//            SetFlag(*p_pStatReg, SPU_SN);
+        }
+    
+       return u32Result;
+}
+/******************************************************************
+	函数名：		Log16
+
+	描述:			16位定点数求对数。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU16 LogAbs16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR, DSPU8 u4CutNum)
+{
+
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+       
+        if (p_u16Src == 0)
+        {
+            SetFlag(*p_pStatReg, SPU_SO);      
+            SetFlag(*p_pStatReg, SPU_SSO);     
+            return MIN_SN_16;
+        }
+        
+       
+       //CutNum为0~8 
+        if (u4CutNum > 8)
+        {
+            u4CutNum = 8;
+        }
+        
+       DSPU32 u32Src = p_u16Src<<16;                              //将16位定点转换为32位定点 
+       DSPU16 u16Result = LogAbs32(u32Src,p_pStatReg,p_u32SPUCR,u4CutNum);    
+       
+       if (u16Result == 0)
+        {               
+//            SetFlag(*p_pStatReg, SPU_SZ);                       
+        }    
+              
+       
+       if (u16Result & 0x8000)
+        {
+//            SetFlag(*p_pStatReg, SPU_SN);
+        }
+        
+       return u16Result;  
+} 
+
+/******************************************************************
+	函数名：		Sqrt32
+
+	描述:			对32位定点小数p_u32Src的绝对值进行开方运算。
+
+	参数:			p_u32Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU32 SqrtAbs32(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+       
+       DSPU32 u32Src = u32tof32(p_u32Src);                         //将32位定点数转换位32位浮点数 
+       Cfloat32 cf32Op_x(u32Src);
+       DSPU32 u32Result = bw_sqrt32(cf32Op_x);
+       
+       if (u32Result  == 0x80000000)
+        {
+            u32Result = 0x7fffffff;
+        }
+            
+       if (u32Result == 0)
+        {               
+//            SetFlag(*p_pStatReg, SPU_SZ);                       
+        }    
+                     
+       if (u32Result & 0x80000000)
+        {
+//            SetFlag(*p_pStatReg, SPU_SN);
+        }
+       return u32Result;
+}
+/******************************************************************
+	函数名：		Sqrt16
+
+	描述:			对16位定点小数p_u16Src的绝对值进行开方运算。
+
+	参数:			p_u16Src -- 源操作数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32SPUCR -- SPU控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+DSPU16 SqrtAbs16(DSPU16 p_u16Src, DSPU32 *p_pStatReg, DSPU32 p_u32SPUCR)
+{
+       *p_pStatReg &= BIT(SPU_SSI) | BIT(SPU_SSFO) | BIT(SPU_SSFU) | BIT(SPU_SSO);
+       
+      
+       DSPU32 u32Src = p_u16Src<<16;   
+       DSPU16 u16Result = 0 ;                           //将16位定点转换为32位定点 
+       DSPU32 u32Result1 = SqrtAbs32(u32Src,p_pStatReg,p_u32SPUCR)+0x00008000;               //应刘小明要求修正结果 
+       u16Result = u32Result1>>16 ;
+      
+       
+       if (u16Result  == 0x8000)
+        {
+            u16Result = 0x7fff;
+        }
+        
+       if (u16Result == 0)
+        {               
+//            SetFlag(*p_pStatReg, SPU_SZ);                       
+        }    
+                     
+       if (u16Result & 0x8000)
+        {
+//            SetFlag(*p_pStatReg, SPU_SN);
+        }
+       return u16Result;
+}
+
+
+
+/********核心函数*********************************************************/
+
+         //for Sqrt 
+   DSPU32   getSqr_tab0[256] = {0x20001, 0x20101, 0x20200, 0x202FF, 0x203FD, 0x204FB, 0x205F8, 0x206F5, 0x207F2, 0x208ED,
+                                0x209E9, 0x20AE4, 0x20BDE, 0x20CD8, 0x20DD2, 0x20ECB, 0x20FC3, 0x210BB, 0x211B3, 0x212AA,
+                                0x213A1, 0x21497, 0x2158D, 0x21683, 0x21778, 0x2186C, 0x21960, 0x21A54, 0x21B47, 0x21C3A,
+                                0x21D2D, 0x21E1F, 0x21F10, 0x22001, 0x220F2, 0x221E2, 0x222D2, 0x223C2, 0x224B1, 0x2259F,
+                                0x2268E, 0x2277C, 0x22869, 0x22956, 0x22A43, 0x22B2F, 0x22C1B, 0x22D06, 0x22DF2, 0x22EDC,
+                                0x22FC7, 0x230B1, 0x2319A, 0x23283, 0x2336C, 0x23455, 0x2353D, 0x23624, 0x2370C, 0x237F3,
+                                0x238D9, 0x239C0, 0x23AA5, 0x23B8B, 0x23C70, 0x23D55, 0x23E39, 0x23F1D, 0x24001, 0x240E5,
+                                0x241C8, 0x242AA, 0x2438D, 0x2446F, 0x24550, 0x24631, 0x24712, 0x247F3, 0x248D3, 0x249B3,
+                                0x24A93, 0x24B72, 0x24C51, 0x24D30, 0x24E0E, 0x24EEC, 0x24FCA, 0x250A7, 0x25184, 0x25261,
+                                0x2533D, 0x25419, 0x254F5, 0x255D0, 0x256AB, 0x25786, 0x25861, 0x2593B, 0x25A15, 0x25AEE,
+                                0x25BC7, 0x25CA0, 0x25D79, 0x25E51, 0x25F29, 0x26001, 0x260D8, 0x261B0, 0x26286, 0x2635D,
+                                0x26433, 0x26509, 0x265DF, 0x266B4, 0x26789, 0x2685E, 0x26933, 0x26A07, 0x26ADB, 0x26BAE,
+                                0x26C82, 0x26D55, 0x26E28, 0x26EFA, 0x26FCC, 0x2709E, 0x27170, 0x27242, 0x27313, 0x273E4,
+                                0x274B4, 0x27585, 0x27655, 0x27724, 0x277F4, 0x278C3, 0x27992, 0x27A61, 0x27B30, 0x27BFE,
+                                0x27CCC, 0x27D99, 0x27E67, 0x27F34, 0x28001, 0x280CE, 0x2819A, 0x28266, 0x28332, 0x283FE,
+                                0x284C9, 0x28594, 0x2865F, 0x2872A, 0x287F4, 0x288BE, 0x28988, 0x28A52, 0x28B1B, 0x28BE5,
+                                0x28CAE, 0x28D76, 0x28E3F, 0x28F07, 0x28FCF, 0x29097, 0x2915E, 0x29226, 0x292ED, 0x293B3,
+                                0x2947A, 0x29540, 0x29606, 0x296CC, 0x29792, 0x29857, 0x2991C, 0x299E1, 0x29AA6, 0x29B6B,
+                                0x29C2F, 0x29CF3, 0x29DB7, 0x29E7A, 0x29F3E, 0x2A001, 0x2A0C4, 0x2A187, 0x2A249, 0x2A30B,
+                                0x2A3CD, 0x2A48F, 0x2A551, 0x2A612, 0x2A6D3, 0x2A794, 0x2A855, 0x2A916, 0x2A9D6, 0x2AA96,
+                                0x2AB56, 0x2AC16, 0x2ACD5, 0x2AD95, 0x2AE54, 0x2AF13, 0x2AFD1, 0x2B090, 0x2B14E, 0x2B20C,
+                                0x2B2CA, 0x2B387, 0x2B445, 0x2B502, 0x2B5BF, 0x2B67C, 0x2B739, 0x2B7F5, 0x2B8B1, 0x2B96D,
+                                0x2BA29, 0x2BAE5, 0x2BBA0, 0x2BC5C, 0x2BD17, 0x2BDD1, 0x2BE8C, 0x2BF47, 0x2C001, 0x2C0BB,
+                                0x2C175, 0x2C22F, 0x2C2E8, 0x2C3A1, 0x2C45A, 0x2C513, 0x2C5CC, 0x2C685, 0x2C73D, 0x2C7F5,
+                                0x2C8AD, 0x2C965, 0x2CA1D, 0x2CAD4, 0x2CB8C, 0x2CC43, 0x2CCF9, 0x2CDB0, 0x2CE67, 0x2CF1D,
+                                0x2CFD3, 0x2D089, 0x2D13F, 0x2D1F5, 0x2D2AA, 0x2D35F};
+                                
+  DSPU32    getSqr_tab1[256] = {0x1FFFF, 0x1FF00, 0x1FE02, 0x1FD06, 0x1FC0B, 0x1FB12, 0x1FA1A, 0x1F923, 0x1F82E, 0x1F73B,
+                                0x1F648, 0x1F557, 0x1F467, 0x1F379, 0x1F28C, 0x1F1A0, 0x1F0B6, 0x1EFCD, 0x1EEE5, 0x1EDFF,
+                                0x1ED19, 0x1EC35, 0x1EB52, 0x1EA71, 0x1E990, 0x1E8B1, 0x1E7D3, 0x1E6F6, 0x1E61B, 0x1E540,
+                                0x1E467, 0x1E38E, 0x1E2B7, 0x1E1E1, 0x1E10D, 0x1E039, 0x1DF66, 0x1DE94, 0x1DDC4, 0x1DCF4,
+                                0x1DC26, 0x1DB59, 0x1DA8C, 0x1D9C1, 0x1D8F7, 0x1D82D, 0x1D765, 0x1D69E, 0x1D5D7, 0x1D512,
+                                0x1D44E, 0x1D38A, 0x1D2C8, 0x1D206, 0x1D146, 0x1D086, 0x1CFC7, 0x1CF0A, 0x1CE4D, 0x1CD91,
+                                0x1CCD6, 0x1CC1B, 0x1CB62, 0x1CAA9, 0x1C9F2, 0x1C93B, 0x1C885, 0x1C7D0, 0x1C71C, 0x1C669,
+                                0x1C5B6, 0x1C504, 0x1C453, 0x1C3A3, 0x1C2F4, 0x1C245, 0x1C198, 0x1C0EB, 0x1C03F, 0x1BF93,
+                                0x1BEE9, 0x1BE3F, 0x1BD96, 0x1BCED, 0x1BC46, 0x1BB9F, 0x1BAF8, 0x1BA53, 0x1B9AE, 0x1B90A,
+                                0x1B867, 0x1B7C5, 0x1B723, 0x1B681, 0x1B5E1, 0x1B541, 0x1B4A2, 0x1B404, 0x1B366, 0x1B2C9,
+                                0x1B22C, 0x1B191, 0x1B0F5, 0x1B05B, 0x1AFC1, 0x1AF28, 0x1AE8F, 0x1ADF7, 0x1AD60, 0x1ACC9,
+                                0x1AC33, 0x1AB9E, 0x1AB09, 0x1AA75, 0x1A9E1, 0x1A94E, 0x1A8BC, 0x1A82A, 0x1A799, 0x1A708,
+                                0x1A678, 0x1A5E8, 0x1A559, 0x1A4CB, 0x1A43D, 0x1A3B0, 0x1A323, 0x1A297, 0x1A20B, 0x1A180,
+                                0x1A0F6, 0x1A06C, 0x19FE2, 0x19F59, 0x19ED1, 0x19E49, 0x19DC2, 0x19D3B, 0x19CB4, 0x19C2F,
+                                0x19BA9, 0x19B25, 0x19AA0, 0x19A1C, 0x19999, 0x19916, 0x19894, 0x19812, 0x19791, 0x19710,
+                                0x1968F, 0x1960F, 0x19590, 0x19511, 0x19492, 0x19414, 0x19397, 0x1931A, 0x1929D, 0x19221,
+                                0x191A5, 0x19129, 0x190AF, 0x19034, 0x18FBA, 0x18F40, 0x18EC7, 0x18E4F, 0x18DD6, 0x18D5E,
+                                0x18CE7, 0x18C70, 0x18BF9, 0x18B83, 0x18B0D, 0x18A98, 0x18A23, 0x189AE, 0x1893A, 0x188C6,
+                                0x18853, 0x187E0, 0x1876D, 0x186FB, 0x18689, 0x18618, 0x185A7, 0x18536, 0x184C6, 0x18456,
+                                0x183E7, 0x18377, 0x18309, 0x1829A, 0x1822C, 0x181BF, 0x18151, 0x180E4, 0x18078, 0x1800C,
+                                0x17FA0, 0x17F34, 0x17EC9, 0x17E5E, 0x17DF4, 0x17D8A, 0x17D20, 0x17CB6, 0x17C4D, 0x17BE5,
+                                0x17B7C, 0x17B14, 0x17AAC, 0x17A45, 0x179DE, 0x17977, 0x17911, 0x178AB, 0x17845, 0x177DF,
+                                0x1777A, 0x17715, 0x176B1, 0x1764D, 0x175E9, 0x17585, 0x17522, 0x174BF, 0x1745D, 0x173FA,
+                                0x17398, 0x17337, 0x172D5, 0x17274, 0x17213, 0x171B3, 0x17152, 0x170F2, 0x17093, 0x17033,
+                                0x16FD4, 0x16F76, 0x16F17, 0x16EB9, 0x16E5B, 0x16DFD, 0x16DA0, 0x16D43, 0x16CE6, 0x16C8A,
+                                0x16C2D, 0x16BD1, 0x16B76, 0x16B1A, 0x16ABF, 0x16A64};
+            
+            //for rec                    
+  DSPU32    getRec_tab0[256] = {0x1ffff, 0x1FE03, 0x1FC09, 0x1FA13, 0x1F820, 0x1F632, 0x1F447, 0x1F260, 0x1F07D, 0x1EE9D,
+                                0x1ECC1, 0x1EAE9, 0x1E914, 0x1E742, 0x1E574, 0x1E3AA, 0x1E1E3, 0x1E01F, 0x1DE5E, 0x1DCA1,
+                                0x1DAE7, 0x1D930, 0x1D77C, 0x1D5CB, 0x1D41E, 0x1D273, 0x1D0CC, 0x1CF28, 0x1CD86, 0x1CBE8,
+                                0x1CA4C, 0x1C8B3, 0x1C71D, 0x1C58A, 0x1C3FA, 0x1C26C, 0x1C0E1, 0x1BF59, 0x1BDD3, 0x1BC50,
+                                0x1BAD0, 0x1B953, 0x1B7D7, 0x1B65F, 0x1B4E9, 0x1B375, 0x1B204, 0x1B095, 0x1AF29, 0x1ADBF,
+                                0x1AC58, 0x1AAF2, 0x1A990, 0x1A82F, 0x1A6D1, 0x1A575, 0x1A41B, 0x1A2C3, 0x1A16E, 0x1A01B,
+                                0x19EC9, 0x19D7B, 0x19C2E, 0x19AE3, 0x1999A, 0x19853, 0x1970F, 0x195CC, 0x1948C, 0x1934D,
+                                0x19210, 0x190D5, 0x18F9D, 0x18E66, 0x18D31, 0x18BFD, 0x18ACC, 0x1899D, 0x1886F, 0x18743,
+                                0x18619, 0x184F1, 0x183CA, 0x182A5, 0x18182, 0x18061, 0x17F41, 0x17E23, 0x17D06, 0x17BEC,
+                                0x17AD3, 0x179BB, 0x178A5, 0x17791, 0x1767E, 0x1756D, 0x1745E, 0x1734F, 0x17243, 0x17138,
+                                0x1702E, 0x16F26, 0x16E20, 0x16D1B, 0x16C17, 0x16B15, 0x16A14, 0x16915, 0x16817, 0x1671A,
+                                0x1661F, 0x16525, 0x1642D, 0x16336, 0x16240, 0x1614C, 0x16058, 0x15F67, 0x15E76, 0x15D87,
+                                0x15C99, 0x15BAC, 0x15AC1, 0x159D7, 0x158EE, 0x15806, 0x1571F, 0x1563A, 0x15556, 0x15473,
+                                0x15391, 0x152B0, 0x151D1, 0x150F3, 0x15015, 0x14F39, 0x14E5E, 0x14D85, 0x14CAC, 0x14BD4,
+                                0x14AFE, 0x14A28, 0x14954, 0x14881, 0x147AE, 0x146DD, 0x1460D, 0x1453E, 0x14470, 0x143A3,
+                                0x142D7, 0x1420C, 0x14142, 0x14078, 0x13FB0, 0x13EE9, 0x13E23, 0x13D5E, 0x13C9A, 0x13BD6,
+                                0x13B14, 0x13A53, 0x13992, 0x138D2, 0x13814, 0x13756, 0x13699, 0x135DD, 0x13522, 0x13468,
+                                0x133AF, 0x132F6, 0x1323E, 0x13188, 0x130D2, 0x1301D, 0x12F69, 0x12EB5, 0x12E03, 0x12D51,
+                                0x12CA0, 0x12BF0, 0x12B41, 0x12A92, 0x129E4, 0x12937, 0x1288B, 0x127E0, 0x12735, 0x1268B,
+                                0x125E2, 0x1253A, 0x12493, 0x123EC, 0x12346, 0x122A0, 0x121FC, 0x12158, 0x120B5, 0x12012,
+                                0x11F71, 0x11ECF, 0x11E2F, 0x11D90, 0x11CF1, 0x11C52, 0x11BB5, 0x11B18, 0x11A7C, 0x119E0,
+                                0x11945, 0x118AB, 0x11812, 0x11779, 0x116E1, 0x11649, 0x115B2, 0x1151C, 0x11486, 0x113F1,
+                                0x1135D, 0x112C9, 0x11236, 0x111A3, 0x11111, 0x11080, 0x10FEF, 0x10F5F, 0x10ED0, 0x10E41,
+                                0x10DB2, 0x10D24, 0x10C97, 0x10C0B, 0x10B7F, 0x10AF3, 0x10A68, 0x109DE, 0x10954, 0x108CB,
+                                0x10842, 0x107BA, 0x10733, 0x106AC, 0x10625, 0x1059F, 0x1051A, 0x10495, 0x10410, 0x1038D,
+                                0x10309, 0x10286, 0x10204, 0x10182, 0x10101, 0x10080};
+                                
+  DSPU32    getRec_tab1[256] = {0x20001, 0x203FB, 0x207E9, 0x20BCB, 0x20FA2, 0x2136E, 0x2172F, 0x21AE5, 0x21E90, 0x22230,
+                                0x225C6, 0x22952, 0x22CD4, 0x2304B, 0x233B9, 0x2371D, 0x23A77, 0x23DC8, 0x24110, 0x2444F,
+                                0x24784, 0x24AB1, 0x24DD5, 0x250F0, 0x25403, 0x2570D, 0x25A10, 0x25D0A, 0x25FFC, 0x262E6,
+                                0x265C8, 0x268A2, 0x26B75, 0x26E41, 0x27105, 0x273C2, 0x27677, 0x27926, 0x27BCD, 0x27E6E,
+                                0x28108, 0x2839B, 0x28627, 0x288AD, 0x28B2D, 0x28DA6, 0x29019, 0x29285, 0x294EC, 0x2974C,
+                                0x299A7, 0x29BFC, 0x29E4B, 0x2A094, 0x2A2D7, 0x2A515, 0x2A74D, 0x2A980, 0x2ABAE, 0x2ADD6,
+                                0x2AFF9, 0x2B217, 0x2B430, 0x2B644, 0x2B852, 0x2BA5C, 0x2BC61, 0x2BE61, 0x2C05D, 0x2C254,
+                                0x2C446, 0x2C633, 0x2C81D, 0x2CA01, 0x2CBE1, 0x2CDBD, 0x2CF95, 0x2D168, 0x2D337, 0x2D502,
+                                0x2D6C9, 0x2D88C, 0x2DA4B, 0x2DC06, 0x2DDBD, 0x2DF70, 0x2E120, 0x2E2CB, 0x2E473, 0x2E617,
+                                0x2E7B8, 0x2E955, 0x2EAEE, 0x2EC84, 0x2EE17, 0x2EFA6, 0x2F131, 0x2F2B9, 0x2F43E, 0x2F5C0,
+                                0x2F73E, 0x2F8BA, 0x2FA32, 0x2FBA6, 0x2FD18, 0x2FE87, 0x2FFF2, 0x3015B, 0x302C1, 0x30424,
+                                0x30583, 0x306E0, 0x3083B, 0x30992, 0x30AE6, 0x30C38, 0x30D87, 0x30ED4, 0x3101D, 0x31165,
+                                0x312A9, 0x313EB, 0x3152A, 0x31667, 0x317A1, 0x318D9, 0x31A0F, 0x31B42, 0x31C72, 0x31DA1,
+                                0x31ECC, 0x31FF6, 0x3211D, 0x32242, 0x32365, 0x32485, 0x325A4, 0x326C0, 0x327DA, 0x328F2,
+                                0x32A07, 0x32B1B, 0x32C2C, 0x32D3C, 0x32E49, 0x32F55, 0x3305E, 0x33166, 0x3326B, 0x3336F,
+                                0x33470, 0x33570, 0x3366E, 0x3376A, 0x33864, 0x3395D, 0x33A53, 0x33B48, 0x33C3B, 0x33D2C,
+                                0x33E1C, 0x33F0A, 0x33FF6, 0x340E0, 0x341C9, 0x342B0, 0x34395, 0x34479, 0x3455B, 0x3463C,
+                                0x3471B, 0x347F8, 0x348D4, 0x349AE, 0x34A87, 0x34B5F, 0x34C34, 0x34D09, 0x34DDC, 0x34EAD,
+                                0x34F7D, 0x3504C, 0x35119, 0x351E5, 0x352AF, 0x35378, 0x35440, 0x35506, 0x355CB, 0x3568E,
+                                0x35751, 0x35812, 0x358D1, 0x35990, 0x35A4D, 0x35B09, 0x35BC4, 0x35C7D, 0x35D35, 0x35DEC,
+                                0x35EA2, 0x35F57, 0x3600A, 0x360BC, 0x3616D, 0x3621D, 0x362CC, 0x3637A, 0x36426, 0x364D2,
+                                0x3657C, 0x36625, 0x366CD, 0x36774, 0x3681A, 0x368BF, 0x36963, 0x36A06, 0x36AA8, 0x36B49,
+                                0x36BE9, 0x36C87, 0x36D25, 0x36DC2, 0x36E5E, 0x36EF9, 0x36F93, 0x3702B, 0x370C3, 0x3715B,
+                                0x371F1, 0x37286, 0x3731A, 0x373AE, 0x37440, 0x374D2, 0x37562, 0x375F2, 0x37681, 0x3770F,
+                                0x3779C, 0x37829, 0x378B4, 0x3793F, 0x379C9, 0x37A52, 0x37ADA, 0x37B61, 0x37BE8, 0x37C6E,
+                                0x37CF3, 0x37D77, 0x37DFA, 0x37E7D, 0x37EFF, 0x37F80};
+            
+            //for Arctg                    
+   DSPU16   getArctg_tab0[256] = {0x00000, 0x00029, 0x00051, 0x0007A, 0x000A3, 0x000CC, 0x000F4, 0x0011D, 0x00146, 0x0016F,
+                                  0x00197, 0x001C0, 0x001E9, 0x00211, 0x0023A, 0x00262, 0x0028B, 0x002B4, 0x002DC, 0x00305,
+                                  0x0032D, 0x00356, 0x0037E, 0x003A7, 0x003CF, 0x003F7, 0x00420, 0x00448, 0x00470, 0x00499,
+                                  0x004C1, 0x004E9, 0x00511, 0x00539, 0x00561, 0x00589, 0x005B1, 0x005D9, 0x00601, 0x00629,
+                                  0x00651, 0x00678, 0x006A0, 0x006C8, 0x006EF, 0x00717, 0x0073E, 0x00766, 0x0078D, 0x007B5,
+                                  0x007DC, 0x00803, 0x0082A, 0x00851, 0x00878, 0x0089F, 0x008C6, 0x008ED, 0x00914, 0x0093B,
+                                  0x00961, 0x00988, 0x009AE, 0x009D5, 0x009FB, 0x00A22, 0x00A48, 0x00A6E, 0x00A94, 0x00ABA,
+                                  0x00AE0, 0x00B06, 0x00B2C, 0x00B51, 0x00B77, 0x00B9D, 0x00BC2, 0x00BE7, 0x00C0D, 0x00C32,
+                                  0x00C57, 0x00C7C, 0x00CA1, 0x00CC6, 0x00CEB, 0x00D10, 0x00D34, 0x00D59, 0x00D7D, 0x00DA2,
+                                  0x00DC6, 0x00DEA, 0x00E0F, 0x00E33, 0x00E56, 0x00E7A, 0x00E9E, 0x00EC2, 0x00EE5, 0x00F09,
+                                  0x00F2C, 0x00F50, 0x00F73, 0x00F96, 0x00FB9, 0x00FDC, 0x00FFF, 0x01021, 0x01044, 0x01067,
+                                  0x01089, 0x010AB, 0x010CE, 0x010F0, 0x01112, 0x01134, 0x01156, 0x01177, 0x01199, 0x011BB,
+                                  0x011DC, 0x011FD, 0x0121F, 0x01240, 0x01261, 0x01282, 0x012A3, 0x012C3, 0x012E4, 0x01305,
+                                  0x01325, 0x01345, 0x01366, 0x01386, 0x013A6, 0x013C6, 0x013E6, 0x01405, 0x01425, 0x01444,
+                                  0x01464, 0x01483, 0x014A2, 0x014C1, 0x014E0, 0x014FF, 0x0151E, 0x0153D, 0x0155B, 0x0157A,
+                                  0x01598, 0x015B7, 0x015D5, 0x015F3, 0x01611, 0x0162F, 0x0164C, 0x0166A, 0x01688, 0x016A5,
+                                  0x016C2, 0x016E0, 0x016FD, 0x0171A, 0x01737, 0x01754, 0x01770, 0x0178D, 0x017AA, 0x017C6,
+                                  0x017E2, 0x017FE, 0x0181B, 0x01837, 0x01853, 0x0186E, 0x0188A, 0x018A6, 0x018C1, 0x018DD,
+                                  0x018F8, 0x01913, 0x0192E, 0x01949, 0x01964, 0x0197F, 0x0199A, 0x019B4, 0x019CF, 0x019E9,
+                                  0x01A04, 0x01A1E, 0x01A38, 0x01A52, 0x01A6C, 0x01A86, 0x01A9F, 0x01AB9, 0x01AD3, 0x01AEC,
+                                  0x01B05, 0x01B1F, 0x01B38, 0x01B51, 0x01B6A, 0x01B83, 0x01B9C, 0x01BB4, 0x01BCD, 0x01BE5,
+                                  0x01BFE, 0x01C16, 0x01C2E, 0x01C46, 0x01C5E, 0x01C76, 0x01C8E, 0x01CA6, 0x01CBE, 0x01CD5,
+                                  0x01CED, 0x01D04, 0x01D1B, 0x01D33, 0x01D4A, 0x01D61, 0x01D78, 0x01D8E, 0x01DA5, 0x01DBC,
+                                  0x01DD3, 0x01DE9, 0x01DFF, 0x01E16, 0x01E2C, 0x01E42, 0x01E58, 0x01E6E, 0x01E84, 0x01E9A,
+                                  0x01EB0, 0x01EC5, 0x01EDB, 0x01EF0, 0x01F06, 0x01F1B, 0x01F30, 0x01F45, 0x01F5A, 0x01F6F,
+                                  0x01F84, 0x01F99, 0x01FAE, 0x01FC3, 0x01FD7, 0x01FEC};
+                                  
+   DSPU16    getArctg_tab1[256] = {0x028BE, 0x028BE, 0x028BE, 0x028BD, 0x028BC, 0x028BA, 0x028B9, 0x028B7, 0x028B4, 0x028B1,
+                                  0x028AE, 0x028AB, 0x028A8, 0x028A4, 0x0289F, 0x0289B, 0x02896, 0x02891, 0x0288B, 0x02885,
+                                  0x0287F, 0x02879, 0x02872, 0x0286B, 0x02864, 0x0285C, 0x02854, 0x0284C, 0x02843, 0x0283A,
+                                  0x02831, 0x02828, 0x0281E, 0x02814, 0x0280A, 0x027FF, 0x027F4, 0x027E9, 0x027DD, 0x027D2,
+                                  0x027C6, 0x027BA, 0x027AD, 0x027A0, 0x02793, 0x02786, 0x02778, 0x0276A, 0x0275C, 0x0274E,
+                                  0x0273F, 0x02730, 0x02721, 0x02712, 0x02702, 0x026F2, 0x026E2, 0x026D2, 0x026C1, 0x026B0,
+                                  0x0269F, 0x0268E, 0x0267C, 0x0266B, 0x02659, 0x02647, 0x02634, 0x02622, 0x0260F, 0x025FC,
+                                  0x025E9, 0x025D5, 0x025C2, 0x025AE, 0x0259A, 0x02586, 0x02572, 0x0255D, 0x02548, 0x02533,
+                                  0x0251E, 0x02509, 0x024F4, 0x024DE, 0x024C9, 0x024B3, 0x0249D, 0x02486, 0x02470, 0x0245A,
+                                  0x02443, 0x0242C, 0x02415, 0x023FE, 0x023E7, 0x023D0, 0x023B8, 0x023A1, 0x02389, 0x02371,
+                                  0x0235A, 0x02342, 0x02329, 0x02311, 0x022F9, 0x022E0, 0x022C8, 0x022AF, 0x02297, 0x0227E,
+                                  0x02265, 0x0224C, 0x02233, 0x02219, 0x02200, 0x021E7, 0x021CE, 0x021B4, 0x0219B, 0x02181,
+                                  0x02167, 0x0214E, 0x02134, 0x0211A, 0x02100, 0x020E6, 0x020CC, 0x020B2, 0x02098, 0x0207E,
+                                  0x02064, 0x0204A, 0x02030, 0x02015, 0x01FFB, 0x01FE1, 0x01FC7, 0x01FAC, 0x01F92, 0x01F77,
+                                  0x01F5D, 0x01F43, 0x01F28, 0x01F0E, 0x01EF3, 0x01ED9, 0x01EBE, 0x01EA4, 0x01E8A, 0x01E6F,
+                                  0x01E55, 0x01E3A, 0x01E20, 0x01E05, 0x01DEB, 0x01DD0, 0x01DB6, 0x01D9C, 0x01D81, 0x01D67,
+                                  0x01D4C, 0x01D32, 0x01D18, 0x01CFE, 0x01CE3, 0x01CC9, 0x01CAF, 0x01C95, 0x01C7B, 0x01C60,
+                                  0x01C46, 0x01C2C, 0x01C12, 0x01BF8, 0x01BDE, 0x01BC5, 0x01BAB, 0x01B91, 0x01B77, 0x01B5D,
+                                  0x01B44, 0x01B2A, 0x01B10, 0x01AF7, 0x01ADD, 0x01AC4, 0x01AAB, 0x01A91, 0x01A78, 0x01A5F,
+                                  0x01A46, 0x01A2D, 0x01A13, 0x019FA, 0x019E1, 0x019C9, 0x019B0, 0x01997, 0x0197E, 0x01966,
+                                  0x0194D, 0x01935, 0x0191C, 0x01904, 0x018EB, 0x018D3, 0x018BB, 0x018A3, 0x0188B, 0x01873,
+                                  0x0185B, 0x01843, 0x0182B, 0x01814, 0x017FC, 0x017E4, 0x017CD, 0x017B5, 0x0179E, 0x01787,
+                                  0x01770, 0x01758, 0x01741, 0x0172A, 0x01713, 0x016FD, 0x016E6, 0x016CF, 0x016B9, 0x016A2,
+                                  0x0168C, 0x01675, 0x0165F, 0x01649, 0x01633, 0x0161D, 0x01606, 0x015F1, 0x015DB, 0x015C5,
+                                  0x015AF, 0x0159A, 0x01584, 0x0156F, 0x01559, 0x01544, 0x0152F, 0x0151A, 0x01505, 0x014F0,
+                                  0x014DB, 0x014C6, 0x014B1, 0x0149D, 0x01488, 0x01474};
+            
+            //for sin cos                             
+  DSPU32    getSin_tab[256] = {0x00000, 0x00192, 0x00324, 0x004B6, 0x00648, 0x007DB, 0x0096D, 0x00AFF, 0x00C91, 0x00E23,
+                               0x00FB5, 0x01147, 0x012D8, 0x0146A, 0x015FC, 0x0178E, 0x0191F, 0x01AB1, 0x01C43, 0x01DD4,
+                               0x01F65, 0x020F7, 0x02288, 0x02419, 0x025AA, 0x0273B, 0x028CC, 0x02A5D, 0x02BEE, 0x02D7E,
+                               0x02F0F, 0x0309F, 0x0322F, 0x033BF, 0x0354F, 0x036DF, 0x0386F, 0x039FF, 0x03B8E, 0x03D1D,
+                               0x03EAD, 0x0403C, 0x041CB, 0x04359, 0x044E8, 0x04676, 0x04804, 0x04992, 0x04B20, 0x04CAE,
+                               0x04E3B, 0x04FC9, 0x05156, 0x052E3, 0x0546F, 0x055FC, 0x05788, 0x05914, 0x05AA0, 0x05C2C,
+                               0x05DB7, 0x05F43, 0x060CE, 0x06258, 0x063E3, 0x0656D, 0x066F7, 0x06881, 0x06A0B, 0x06B94,
+                               0x06D1D, 0x06EA6, 0x0702E, 0x071B6, 0x0733E, 0x074C6, 0x0764D, 0x077D4, 0x0795B, 0x07AE2,
+                               0x07C68, 0x07DEE, 0x07F73, 0x080F9, 0x0827E, 0x08402, 0x08587, 0x0870B, 0x0888F, 0x08A12,
+                               0x08B95, 0x08D18, 0x08E9A, 0x0901C, 0x0919E, 0x0931F, 0x094A0, 0x09621, 0x097A1, 0x09921,
+                               0x09AA1, 0x09C20, 0x09D9E, 0x09F1D, 0x0A09B, 0x0A219, 0x0A396, 0x0A513, 0x0A68F, 0x0A80B,
+                               0x0A987, 0x0AB02, 0x0AC7D, 0x0ADF7, 0x0AF71, 0x0B0EB, 0x0B264, 0x0B3DD, 0x0B555, 0x0B6CD,
+                               0x0B844, 0x0B9BB, 0x0BB32, 0x0BCA8, 0x0BE1D, 0x0BF92, 0x0C107, 0x0C27B, 0x0C3EF, 0x0C562,
+                               0x0C6D5, 0x0C847, 0x0C9B9, 0x0CB2B, 0x0CC9C, 0x0CE0C, 0x0CF7C, 0x0D0EB, 0x0D25A, 0x0D3C8,
+                               0x0D536, 0x0D6A4, 0x0D810, 0x0D97D, 0x0DAE9, 0x0DC54, 0x0DDBE, 0x0DF29, 0x0E092, 0x0E1FB,
+                               0x0E364, 0x0E4CC, 0x0E633, 0x0E79A, 0x0E901, 0x0EA67, 0x0EBCC, 0x0ED30, 0x0EE94, 0x0EFF8,
+                               0x0F15B, 0x0F2BD, 0x0F41F, 0x0F580, 0x0F6E1, 0x0F841, 0x0F9A0, 0x0FAFF, 0x0FC5D, 0x0FDBB,
+                               0x0FF18, 0x10074, 0x101D0, 0x1032B, 0x10485, 0x105DF, 0x10738, 0x10891, 0x109E9, 0x10B40,
+                               0x10C97, 0x10DED, 0x10F42, 0x11097, 0x111EB, 0x1133F, 0x11491, 0x115E3, 0x11735, 0x11886,
+                               0x119D6, 0x11B25, 0x11C74, 0x11DC2, 0x11F0F, 0x1205C, 0x121A8, 0x122F3, 0x1243D, 0x12587,
+                               0x126D0, 0x12819, 0x12960, 0x12AA7, 0x12BEE, 0x12D33, 0x12E78, 0x12FBC, 0x130FF, 0x13242,
+                               0x13384, 0x134C5, 0x13606, 0x13745, 0x13884, 0x139C2, 0x13B00, 0x13C3C, 0x13D78, 0x13EB3,
+                               0x13FEE, 0x14127, 0x14260, 0x14398, 0x144CF, 0x14606, 0x1473B, 0x14870, 0x149A4, 0x14AD8,
+                               0x14C0A, 0x14D3C, 0x14E6D, 0x14F9D, 0x150CC, 0x151FB, 0x15328, 0x15455, 0x15581, 0x156AC,
+                               0x157D7, 0x15900, 0x15A29, 0x15B51, 0x15C78, 0x15D9E, 0x15EC3, 0x15FE8, 0x1610B, 0x1622E,
+                               0x16350, 0x16471, 0x16592, 0x166B1, 0x167CF, 0x168ED};
+                               
+    DSPU32  getCos_tab[256] = {0x1FFFE, 0x1FFFF, 0x1FFFE, 0x1FFFA, 0x1FFF6, 0x1FFF1, 0x1FFEA, 0x1FFE2, 0x1FFD9, 0x1FFCE,
+                               0x1FFC2, 0x1FFB5, 0x1FFA7, 0x1FF98, 0x1FF87, 0x1FF75, 0x1FF62, 0x1FF4E, 0x1FF38, 0x1FF21,
+                               0x1FF09, 0x1FEF0, 0x1FED6, 0x1FEBA, 0x1FE9D, 0x1FE7F, 0x1FE5F, 0x1FE3F, 0x1FE1D, 0x1FDFA,
+                               0x1FDD5, 0x1FDB0, 0x1FD89, 0x1FD61, 0x1FD38, 0x1FD0D, 0x1FCE1, 0x1FCB4, 0x1FC86, 0x1FC57,
+                               0x1FC26, 0x1FBF4, 0x1FBC1, 0x1FB8D, 0x1FB58, 0x1FB21, 0x1FAE9, 0x1FAB0, 0x1FA75, 0x1FA3A,
+                               0x1F9FD, 0x1F9BF, 0x1F980, 0x1F93F, 0x1F8FD, 0x1F8BA, 0x1F876, 0x1F831, 0x1F7EA, 0x1F7A3,
+                               0x1F75A, 0x1F70F, 0x1F6C4, 0x1F677, 0x1F629, 0x1F5DA, 0x1F58A, 0x1F539, 0x1F4E6, 0x1F492,
+                               0x1F43D, 0x1F3E7, 0x1F38F, 0x1F337, 0x1F2DD, 0x1F281, 0x1F225, 0x1F1C8, 0x1F169, 0x1F109,
+                               0x1F0A8, 0x1F046, 0x1EFE2, 0x1EF7D, 0x1EF18, 0x1EEB0, 0x1EE48, 0x1EDDF, 0x1ED74, 0x1ED08,
+                               0x1EC9B, 0x1EC2D, 0x1EBBE, 0x1EB4D, 0x1EADB, 0x1EA68, 0x1E9F4, 0x1E97F, 0x1E908, 0x1E891,
+                               0x1E818, 0x1E79E, 0x1E722, 0x1E6A6, 0x1E629, 0x1E5AA, 0x1E52A, 0x1E4A9, 0x1E427, 0x1E3A3,
+                               0x1E31F, 0x1E299, 0x1E212, 0x1E18A, 0x1E101, 0x1E076, 0x1DFEB, 0x1DF5E, 0x1DED0, 0x1DE41,
+                               0x1DDB1, 0x1DD20, 0x1DC8D, 0x1DBFA, 0x1DB65, 0x1DACF, 0x1DA38, 0x1D9A0, 0x1D907, 0x1D86C,
+                               0x1D7D1, 0x1D734, 0x1D696, 0x1D5F7, 0x1D557, 0x1D4B6, 0x1D413, 0x1D370, 0x1D2CB, 0x1D225,
+                               0x1D17E, 0x1D0D6, 0x1D02D, 0x1CF83, 0x1CED8, 0x1CE2B, 0x1CD7E, 0x1CCCF, 0x1CC1F, 0x1CB6E,
+                               0x1CABC, 0x1CA09, 0x1C955, 0x1C89F, 0x1C7E9, 0x1C731, 0x1C679, 0x1C5BF, 0x1C504, 0x1C448,
+                               0x1C38B, 0x1C2CD, 0x1C20E, 0x1C14E, 0x1C08C, 0x1BFCA, 0x1BF06, 0x1BE42, 0x1BD7C, 0x1BCB5,
+                               0x1BBED, 0x1BB25, 0x1BA5B, 0x1B990, 0x1B8C4, 0x1B7F6, 0x1B728, 0x1B659, 0x1B589, 0x1B4B7,
+                               0x1B3E5, 0x1B311, 0x1B23D, 0x1B167, 0x1B091, 0x1AFB9, 0x1AEE0, 0x1AE07, 0x1AD2C, 0x1AC50,
+                               0x1AB73, 0x1AA95, 0x1A9B6, 0x1A8D6, 0x1A7F6, 0x1A714, 0x1A631, 0x1A54D, 0x1A468, 0x1A382,
+                               0x1A29A, 0x1A1B2, 0x1A0C9, 0x19FDF, 0x19EF4, 0x19E08, 0x19D1B, 0x19C2D, 0x19B3E, 0x19A4E,
+                               0x1995D, 0x1986B, 0x19778, 0x19684, 0x1958F, 0x19499, 0x193A2, 0x192AA, 0x191B1, 0x190B8,
+                               0x18FBD, 0x18EC1, 0x18DC4, 0x18CC7, 0x18BC8, 0x18AC8, 0x189C8, 0x188C6, 0x187C4, 0x186C1,
+                               0x185BC, 0x184B7, 0x183B1, 0x182AA, 0x181A2, 0x18099, 0x17F8F, 0x17E84, 0x17D78, 0x17C6C,
+                               0x17B5E, 0x17A4F, 0x17940, 0x17830, 0x1771E, 0x1760C, 0x174F9, 0x173E5, 0x172D1, 0x171BB,
+                               0x170A4, 0x16F8D, 0x16E74, 0x16D5B, 0x16C41, 0x16B26};
+                               
+    DSPU32  getSinCos_x1[256] = {0x00000, 0x00002, 0x00003, 0x00005, 0x00006, 0x00008, 0x00009, 0x0000B, 0x0000D, 0x0000E,
+                                 0x00010, 0x00011, 0x00013, 0x00014, 0x00016, 0x00018, 0x00019, 0x0001B, 0x0001C, 0x0001E,
+                                 0x0001F, 0x00021, 0x00023, 0x00024, 0x00026, 0x00027, 0x00029, 0x0002A, 0x0002C, 0x0002E,
+                                 0x0002F, 0x00031, 0x00032, 0x00034, 0x00035, 0x00037, 0x00039, 0x0003A, 0x0003C, 0x0003D,
+                                 0x0003F, 0x00040, 0x00042, 0x00044, 0x00045, 0x00047, 0x00048, 0x0004A, 0x0004B, 0x0004D,
+                                 0x0004F, 0x00050, 0x00052, 0x00053, 0x00055, 0x00056, 0x00058, 0x0005A, 0x0005B, 0x0005D,
+                                 0x0005E, 0x00060, 0x00061, 0x00063, 0x00065, 0x00066, 0x00068, 0x00069, 0x0006B, 0x0006C,
+                                 0x0006E, 0x00070, 0x00071, 0x00073, 0x00074, 0x00076, 0x00077, 0x00079, 0x0007B, 0x0007C,
+                                 0x0007E, 0x0007F, 0x00081, 0x00082, 0x00084, 0x00086, 0x00087, 0x00089, 0x0008A, 0x0008C,
+                                 0x0008D, 0x0008F, 0x00091, 0x00092, 0x00094, 0x00095, 0x00097, 0x00098, 0x0009A, 0x0009C,
+                                 0x0009D, 0x0009F, 0x000A0, 0x000A2, 0x000A3, 0x000A5, 0x000A7, 0x000A8, 0x000AA, 0x000AB,
+                                 0x000AD, 0x000AE, 0x000B0, 0x000B1, 0x000B3, 0x000B5, 0x000B6, 0x000B8, 0x000B9, 0x000BB,
+                                 0x000BC, 0x000BE, 0x000C0, 0x000C1, 0x000C3, 0x000C4, 0x000C6, 0x000C7, 0x000C9, 0x000CB,
+                                 0x000CC, 0x000CE, 0x000CF, 0x000D1, 0x000D2, 0x000D4, 0x000D6, 0x000D7, 0x000D9, 0x000DA,
+                                 0x000DC, 0x000DD, 0x000DF, 0x000E1, 0x000E2, 0x000E4, 0x000E5, 0x000E7, 0x000E8, 0x000EA,
+                                 0x000EC, 0x000ED, 0x000EF, 0x000F0, 0x000F2, 0x000F3, 0x000F5, 0x000F7, 0x000F8, 0x000FA,
+                                 0x000FB, 0x000FD, 0x000FE, 0x00100, 0x00102, 0x00103, 0x00105, 0x00106, 0x00108, 0x00109,
+                                 0x0010B, 0x0010D, 0x0010E, 0x00110, 0x00111, 0x00113, 0x00114, 0x00116, 0x00118, 0x00119,
+                                 0x0011B, 0x0011C, 0x0011E, 0x0011F, 0x00121, 0x00123, 0x00124, 0x00126, 0x00127, 0x00129,
+                                 0x0012A, 0x0012C, 0x0012E, 0x0012F, 0x00131, 0x00132, 0x00134, 0x00135, 0x00137, 0x00139,
+                                 0x0013A, 0x0013C, 0x0013D, 0x0013F, 0x00140, 0x00142, 0x00144, 0x00145, 0x00147, 0x00148,
+                                 0x0014A, 0x0014B, 0x0014D, 0x0014F, 0x00150, 0x00152, 0x00153, 0x00155, 0x00156, 0x00158,
+                                 0x0015A, 0x0015B, 0x0015D, 0x0015E, 0x00160, 0x00161, 0x00163, 0x00165, 0x00166, 0x00168,
+                                 0x00169, 0x0016B, 0x0016C, 0x0016E, 0x00170, 0x00171, 0x00173, 0x00174, 0x00176, 0x00177,
+                                 0x00179, 0x0017B, 0x0017C, 0x0017E, 0x0017F, 0x00181, 0x00182, 0x00184, 0x00186, 0x00187,
+                                 0x00189, 0x0018A, 0x0018C, 0x0018D, 0x0018F, 0x00191};
+                                 
+   DSPU32   getSinCos_negx1[256] = {0x00000, 0x3FFFE, 0x3FFFD, 0x3FFFB, 0x3FFFA, 0x3FFF8, 0x3FFF7, 0x3FFF5, 0x3FFF3, 0x3FFF2,
+                                    0x3FFF0, 0x3FFEF, 0x3FFED, 0x3FFEC, 0x3FFEA, 0x3FFE8, 0x3FFE7, 0x3FFE5, 0x3FFE4, 0x3FFE2,
+                                    0x3FFE1, 0x3FFDF, 0x3FFDD, 0x3FFDC, 0x3FFDA, 0x3FFD9, 0x3FFD7, 0x3FFD6, 0x3FFD4, 0x3FFD2,
+                                    0x3FFD1, 0x3FFCF, 0x3FFCE, 0x3FFCC, 0x3FFCB, 0x3FFC9, 0x3FFC7, 0x3FFC6, 0x3FFC4, 0x3FFC3,
+                                    0x3FFC1, 0x3FFC0, 0x3FFBE, 0x3FFBC, 0x3FFBB, 0x3FFB9, 0x3FFB8, 0x3FFB6, 0x3FFB5, 0x3FFB3,
+                                    0x3FFB1, 0x3FFB0, 0x3FFAE, 0x3FFAD, 0x3FFAB, 0x3FFAA, 0x3FFA8, 0x3FFA6, 0x3FFA5, 0x3FFA3,
+                                    0x3FFA2, 0x3FFA0, 0x3FF9F, 0x3FF9D, 0x3FF9B, 0x3FF9A, 0x3FF98, 0x3FF97, 0x3FF95, 0x3FF94,
+                                    0x3FF92, 0x3FF90, 0x3FF8F, 0x3FF8D, 0x3FF8C, 0x3FF8A, 0x3FF89, 0x3FF87, 0x3FF85, 0x3FF84,
+                                    0x3FF82, 0x3FF81, 0x3FF7F, 0x3FF7E, 0x3FF7C, 0x3FF7A, 0x3FF79, 0x3FF77, 0x3FF76, 0x3FF74,
+                                    0x3FF73, 0x3FF71, 0x3FF6F, 0x3FF6E, 0x3FF6C, 0x3FF6B, 0x3FF69, 0x3FF68, 0x3FF66, 0x3FF64,
+                                    0x3FF63, 0x3FF61, 0x3FF60, 0x3FF5E, 0x3FF5D, 0x3FF5B, 0x3FF59, 0x3FF58, 0x3FF56, 0x3FF55,
+                                    0x3FF53, 0x3FF52, 0x3FF50, 0x3FF4F, 0x3FF4D, 0x3FF4B, 0x3FF4A, 0x3FF48, 0x3FF47, 0x3FF45,
+                                    0x3FF44, 0x3FF42, 0x3FF40, 0x3FF3F, 0x3FF3D, 0x3FF3C, 0x3FF3A, 0x3FF39, 0x3FF37, 0x3FF35,
+                                    0x3FF34, 0x3FF32, 0x3FF31, 0x3FF2F, 0x3FF2E, 0x3FF2C, 0x3FF2A, 0x3FF29, 0x3FF27, 0x3FF26,
+                                    0x3FF24, 0x3FF23, 0x3FF21, 0x3FF1F, 0x3FF1E, 0x3FF1C, 0x3FF1B, 0x3FF19, 0x3FF18, 0x3FF16,
+                                    0x3FF14, 0x3FF13, 0x3FF11, 0x3FF10, 0x3FF0E, 0x3FF0D, 0x3FF0B, 0x3FF09, 0x3FF08, 0x3FF06,
+                                    0x3FF05, 0x3FF03, 0x3FF02, 0x3FF00, 0x3FEFE, 0x3FEFD, 0x3FEFB, 0x3FEFA, 0x3FEF8, 0x3FEF7,
+                                    0x3FEF5, 0x3FEF3, 0x3FEF2, 0x3FEF0, 0x3FEEF, 0x3FEED, 0x3FEEC, 0x3FEEA, 0x3FEE8, 0x3FEE7,
+                                    0x3FEE5, 0x3FEE4, 0x3FEE2, 0x3FEE1, 0x3FEDF, 0x3FEDD, 0x3FEDC, 0x3FEDA, 0x3FED9, 0x3FED7,
+                                    0x3FED6, 0x3FED4, 0x3FED2, 0x3FED1, 0x3FECF, 0x3FECE, 0x3FECC, 0x3FECB, 0x3FEC9, 0x3FEC7,
+                                    0x3FEC6, 0x3FEC4, 0x3FEC3, 0x3FEC1, 0x3FEC0, 0x3FEBE, 0x3FEBC, 0x3FEBB, 0x3FEB9, 0x3FEB8,
+                                    0x3FEB6, 0x3FEB5, 0x3FEB3, 0x3FEB1, 0x3FEB0, 0x3FEAE, 0x3FEAD, 0x3FEAB, 0x3FEAA, 0x3FEA8,
+                                    0x3FEA6, 0x3FEA5, 0x3FEA3, 0x3FEA2, 0x3FEA0, 0x3FE9F, 0x3FE9D, 0x3FE9B, 0x3FE9A, 0x3FE98,
+                                    0x3FE97, 0x3FE95, 0x3FE94, 0x3FE92, 0x3FE90, 0x3FE8F, 0x3FE8D, 0x3FE8C, 0x3FE8A, 0x3FE89,
+                                    0x3FE87, 0x3FE85, 0x3FE84, 0x3FE82, 0x3FE81, 0x3FE7F, 0x3FE7E, 0x3FE7C, 0x3FE7A, 0x3FE79,
+                                    0x3FE77, 0x3FE76, 0x3FE74, 0x3FE73, 0x3FE71, 0x3FE6F};
+            
+            
+            //for ln                        
+  DSPU32    getln_tab[256] = {0x00000, 0x001FF, 0x003FC, 0x005F7, 0x007F0, 0x009E7, 0x00BDD, 0x00DD0, 0x00FC1, 0x011B1,
+                              0x0139F, 0x0158A, 0x01774, 0x0195D, 0x01B43, 0x01D27, 0x01F0A, 0x020EB, 0x022CA, 0x024A8,
+                              0x02684, 0x0285E, 0x02A36, 0x02C0D, 0x02DE2, 0x02FB5, 0x03187, 0x03357, 0x03525, 0x036F2,
+                              0x038BD, 0x03A86, 0x03C4E, 0x03E14, 0x03FD9, 0x0419C, 0x0435E, 0x0451E, 0x046DD, 0x0489A,
+                              0x04A55, 0x04C0F, 0x04DC8, 0x04F7F, 0x05135, 0x052E9, 0x0549C, 0x0564D, 0x057FD, 0x059AB,
+                              0x05B58, 0x05D04, 0x05EAE, 0x06057, 0x061FF, 0x063A5, 0x06549, 0x066ED, 0x0688F, 0x06A30,
+                              0x06BCF, 0x06D6D, 0x06F0A, 0x070A6, 0x07240, 0x073D9, 0x07571, 0x07707, 0x0789C, 0x07A30,
+                              0x07BC3, 0x07D54, 0x07EE4, 0x08073, 0x08201, 0x0838E, 0x08519, 0x086A3, 0x0882C, 0x089B4,
+                              0x08B3B, 0x08CC0, 0x08E45, 0x08FC8, 0x0914A, 0x092CB, 0x0944B, 0x095CA, 0x09747, 0x098C4,
+                              0x09A3F, 0x09BB9, 0x09D32, 0x09EAA, 0x0A022, 0x0A197, 0x0A30C, 0x0A480, 0x0A5F3, 0x0A765,
+                              0x0A8D5, 0x0AA45, 0x0ABB4, 0x0AD21, 0x0AE8E, 0x0AFFA, 0x0B164, 0x0B2CE, 0x0B436, 0x0B59E,
+                              0x0B704, 0x0B86A, 0x0B9CF, 0x0BB32, 0x0BC95, 0x0BDF7, 0x0BF58, 0x0C0B8, 0x0C217, 0x0C375,
+                              0x0C4D2, 0x0C62E, 0x0C789, 0x0C8E3, 0x0CA3D, 0x0CB95, 0x0CCED, 0x0CE43, 0x0CF99, 0x0D0EE,
+                              0x0D242, 0x0D395, 0x0D4E7, 0x0D639, 0x0D789, 0x0D8D9, 0x0DA28, 0x0DB76, 0x0DCC3, 0x0DE0F,
+                              0x0DF5A, 0x0E0A5, 0x0E1EF, 0x0E338, 0x0E480, 0x0E5C7, 0x0E70D, 0x0E853, 0x0E998, 0x0EADC,
+                              0x0EC1F, 0x0ED62, 0x0EEA3, 0x0EFE4, 0x0F124, 0x0F264, 0x0F3A2, 0x0F4E0, 0x0F61D, 0x0F759,
+                              0x0F894, 0x0F9CF, 0x0FB09, 0x0FC42, 0x0FD7B, 0x0FEB2, 0x0FFE9, 0x10120, 0x10255, 0x1038A,
+                              0x104BE, 0x105F1, 0x10724, 0x10856, 0x10987, 0x10AB7, 0x10BE7, 0x10D16, 0x10E45, 0x10F72,
+                              0x1109F, 0x111CC, 0x112F7, 0x11422, 0x1154C, 0x11676, 0x1179F, 0x118C7, 0x119EE, 0x11B15,
+                              0x11C3C, 0x11D61, 0x11E86, 0x11FAA, 0x120CE, 0x121F1, 0x12313, 0x12435, 0x12556, 0x12676,
+                              0x12796, 0x128B5, 0x129D3, 0x12AF1, 0x12C0F, 0x12D2B, 0x12E47, 0x12F63, 0x1307D, 0x13198,
+                              0x132B1, 0x133CA, 0x134E3, 0x135FA, 0x13711, 0x13828, 0x1393E, 0x13A53, 0x13B68, 0x13C7C,
+                              0x13D90, 0x13EA3, 0x13FB6, 0x140C8, 0x141D9, 0x142EA, 0x143FA, 0x1450A, 0x14619, 0x14727,
+                              0x14835, 0x14943, 0x14A50, 0x14B5C, 0x14C68, 0x14D73, 0x14E7E, 0x14F88, 0x15091, 0x1519A,
+                              0x152A3, 0x153AB, 0x154B2, 0x155B9, 0x156C0, 0x157C5, 0x158CB, 0x159D0, 0x15AD4, 0x15BD8,
+                              0x15CDB, 0x15DDE, 0x15EE0, 0x15FE2, 0x160E3, 0x161E4};
+  //for SqrtAbsF32() 2008.08.14   
+  DSPU32  get_sqrt_odd_table0[256] = {0x16A0A,0x16ABF,0x16B73,0x16C28,0x16CDB,0x16D8F,0x16E42,0x16EF5,0x16FA8,0x17059,0x1710B,
+                                  0x171BD,0x1726E,0x1731E,0x173CF,0x1747F,0x1752F,0x175DE,0x1768D,0x1773C,0x177EB,0x17899,
+                                  0x17947,0x179F4,0x17AA2,0x17B4E,0x17BFB,0x17CA7,0x17D53,0x17DFF,0x17EAB,0x17F56,0x18000,
+                                  0x180AB,0x18155,0x181FF,0x182A9,0x18352,0x183FB,0x184A4,0x1854D,0x185F5,0x1869C,0x18744,
+                                  0x187EC,0x18892,0x18939,0x189E0,0x18A86,0x18B2C,0x18BD2,0x18C77,0x18D1C,0x18DC1,0x18E66,
+                                  0x18F0B,0x18FAF,0x19052,0x190F6,0x19199,0x1923C,0x192DF,0x19381,0x19424,0x194C6,0x19568,
+                                  0x19609,0x196AA,0x1974B,0x197ED,0x1988D,0x1992D,0x199CD,0x19A6D,0x19B0C,0x19BAB,0x19C4B,
+                                  0x19CEA,0x19D88,0x19E26,0x19EC5,0x19F62,0x1A000,0x1A09E,0x1A13B,0x1A1D8,0x1A275,0x1A311,
+                                  0x1A3AD,0x1A44A,0x1A4E5,0x1A581,0x1A61C,0x1A6B7,0x1A752,0x1A7ED,0x1A888,0x1A922,0x1A9BC,
+                                  0x1AA55,0x1AAEF,0x1AB88,0x1AC22,0x1ACBA,0x1AD53,0x1ADEC,0x1AE84,0x1AF1D,0x1AFB4,0x1B04C,
+                                  0x1B0E3,0x1B17B,0x1B212,0x1B2A9,0x1B33F,0x1B3D6,0x1B46C,0x1B502,0x1B598,0x1B62E,0x1B6C3,
+                                  0x1B759,0x1B7EE,0x1B882,0x1B917,0x1B9AB,0x1BA40,0x1BAD4,0x1BB68,0x1BBFC,0x1BC8F,0x1BD23,
+                                  0x1BDB6,0x1BE48,0x1BEDB,0x1BF6E,0x1C000,0x1C092,0x1C125,0x1C1B6,0x1C248,0x1C2D9,0x1C36B,
+                                  0x1C3FC,0x1C48D,0x1C51E,0x1C5AE,0x1C63E,0x1C6CE,0x1C75F,0x1C7EE,0x1C87E,0x1C90D,0x1C99D,
+                                  0x1CA2C,0x1CABA,0x1CB49,0x1CBD8,0x1CC66,0x1CCF5,0x1CD83,0x1CE11,0x1CE9F,0x1CF2C,0x1CFBA,
+                                  0x1D047,0x1D0D4,0x1D161,0x1D1EE,0x1D27A,0x1D307,0x1D393,0x1D41F,0x1D4AB,0x1D537,0x1D5C2,
+                                  0x1D64D,0x1D6D8,0x1D764,0x1D7EF,0x1D87A,0x1D904,0x1D98F,0x1DA19,0x1DAA3,0x1DB2D,0x1DBB7,
+                                  0x1DC41,0x1DCCA,0x1DD53,0x1DDDD,0x1DE66,0x1DEEF,0x1DF77,0x1E000,0x1E088,0x1E111,0x1E199,
+                                  0x1E221,0x1E2A9,0x1E331,0x1E3B8,0x1E43F,0x1E4C7,0x1E54E,0x1E5D5,0x1E65C,0x1E6E3,0x1E769,
+                                  0x1E7EF,0x1E876,0x1E8FB,0x1E982,0x1EA07,0x1EA8D,0x1EB13,0x1EB98,0x1EC1D,0x1ECA2,0x1ED27,
+                                  0x1EDAC,0x1EE31,0x1EEB5,0x1EF3A,0x1EFBE,0x1F042,0x1F0C6,0x1F14A,0x1F1CE,0x1F251,0x1F2D5,
+                                  0x1F358,0x1F3DB,0x1F45E,0x1F4E1,0x1F564,0x1F5E6,0x1F669,0x1F6EB,0x1F76D,0x1F7F0,0x1F872,
+                                  0x1F8F4,0x1F975,0x1F9F7,0x1FA79,0x1FAF9,0x1FB7B,0x1FBFC,0x1FC7D,0x1FCFE,0x1FD7E,0x1FDFF,
+                                  0x1FE80,0x1FF00,0x1FF80};
+  DSPU32  get_sqrt_odd_table1[256] = {0x16A09,0x16954,0x168A1,0x167EF,0x1673D,0x1668D,0x165DE,0x1652F,0x16482,0x163D6,0x1632A,
+                                      0x16280,0x161D6,0x1612E,0x16086,0x15FDF,0x15F3A,0x15E95,0x15DF1,0x15D4E,0x15CAC,0x15C0A,
+                                      0x15B6A,0x15ACB,0x15A2C,0x1598E,0x158F1,0x15855,0x157BA,0x1571F,0x15686,0x155EC,0x15554,
+                                      0x154BD,0x15427,0x15391,0x152FC,0x15267,0x151D4,0x15141,0x150B0,0x1501F,0x14F8E,0x14EFE,
+                                      0x14E6F,0x14DE0,0x14D53,0x14CC6,0x14C3A,0x14BAE,0x14B24,0x14A99,0x14A10,0x14987,0x148FF,
+                                      0x14877,0x147F0,0x1476B,0x146E5,0x14660,0x145DC,0x14557,0x144D5,0x14452,0x143D0,0x1434F,
+                                      0x142CE,0x1424E,0x141CF,0x14151,0x140D2,0x14054,0x13FD7,0x13F5A,0x13EDF,0x13E63,0x13DE9,
+                                      0x13D6E,0x13CF5,0x13C7B,0x13C03,0x13B8B,0x13B13,0x13A9C,0x13A26,0x139AF,0x13939,0x138C5,
+                                      0x13850,0x137DC,0x13769,0x136F6,0x13684,0x13611,0x135A0,0x1352F,0x134BE,0x1344F,0x133DF,
+                                      0x13370,0x13301,0x13293,0x13225,0x131B8,0x1314B,0x130DF,0x13073,0x13007,0x12F9D,0x12F32,
+                                      0x12EC8,0x12E5E,0x12DF5,0x12D8C,0x12D24,0x12CBC,0x12C55,0x12BED,0x12B87,0x12B20,0x12ABB,
+                                      0x12A55,0x129F0,0x1298B,0x12927,0x128C3,0x1285F,0x127FC,0x12799,0x12737,0x126D5,0x12674,
+                                      0x12612,0x125B1,0x12551,0x124F1,0x12492,0x12432,0x123D3,0x12375,0x12316,0x122B9,0x1225B,
+                                      0x121FD,0x121A1,0x12144,0x120E8,0x1208C,0x12031,0x11FD6,0x11F7A,0x11F20,0x11EC6,0x11E6C,
+                                      0x11E13,0x11DB9,0x11D61,0x11D09,0x11CB0,0x11C59,0x11C01,0x11BA9,0x11B53,0x11AFC,0x11AA6,
+                                      0x11A4F,0x119FA,0x119A5,0x1194F,0x118FB,0x118A6,0x11852,0x117FE,0x117AB,0x11757,0x11705,
+                                      0x116B2,0x1165F,0x1160D,0x115BB,0x1156A,0x11518,0x114C7,0x11477,0x11426,0x113D6,0x11386,
+                                      0x11336,0x112E7,0x11298,0x11249,0x111FA,0x111AC,0x1115E,0x11110,0x110C3,0x11075,0x11028,
+                                      0x10FDC,0x10F8F,0x10F43,0x10EF7,0x10EAB,0x10E5F,0x10E14,0x10DC9,0x10D7E,0x10D34,0x10CE9,
+                                      0x10CA0,0x10C56,0x10C0C,0x10BC2,0x10B7A,0x10B31,0x10AE8,0x10AA0,0x10A58,0x10A10,0x109C7,
+                                      0x10980,0x10939,0x108F2,0x108AB,0x10864,0x1081E,0x107D8,0x10792,0x1074C,0x10706,0x106C1,
+                                      0x1067D,0x10637,0x105F3,0x105AE,0x1056A,0x10526,0x104E2,0x1049F,0x1045B,0x10418,0x103D5,
+                                      0x10392,0x1034F,0x1030D,0x102CA,0x10289,0x10247,0x10205,0x101C4,0x10182,0x10141,0x10101,
+                                      0x100C0,0x10080,0x1003F};
+DSPU32 bw_sqrt32(Cfloat32 f32src)
+{	       
+    DSPU64 u64Result1=(DSPU64)getSqr_tab0[f32src.rf32value.split_f32.u8X0]*65536;
+    DSPU32 u32s1=getSqr_tab1[f32src.rf32value.split_f32.u8X0];
+    //cout<<"tab0 = "<<hex<<getSqr_tab0[f32src.rf32value.split_f32.u8X0]<<endl;
+    //cout<<"tab1 = "<<hex<<getSqr_tab1[f32src.rf32value.split_f32.u8X0]<<endl;
+    DSPU32 u32s2=f32src.rf32value.split_f32.u9X1 / 4;
+    DSPU64 u64Result2=(DSPU64)u32s1*u32s2;
+	DSPU64 u64Result= u64Result1+u64Result2;               //以上为计算sqrt(x0+x1) 
+    
+    DSPU64 u64LastResult;
+    DSPI32 i32src; 
+    DSPU32 tempu32;
+    DSPU32 u32Result; 
+    
+    RECI_F64_35 rf64_35;
+    rf64_35.u64Value=u64Result;
+    DSPU32 u18src1=rf64_35.split_f64.u18X1;               //取64位结果的34-17位 
+     
+    int isodd=(f32src.cf32value.split_f32.u8Exp - 127 ) % 2;       //指数模2       
+
+    if (isodd)                                                 //指数为奇数 
+	   	{
+           i32src = (127 - f32src.cf32value.split_f32.u8Exp -1) / 2; 
+           tempu32 = 0x16a09 >> i32src;                       //0x16a09为0.5开方的结果 
+           u64LastResult = (DSPU64) u18src1 * tempu32;    
+        }   
+    else                                                      //指数为偶数 
+        {   
+            i32src = (127 - f32src.cf32value.split_f32.u8Exp ) / 2; 
+            tempu32 = 0x1ffff >> i32src; 
+            u64LastResult = (DSPU64) u18src1 * tempu32;   		  
+        }
+    
+    RECI_33to2 rf_33to2;
+    rf_33to2.u64Value = u64LastResult;
+    u32Result = rf_33to2.split_f32.u31X1;
+	
+    return u32Result;
+	   
+}
+
+DSPU64 bw_log(Cfloat32 f32src)
+{
+    DSPU16 u8X0 = f32src.rf32value.split_f32.u8X0;                                 //取x0 
+    DSPU16 u9X1 = f32src.rf32value.split_f32.u9X1;                                 //取x1 
+    DSPU16 u8Exp = f32src.rf32value.split_f32.u8Exp;                               //取指数 
+
+    DSPU64 u64Result = (DSPU64)getln_tab[u8X0]*131072 + u9X1 * getRec_tab0[u8X0];    //计算不加(u8Exp-0x7f)*ln2的结果;
+
+    // 以下操作为：应刘小明要求截取 u64Result的34-17位 
+    LogMidResult_64 temp;
+    temp.u64Value = u64Result;
+    DSPU64 u64MidRes = temp.split_f32.u18res; 
+    
+    //计算加(u8Exp-0x7f)*ln2的结果
+    u64Result = u64MidRes + (u8Exp-0x7f)*ln2;  
+
+    //截取32位结果的24-0位，并对其扩充符号位 
+    LogResult_32 u32log;
+    u32log.u32Value = (DSPU32)u64Result; 
+    
+    if(u32log.split_f32.u1Nega == 0x1)
+          {
+              u64Result = u32log.split_f32.u24res |(DSPU64)(0x1ffffff<<24);
+          }
+    else u64Result = u32log.split_f32.u24res;  
+
+    return u64Result;       
+}
+
+DSPU16 get_sin16(DSPU16 p_u16Src)
+{
+    DSPU16 u5x1;
+    DSPU16 u8x0;
+    DSPU16 u3Nega;
+    DSPU16 u16Result;
+    
+    SIN_16 sin16value;
+    sin16value.u16Value = p_u16Src;
+    u3Nega = sin16value.split_16.u3Nega;
+    
+    switch(u3Nega)
+    {
+                  case 0x0:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_sin16(u8x0,u5x1);
+                       break;
+                  case 0x1:
+                       if(sin16value.u16Value == 0x2000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_cos16(u8x0,u5x1); 
+                       break;
+                  case 0x2:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_cos16(u8x0,u5x1);
+                       break;
+                  case 0x3:
+                       if(sin16value.u16Value == 0x6000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_sin16(u8x0,u5x1);
+                       break;
+                  case 0x4:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_sin16(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x5:
+                       if(sin16value.u16Value == 0xa000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_cos16(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x6:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_cos16(u8x0,u5x1)*(-1); 
+                       break; 
+                  case 0x7:
+                       if(sin16value.u16Value == 0xe000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_sin16(u8x0,u5x1)*(-1);
+                       break;                  
+    }  
+    return u16Result;      
+}
+
+DSPU16 get_cos16(DSPU16 p_u16Src)
+{
+    DSPU16 u5x1;
+    DSPU16 u8x0;
+    DSPU16 u3Nega;
+    DSPU16 u16Result;
+    
+    SIN_16 sin16value;
+    sin16value.u16Value = p_u16Src;
+    u3Nega = sin16value.split_16.u3Nega;
+        
+    switch(u3Nega)
+    {
+                  case 0x0:                                                        //[0,pi/4)处理 
+                       u5x1 = sin16value.split_16.u5x1<<3;                         //x1,取源操作数的低5位，并左移3位 
+                       u8x0 = sin16value.split_16.u8x0;                            //x0，取源操作数的5-12位 
+                       u16Result = bw_cos16(u8x0,u5x1);
+                       break;                       //查表计算 
+                  case 0x1:                                                        //[pi/4,pi/2)处理 
+                       if(sin16value.u16Value == 0x2000)                           //特殊点pi/4处理（应刘小明要求） 
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else                                                        //区间内正常数处理 
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_sin16(u8x0,u5x1);
+                       break; 
+                  case 0x2:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_sin16(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x3:
+                       if(sin16value.u16Value == 0x6000)                            //特殊值3pi/4处理 
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_cos16(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x4:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_cos16(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x5:
+                       if(sin16value.u16Value == 0xa000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_sin16(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x6:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u16Result = bw_sin16(u8x0,u5x1);
+                       break;  
+                  case 0x7:
+                       if(sin16value.u16Value == 0xe000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {   
+                           sin16value.u16Value &= 0x1fff;
+                           
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u16Result = bw_cos16(u8x0,u5x1);
+                       break;                  
+    } 
+    return u16Result;
+}
+
+DSPU16 bw_cos16(DSPU16 u8x0, DSPU16 u5x1)
+{       
+    DSPU64 i64Result = (DSPU64) getCos_tab[u8x0]*131072 - getSin_tab[u8x0]* getbuma18(getSinCos_negx1[u5x1]);        //计算等式    
+    
+    RECI_34to19 rf64_16;                                                //定义64位变量，取19到34位为结果 
+    rf64_16.u64Value = i64Result;    
+    DSPU16 u16result = rf64_16.split_f32.u16X1;
+    
+    return u16result; 
+}
+
+
+DSPU16 bw_sin16(DSPU16 u8x0, DSPU16 u5x1)
+{
+    DSPU64 i64Result =(DSPU64) getSin_tab[u8x0]*131072 + getCos_tab[u8x0]* getSinCos_x1[u5x1];        //计算等式 
+    
+    RECI_34to19 rf64_16;                                                //定义64位变量，取19到34位为结果 
+    rf64_16.u64Value = i64Result;    
+    DSPU16 u16result = rf64_16.split_f32.u16X1;
+
+    return u16result;  
+       
+}
+
+DSPU32 get_sin16to32(DSPU16 p_u16Src)
+{
+    DSPU16 u5x1;
+    DSPU16 u8x0;
+    DSPU16 u3Nega;
+    DSPU32 u32Result;
+    
+    SIN_16 sin16value;
+    sin16value.u16Value = p_u16Src;
+    u3Nega = sin16value.split_16.u3Nega;
+    
+    switch(u3Nega)
+    {
+                  case 0x0:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_sin32(u8x0,u5x1);
+                       break;
+                  case 0x1:
+                       if(sin16value.u16Value == 0x2000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_cos32(u8x0,u5x1);
+                       break; 
+                  case 0x2:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_cos32(u8x0,u5x1);
+                       break;
+                  case 0x3:
+                       if(sin16value.u16Value == 0x6000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_sin32(u8x0,u5x1);
+                       break;
+                  case 0x4:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_sin32(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x5:
+                       if(sin16value.u16Value == 0xa000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_cos32(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x6:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_cos32(u8x0,u5x1)*(-1);  
+                       break;
+                  case 0x7:
+                       if(sin16value.u16Value == 0xe000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_sin32(u8x0,u5x1)*(-1);
+                       break;                  
+    }
+      return u32Result;       
+}
+
+DSPU32 get_cos16to32(DSPU16 p_u16Src)
+{
+    DSPU16 u5x1;
+    DSPU16 u8x0;
+    DSPU16 u3Nega;
+    DSPU32 u32Result;
+    
+    SIN_16 sin16value;
+    sin16value.u16Value = p_u16Src;
+    u3Nega = sin16value.split_16.u3Nega;
+        
+    switch(u3Nega)
+    {
+                  case 0x0:                                                        //[0,pi/4)处理 
+                       u5x1 = sin16value.split_16.u5x1<<3;                         //x1,取源操作数的低5位，并左移3位 
+                       u8x0 = sin16value.split_16.u8x0;                            //x0，取源操作数的5-12位 
+                       u32Result = bw_cos32(u8x0,u5x1);
+                       break;                       //查表计算 
+                  case 0x1:                                                        //[pi/4,pi/2)处理 
+                       if(sin16value.u16Value == 0x2000)                           //特殊点pi/4处理（应刘小明要求） 
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else                                                        //区间内正常数处理 
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_sin32(u8x0,u5x1);
+                       break; 
+                  case 0x2:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_sin32(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x3:
+                       if(sin16value.u16Value == 0x6000)                            //特殊值3pi/4处理 
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_cos32(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x4:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_cos32(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x5:
+                       if(sin16value.u16Value == 0xa000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_sin32(u8x0,u5x1)*(-1);
+                       break;
+                  case 0x6:
+                       u5x1 = sin16value.split_16.u5x1<<3;
+                       u8x0 = sin16value.split_16.u8x0;
+                       u32Result = bw_sin32(u8x0,u5x1);
+                       break;  
+                  case 0x7:
+                       if(sin16value.u16Value == 0xe000)
+                        {
+                           sin16value.u16Value = 0x1fff;
+                           u5x1 = 0xff;
+                           u8x0 = 0xff;                       
+                        }
+                       else
+                       {
+                           sin16value.u16Value &= 0x1fff;
+                           sin16value.u16Value = 0x2000 - sin16value.u16Value;
+                           u5x1 = sin16value.split_16.u5x1<<3;
+                           u8x0 = sin16value.split_16.u8x0;
+                        }
+                       u32Result = bw_cos32(u8x0,u5x1);
+                       break;                  
+    } 
+    return u32Result; 
+}
+
+DSPU32 bw_cos32(DSPU16 u8x0, DSPU16 u5x1)
+{    
+    DSPU64 i64Result = (DSPU64) getCos_tab[u8x0]*131072 - getSin_tab[u8x0]* getbuma18(getSinCos_negx1[u5x1]);        //计算等式     
+    
+    RECI_34to3 rf64_16;                                                //定义64位变量，取19到34位为结果 
+    rf64_16.u64Value = i64Result;    
+    DSPU32 u32result = rf64_16.split_f32.u32X1;
+
+    return u32result;
+}
+
+
+DSPU32 bw_sin32(DSPU16 u8x0, DSPU16 u5x1)
+{   
+    DSPU64 i64Result =(DSPU64) getSin_tab[u8x0]*131072 + getCos_tab[u8x0]* getSinCos_x1[u5x1];        //计算等式
+    
+    RECI_34to3 rf64_16;                                                //定义64位变量，取19到34位为结果 
+    rf64_16.u64Value = i64Result;    
+    DSPU32 u32result=rf64_16.split_f32.u32X1;
+
+    return u32result;  
+       
+}
+
+
+
+
+DSPU32 getbuma18(DSPU32 u32src){
+	   u32src=u32src ^ 0x3ffff;       //按位取反 
+	   if(u32src != 0x1ffff)            
+            {u32src +=1;}                    //取反加一 
+       u32src &= 0x3ffff; 
+       return u32src;
+}
+
+
+
+
+DSPU32 u32tof32(DSPU32 uItem)
+{
+    if(uItem == 0x80000000)
+    {    return 0x3f800000;}
+    else
+    {
+        DSPU32 tempu32;
+        tempu32 = uItem;
+        DSPU32 exp=0;
+        DSPU32 exp1=0;
+        if (uItem>>31)
+        {       
+                tempu32 = getbuma32(tempu32);                     //如果是负数求补码 
+        }               
+        
+        for(int i=31;i>-1;i--)                                //该循环用于确定指数，即阶码 
+        {
+                if(tempu32>>i)
+                {
+                       exp = i-0x1f+0x7f;
+                       exp1 = 31-i;
+                       break;     
+                }
+        }
+        tempu32<<=exp1;                                        //将操作数左移指数位，取30-8的数据，即确定尾数    
+        tempu32&=0x7fffff00;
+        tempu32>>=8;                                           //23位尾数已确定，将其右移8位，准备合成浮点数 
+        exp<<=23; 
+        if (uItem>>31)
+        {       
+                uItem = tempu32 | exp |0x80000000;                     //合成负数的浮点数 
+        }                                              
+        uItem = tempu32 | exp;                                 //合成正数的浮点数 
+        
+        return uItem;
+    }
+}
+
+
+
+
+//以下为余峰林编辑 
+
+DSPU32 bw_sqrtf32(Cfloat32 f32src){
+    
+    CUSTOM_F32 cf32src;
+    cf32src.split_f32.u1Nega=0;
+    DSPU64 ucomp1=1;
+    DSPU64 u64isequ1=0;
+    
+    int isodd=(f32src.cf32value.split_f32.u8Exp - 127 ) % 2;
+
+    RECI_F64_31 rf64_23;
+    RECI_F64_34 rf64_34;
+    if (isodd){
+                DSPU64 u64Result1=(DSPU64)get_sqrt_odd_table0[f32src.rf32value.split_f32.u8X0]*65536;
+                DSPU32 u32s1=get_sqrt_odd_table1[f32src.rf32value.split_f32.u8X0];
+                
+                DSPU32 u32s2=f32src.rf32value.split_f32.u9X1 / 4;
+                DSPU64 u64Result2=(DSPU64)u32s1*u32s2;
+            	DSPU64 u64Result= u64Result1+u64Result2;
+                
+	   	DSPU64 u64OddRresult =  u64Result;
+	   	ucomp1=ucomp1 << 33;
+	    u64isequ1 =  ucomp1 & u64OddRresult;
+	    if (!u64isequ1){
+		   DSPI32 i32src=(f32src.cf32value.split_f32.u8Exp - 127 +1) / 2 +127 -1;
+		   cf32src.split_f32.u8Exp=	i32src;
+		   rf64_23.u32Value=u64OddRresult;
+		   cf32src.split_f32.u23Frac=rf64_23.split_f32.u23src;		
+		   }else{
+  		    DSPI32 i32src=	(f32src.cf32value.split_f32.u8Exp - 127 +1) / 2 +127;
+		   	cf32src.split_f32.u8Exp=i32src;
+		    rf64_34.u32Value=u64OddRresult;
+		    cf32src.split_f32.u23Frac=rf64_34.split_f32.u23src; 
+		   }
+		 
+    }else{
+
+            DSPU64 u64Result1=(DSPU64)getSqr_tab0[f32src.rf32value.split_f32.u8X0]*65536;
+            DSPU32 u32s1=getSqr_tab1[f32src.rf32value.split_f32.u8X0];
+            
+            DSPU32 u32s2=f32src.rf32value.split_f32.u9X1 / 4;
+            DSPU64 u64Result2=(DSPU64)u32s1*u32s2;
+        	DSPU64 u64Result= u64Result1+u64Result2;           
+
+		DSPU64 u64EvehRresult =  u64Result;        		
+		ucomp1=ucomp1 << 33;
+	    u64isequ1 =  ucomp1 & u64EvehRresult;
+	    if (!u64isequ1){
+           DSPI32 i32src=(f32src.cf32value.split_f32.u8Exp - 127) / 2 +127 -1;
+		   cf32src.split_f32.u8Exp=	i32src;
+		   	rf64_23.u32Value=u64EvehRresult;
+		   cf32src.split_f32.u23Frac=rf64_23.split_f32.u23src;		
+		   }else{
+  		    DSPI32 i32src=	(f32src.cf32value.split_f32.u8Exp - 127) / 2 +127;
+		   		 
+		   	cf32src.split_f32.u8Exp=i32src;
+		    rf64_34.u32Value=u64EvehRresult;
+		    cf32src.split_f32.u23Frac=rf64_34.split_f32.u23src;  
+		   }
+		  
+    }  
+ 	DSPU32 u32Result=cf32src.u32Value;
+	
+    return u32Result;
+	   
+}
+
+DSPU32 bw_divf32(Cfloat32 op_x,Cfloat32 op_y,bool bolSatu){
+    
+
+    DSPU64 u64Result1=(DSPU64)getRec_tab0[op_x.rf32value.split_f32.u8X0]*131072;
+    
+   	DSPU32 u32x1=getRec_tab1[op_x.rf32value.split_f32.u8X0];
+   	u32x1 = getbuma32(u32x1);
+   	RECI_F32_18 rf32_18;
+   	rf32_18.u32Value=u32x1;
+   	
+	DSPU64 u64Result2=(DSPU64)rf32_18.split_f32.u18src * (DSPU64)op_x.rf32value.split_f32.u9X1;   
+	DSPU64 u64Result =u64Result1-u64Result2;
+    
+    RECI_F64_18 rf64src;
+	rf64src.u64Value= u64Result;	
+	
+	DSPU32 u32src=op_x.cf32value.split_f32.u8Exp;
+	DSPU32 u32src_y=op_y.cf32value.split_f32.u8Exp;
+
+	DSPI32 i32src_y= u32src_y;
+	DSPI32 i32src= u32src;
+	
+	i32src=i32src_y-127+(127-i32src)+127;
+	//计算尾数
+
+	DSPU32 u32_y=op_y.cf32value.split_f32.u23Frac >> 7 | BIT(16);
+	DSPU32 u32_x=rf64src.split_f64.u17X1;
+	DSPU64 u64ydivx= (DSPU64) u32_y * u32_x + 65536;
+	
+	DSPU64 ucomp1=1;
+	ucomp1=ucomp1 << 33;
+	DSPU64 u64isequ1 =  ucomp1 & u64ydivx;
+	RECI_F64_23 rf64_23;
+	rf64_23.u32Value=u64ydivx;
+	
+	RECI_F64_31 rf64_31;
+	rf64_31.u32Value=u64ydivx;
+	
+	if (!u64isequ1)
+	   i32src=i32src-1;
+       	
+	u32src=i32src;
+	
+	if (i32src <= 0)
+	{   if (op_x.IsNega() ^ op_y.IsNega())
+		   return NEG_ZERO;
+        else
+   		   return POS_ZERO;	   
+    }
+	if (i32src >= 255)
+	{   
+		if (bolSatu)
+		{
+			if (op_x.IsNega() ^ op_y.IsNega())
+			   return MIN_NORM;
+	        else
+	   		   return MAX_NORM;
+		}else{
+			if (op_x.IsNega() ^ op_y.IsNega())
+			   return NEG_INF;
+	        else
+	   		   return POS_INF;	  
+        }
+			   
+    }
+	
+	CUSTOM_F32 cf32src;
+	cf32src.split_f32.u1Nega=op_x.cf32value.split_f32.u1Nega ^ op_y.cf32value.split_f32.u1Nega;
+	cf32src.split_f32.u8Exp=u32src;
+	if (u64isequ1)
+	   cf32src.split_f32.u23Frac=rf64_23.split_f32.u23src;
+    else
+   	   cf32src.split_f32.u23Frac=rf64_31.split_f32.u23src;
+	DSPU32 u32Result=cf32src.u32Value;
+	
+    return u32Result;
+	   
+} 
+
+DSPU32 bw_reciprocal(Cfloat32 f32src){
+    
+    DSPU64 u64Result1=(DSPU64)getRec_tab0[f32src.rf32value.split_f32.u8X0]*131072;
+    
+   	DSPU32 u32x1=getRec_tab1[f32src.rf32value.split_f32.u8X0];
+   	u32x1 = getbuma32(u32x1);
+   	RECI_F32_18 rf32_18;
+   	rf32_18.u32Value=u32x1;
+   	
+	DSPU64 u64Result2=(DSPU64)rf32_18.split_f32.u18src * (DSPU64)f32src.rf32value.split_f32.u9X1;
+	DSPU64 u64Result =u64Result1-u64Result2;
+	
+	DSPU32 u32src=f32src.cf32value.split_f32.u8Exp;	
+	DSPI32 i32src= u32src;
+	i32src=127-i32src-1+127;
+	//cout<<hex<<(u64Result>>33)<<endl;
+	if(!((u64Result>>33)&0x1))//modify 2009.09.23
+	{
+         u64Result = u64Result<<1 ;
+         i32src = i32src - 1;
+    }
+   
+    RECI_F64 rf64src;
+	rf64src.u64Value= u64Result;
+	
+	u32src=i32src;	
+	
+	if (i32src <= 0)
+	{   if (f32src.IsNega())
+		   return NEG_ZERO;
+        else
+   		   return POS_ZERO;	   
+    }
+	
+	CUSTOM_F32 cf32src;
+	cf32src.split_f32.u1Nega=f32src.cf32value.split_f32.u1Nega;
+	cf32src.split_f32.u8Exp=u32src;
+	cf32src.split_f32.u23Frac=rf64src.split_f64.u23X1;
+	DSPU32 u32Result=cf32src.u32Value;
+	
+    return u32Result;
+	   
+} 
+
+
+DSPU16 bw_atan(DSPU32 uix0, DSPU32 uix1,DSPU16 uisneg){
+	   
+    DSPU64 u64Result = getArctg_tab0[uix0]*131072 + getArctg_tab1[uix0]*uix1;
+ 	DSPU32 u32Result =(DSPU32)u64Result/65536;
+ 	DSPU16 u16Result=u32Result/2;
+ 	if (uisneg)
+    {
+	   	u32Result=getbuma32(u32Result);
+        u16Result = u32Result/2;
+    } 
+    return u16Result;
+}
+
+
+DSPU32 getbuma32(DSPU32 u32src){
+	   u32src=u32src ^ 0xffffffff;
+	   if(u32src != 0x7fffffff)
+            u32src +=1;
+       return u32src;
+}
+
+DSPU16 getbuma16(DSPU16 u16src){
+	   u16src=u16src ^ 0xffff;
+	   if(u16src != 0x7fff)
+            u16src +=1;
+       return u16src;
+}
+
+DSPU16 getmyx0_x1_32(DSPU32 u32src,DSPU32 *umyx0,DSPU32 *umyx1){
+	 
+    DSPU16 isneg=0;
+	 if (u32src & 0x80000000)
+    {
+        isneg=1;
+		u32src= getbuma32(u32src);    
+	   	*umyx0=u32src&0x7f800000;
+ 	   	*umyx1=u32src&0x7fC000;
+    }else{
+	    *umyx0=u32src&0x7f800000;
+ 	    *umyx1=u32src&0x007fC000;
+    }
+    return isneg;
+}
+
+DSPU16 getmyx0_x1_16(DSPU16 u16src,DSPU16 *umyx0,DSPU16 *umyx1){
+	 
+    DSPU16 isneg=0;
+	 if (u16src & 0x8000)
+    {
+        isneg=1;
+		u16src= getbuma16(u16src);    
+	   	*umyx0=u16src&0x7f80;
+ 	   	*umyx1=u16src&0x7f;
+    }else{
+	    *umyx0=u16src&0x7f80;
+ 	    *umyx1=u16src&0x007f;
+    }
+    return isneg;
+}

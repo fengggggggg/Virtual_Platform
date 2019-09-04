@@ -1,0 +1,43 @@
+#include "Bridge_MODULE.h"
+
+
+Bridge_MODULE::Bridge_MODULE(sc_module_name mn)
+
+{
+
+		//init_socket2AHB.bind(*this);
+		targ_socket2AHB.bind(*this);
+
+		init_socket2APB.bind(*this);
+		//targ_socket2APB.bind(*this);
+	
+
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+}
+
+
+tlm::tlm_sync_enum Bridge_MODULE::nb_transport_bw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+
+tlm::tlm_sync_enum Bridge_MODULE::nb_transport_fw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+void Bridge_MODULE::clock_tick(){
+
+
+}

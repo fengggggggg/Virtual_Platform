@@ -1,0 +1,2075 @@
+#include "DMAC.h"
+
+
+DMAC::DMAC(sc_module_name mn, unsigned int CORE_ID)
+:core_id(CORE_ID)
+,REGS("REGS",CORE_ID)
+
+
+{
+
+	//REGS.clk(clk);
+
+	init_socket2core.bind(*this); 
+	targ_socket2core.bind(*this); 
+
+	init_socket2other.bind(*this);
+	targ_socket2other.bind(*this);
+
+	init_socket2SyscfgReg.bind(*this);
+	targ_socket2SyscfgReg.bind(*this);
+
+	init_socket2ddr.bind(*this);
+	targ_socket2ddr.bind(*this);
+
+
+	for(int i =0;i !=CHANNEL_NUM; i++){
+
+		c2d_xmchI_waccept[i].write(1);
+		c2d_xschI_waccept[i].write(1);
+		c2d_xmchI_raccept[i].write(1);
+		c2d_xschI_raccept[i].write(1);
+
+		dma_wr_mission_on[i].write(0);
+		dma_rd_mission_on[i].write(0);
+		dma_rdack_mission_on[i].write(0);
+		
+		src_D_sel_wr[i] = 0;
+		src_curr_addr_wr[i] = 0;
+		src_rem_x_len_wr[i] = 0;
+		src_rem_y_len_wr[i] = 0;
+		src_addr_x_step_wr[i] = 0;
+		src_addr_y_step_wr[i] = 0;
+
+		src_D_sel_rd[i] = 0;
+		src_curr_addr_rd[i] = 0;
+		src_rem_x_len_rd[i] = 0;
+		src_rem_y_len_rd[i] = 0;
+		src_addr_x_step_rd[i] = 0;
+		src_addr_y_step_rd[i] = 0;
+
+		dst_D_sel_wr[i] = 0;
+		dst_curr_addr_wr[i] = 0;
+		dst_rem_x_len_wr[i] = 0;
+		dst_rem_y_len_wr[i] = 0;
+		dst_addr_x_step_wr[i] = 0;
+		dst_addr_y_step_wr[i] = 0;
+
+		dst_D_sel_rd[i] = 0;
+		dst_curr_addr_rd[i] = 0;
+		dst_rem_x_len_rd[i] = 0;
+		dst_rem_y_len_rd[i] = 0;
+		dst_addr_x_step_rd[i] = 0;
+		dst_addr_y_step_rd[i] = 0;
+//====================================
+		Sdst_x_len_record[i] = 0;
+		Sdst_y_len_record[i] = 0;
+		
+		Sdst_D_sel_rd[i] = 0;
+		Sdst_curr_addr_rd[i] = 0;
+		Sdst_rem_x_len_rd[i] = 0;	
+		Sdst_rem_y_len_rd[i] = 0;	
+		Sdst_addr_x_step_rd[i] = 0;
+		Sdst_addr_y_step_rd[i] = 0;
+
+//===============================for interrupt
+		wr_interrupt[i].write(0);
+		rd_interrupt[i].write(0);
+
+		WR_DEAD_LINE[i] = 0;
+		RD_DEAD_LINE[i] = 0;
+	}
+
+
+
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+
+	SC_METHOD(Trans_interrupt);
+	sensitive<<clk.pos();
+	dont_initialize();
+
+#ifdef DMAC_LOG
+		time_t t = time(NULL);
+		char timename[64];
+		strftime(timename,sizeof(timename),"%Y%m%d%X",localtime(&t));
+		string ss(timename);
+		for(int i = 0; i!=ss.size(); i++){
+			if(ss[i] == ':'){
+				ss[i] = '_';
+			}
+		}
+		char DmacLogName[100], RegFileLogName[100];
+		sprintf(DmacLogName,"./%s_DMAC_%d.txt",ss.c_str(),core_id);
+		DmacLog.open(DmacLogName,fstream::out);
+
+		sprintf(RegFileLogName,"./%s_RegFileLog_%d.txt",ss.c_str(),core_id);
+		RegFileLog.open(RegFileLogName,fstream::out);
+
+
+#endif
+
+
+
+}
+
+
+void DMAC::Trans_interrupt(){
+
+	
+	for(int i = 0; i!=CHANNEL_NUM;i++){
+		
+		SRC_EVT_S interrupt_code;
+
+		if(wr_interrupt[i].read()){
+
+			if(	WR_DEAD_LINE[i] != DELAY_INTERRUPT){
+					WR_DEAD_LINE[i]++;
+			}else{
+				interrupt_code.u32SrcEvt = 0x5;
+				interrupt_code.bolPosEdge = true;
+				TRANS2CORE(tlm::BEGIN_REQ,SYS_CFG_MSG,i,(unsigned char*)&interrupt_code,SC_ZERO_TIME);
+NORMAL_REPORT_DMAC("trans write interrupt to own core!")
+
+				wr_interrupt[i].write(0);
+				WR_DEAD_LINE[i] = 0;
+				
+			}	
+		}
+		
+
+
+		if(rd_interrupt[i].read()){
+
+			if(	RD_DEAD_LINE[i] != DELAY_INTERRUPT){
+				RD_DEAD_LINE[i]++;
+			}else{
+				interrupt_code.u32SrcEvt = 0x6;
+				interrupt_code.bolPosEdge = true;
+				TRANS2CORE(tlm::BEGIN_REQ,SYS_CFG_MSG,i,(unsigned char*)&interrupt_code,SC_ZERO_TIME);
+
+				rd_interrupt[i].write(0);
+				RD_DEAD_LINE[i] = 0;
+NORMAL_REPORT_DMAC("trans rd interrupt to own core!")
+			}	
+		}
+	}
+}
+
+
+
+
+
+
+tlm::tlm_sync_enum DMAC::nb_transport_bw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+
+		//DMAC_RW_REG_S* msg;
+//--------------------------------------------------regs write 
+		if(trans.get_address() == DMAC_REQ_CORE_MEM){//get data return from own Core
+NORMAL_REPORT_DMAC("get rd data from Own Core")
+		TRANSFromCore(trans);
+//cout<<"get"<<endl;
+		}
+		return tlm::TLM_UPDATED;
+}
+
+
+tlm::tlm_sync_enum DMAC::nb_transport_fw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+
+		DMAC_RW_REG_S*	msg;
+		DMAC_MEM	*	dmac_msg;
+		unsigned int	rd_result = 0;
+		unsigned int	ch_id;
+//--------------------------------------------------//get info from SystemConfigReg, and trans this to core
+		if(trans.get_address() == SYS_CFG_MSG){
+			//dmac_msg = (DMAC_MEM*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get Msg from SystemConfigReg")
+			init_socket2core->nb_transport_fw(trans, phase, t);	
+		}
+
+
+//-------------------------------------------------
+		if(trans.get_address() == CORE_REQ_OUT_MEM){// JTAGÐ´DMA¿ØÖÆ¼Ä´æÆ÷
+			dmac_msg = (DMAC_MEM*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get CORE_REQ_OUT_MEM cmd from Core")
+				if(OutMemRW(dmac_msg)){
+					trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				}
+		}
+
+
+	
+//--------------------------------------------------regs write By Jtag
+		if(trans.get_address() == JTAG_REQ_WR_REG){// JTAGÐ´DMA¿ØÖÆ¼Ä´æÆ÷
+			msg = (DMAC_RW_REG_S*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get wr regs cmd from Jtag")
+				if(REGS.write_reg(msg->u32Addr,msg->u32Value, true)){
+					trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				}
+		}
+
+//---------------------------------------regs read By Jtag
+		if(trans.get_address() == JTAG_REQ_RD_REG){// JTAG¶ÁDMA¿ØÖÆ¼Ä´æÆ÷
+			msg = (DMAC_RW_REG_S*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get rd regs cmd from Jtag")
+				if(REGS.read_reg(msg->u32Addr,rd_result, true)){
+					msg->u32Value = rd_result;
+					trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				}
+		}
+
+//--------------------------------------------------regs write normal
+		if(trans.get_address() == CORE_REQ_WR_REG){
+				msg = (DMAC_RW_REG_S*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get wr regs cmd from core: addr= "<<hex<<showbase<<msg->u32Addr<<" value= "<<msg->u32Value)
+
+			if(		msg->u32Addr >= GlobalRegBase		&& msg->u32Addr			<= GlobalRegBase + GlobalRegMaxOffset
+			   ||	msg->u32Addr >= MCRCRRegBase		&& msg->u32Addr			<= MCRCRRegBase + MCRCRRegMaxOffset
+			   ||	msg->u32Addr >= PMARegBase			&& msg->u32Addr			<= PMARegBase + PMARegMaxOffset
+			   ||	msg->u32Addr >= PCIERegBase		&& msg->u32Addr			<= PCIERegBase + PCIERegMaxOffset
+			   ||	msg->u32Addr >= SRIORegBase		&& msg->u32Addr			<= SRIORegBase + SRIORegMaxOffset
+			   ||	msg->u32Addr >= IPCRegBase			&& msg->u32Addr			<= IPCRegBase + IPCRegMaxOffset
+			   ||	msg->u32Addr >= CLK_RST_RegBase	&& msg->u32Addr			<= CLK_RST_RegBase + CLK_RST_MaxOffset
+			   ||	msg->u32Addr >= TCR_WDT_RegBase	&& msg->u32Addr			<= TCR_WDT_RegBase + TCR_WDT_MaxOffset
+			   || msg->u32Addr >= HSRegBase			&& msg->u32Addr			< HSRegBase + HSRegNum) {
+				   if(SystemCfgRegWr(msg->u32Addr,msg->u32Value)){
+						trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				   }else{
+						trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				   }
+			}else if(	msg->u32Addr  >= Global_Start_Addr_reg	&& msg->u32Addr<= Global_End_Addr_reg
+				||		msg->u32Addr  >= HMCH0_Start_Addr_reg	&& msg->u32Addr <= HMCH0_End_Addr_reg	
+				||		msg->u32Addr  >= XMCH0_Start_Addr_reg	&& msg->u32Addr <= XMCH3_End_Addr_reg){
+					if(REGS.write_reg(msg->u32Addr,msg->u32Value)){
+						trans.set_response_status(tlm::TLM_OK_RESPONSE);
+					}else{
+						trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+					}
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+
+				}
+		}
+//---------------------------------------regs read normal
+		if(trans.get_address() == CORE_REQ_RD_REG){
+			msg = (DMAC_RW_REG_S*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get rd regs cmd from core: addr= "<<hex<<showbase<<msg->u32Addr)
+			if(	msg->u32Addr >= GlobalRegBase		&& msg->u32Addr			<= GlobalRegBase + GlobalRegMaxOffset
+			||	msg->u32Addr >= MCRCRRegBase		&& msg->u32Addr			<= MCRCRRegBase + MCRCRRegMaxOffset
+			||	msg->u32Addr >= PMARegBase			&& msg->u32Addr			<= PMARegBase + PMARegMaxOffset
+			||	msg->u32Addr >= PCIERegBase		&& msg->u32Addr			<= PCIERegBase + PCIERegMaxOffset
+			||	msg->u32Addr >= SRIORegBase		&& msg->u32Addr			<= SRIORegBase + SRIORegMaxOffset
+			||	msg->u32Addr >= IPCRegBase			&& msg->u32Addr			<= IPCRegBase + IPCRegMaxOffset
+			||	msg->u32Addr >= CLK_RST_RegBase	&& msg->u32Addr			<= CLK_RST_RegBase + CLK_RST_MaxOffset
+			||	msg->u32Addr >= TCR_WDT_RegBase	&& msg->u32Addr			<= TCR_WDT_RegBase + TCR_WDT_MaxOffset
+			|| msg->u32Addr >= HSRegBase		&& msg->u32Addr			< HSRegBase + HSRegNum )
+			{
+				if(SystemCfgRegRd(msg->u32Addr,msg->u32Value)){
+					trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				}
+			}else if(		msg->u32Addr  >= Global_Start_Addr_reg	&& msg->u32Addr<= Global_End_Addr_reg
+					 ||		msg->u32Addr  >= HMCH0_Start_Addr_reg	&& msg->u32Addr <= HMCH0_End_Addr_reg	
+					 ||		msg->u32Addr  >= XMCH0_Start_Addr_reg	&& msg->u32Addr <= XMCH3_End_Addr_reg)
+			{
+						 if(REGS.read_reg(msg->u32Addr,msg->u32Value)){
+							 trans.set_response_status(tlm::TLM_OK_RESPONSE);
+						 }else{
+							 trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+						 }
+			}else
+			{
+				trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+
+			}
+	}
+
+
+//=====================================================================================================================
+
+
+
+//--------------------------------------Be Slave get wr req from the Other DMAC
+		if(trans.get_address() == DMAC_WR_REQ){
+			
+			bool DstAddrFlagWR = true;
+
+			dmac_msg = (DMAC_MEM*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get wr_req cmd from other DMAC")
+#ifdef  DMAC_LOG
+for(int i = 0; i!=dmac_msg->u32ElemNum;i++){
+	DmacLog<<"["<<i<<"]'s addr = "<<dmac_msg->arrRWInfo[i].u32Addr<<"\t value= "<<dmac_msg->arrRWInfo[i].u32Value<<endl;
+}
+#endif
+
+
+			switch (dmac_msg->u32ChanIdx)
+			{
+			case XMCH0_WR :	{
+					ch_id = 0; 
+					for(int i = 0; i!=dmac_msg->u32ElemNum;i++){
+						if(JudgeAddr(dmac_msg->arrRWInfo[i].u32Addr)){
+							continue;
+						}else{
+							DstAddrFlagWR = false;
+							break;
+						}
+					}
+					break;
+							}
+			default:
+				ERROR_REPORT_DMAC("ERROR dmac_msg->u32ChanIdx get")
+					break;
+			}
+			if(!DstAddrFlagWR){//wr dst addr is wrong
+				trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				DMAWRBuff[ch_id].clear();
+			}else{
+				trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				DMAWRBuff[ch_id].push_back(*dmac_msg);
+			}
+		}
+
+
+
+//--------------------------------------get rd trans data return from the Other DMAC or from ddr
+		if(trans.get_address() == DMAC_RD_ACK){
+			dmac_msg = (DMAC_MEM*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get rd_ack cmd from other DMAC or ddr")
+#ifdef  DMAC_LOG
+for(int i = 0; i!=dmac_msg->u32ElemNum;i++){
+	DmacLog<<"["<<i<<"]'s addr = "<<dmac_msg->arrRWInfo[i].u32Addr<<"\t value= "<<dmac_msg->arrRWInfo[i].u32Value<<endl;
+}
+#endif
+
+			switch (dmac_msg->u32ChanIdx)
+			{
+				case XSCH0_RD :	ch_id = 0x0; break;
+				case XMCH2_RD : ch_id = 0x2; break;
+
+			default:
+ERROR_REPORT_DMAC("ERROR dmac_msg->u32ChanIdx get")
+			break;
+			}
+			DMARDBuff[ch_id].push_back(*dmac_msg);
+			trans.set_response_status(tlm::TLM_OK_RESPONSE);
+		}
+
+
+
+//-------------------------------------get rd req from the Other DMAC be slave
+		if(trans.get_address() == DMAC_RD_REQ){
+				dmac_msg = (DMAC_MEM*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get rd_req cmd from other DMAC")
+#ifdef  DMAC_LOG
+for(int i = 0; i!=dmac_msg->u32ElemNum;i++){
+	//DmacLog<<"["<<i<<"]'s addr = "<<dmac_msg->arrRWInfo[i].u32Addr<<endl;
+}
+#endif
+					switch (dmac_msg->u32ChanIdx)
+				{
+					case XMCH0_RD :	ch_id = 0; 	break;
+
+					default:
+ERROR_REPORT_DMAC("ERROR dmac_msg->u32ChanIdx get")
+					return tlm::TLM_UPDATED;
+				}
+			if(dma_rdack_mission_on[ch_id].read() == 0){//check idle or not
+				Sdst_x_len_record[ch_id]	= dmac_msg->arrRWInfo[2].u32Addr;
+				Sdst_y_len_record[ch_id]	= dmac_msg->arrRWInfo[3].u32Addr;
+				
+				Sdst_D_sel_rd[ch_id]		= dmac_msg->arrRWInfo[0].u32Addr;
+				Sdst_curr_addr_rd[ch_id]	= dmac_msg->arrRWInfo[1].u32Addr;
+				Sdst_rem_x_len_rd[ch_id]	= dmac_msg->arrRWInfo[2].u32Addr;	
+				Sdst_rem_y_len_rd[ch_id]	= dmac_msg->arrRWInfo[3].u32Addr;	
+				Sdst_addr_x_step_rd[ch_id]	= dmac_msg->arrRWInfo[4].u32Addr;
+				Sdst_addr_y_step_rd[ch_id]	= dmac_msg->arrRWInfo[5].u32Addr;
+
+				TransPayload2core(0,1,ch_id,DMAC_RD_REQ);//rd new first
+				dma_rdack_mission_on[ch_id].write(1);
+
+
+
+			}else{
+ERROR_REPORT_DMAC("resent DMA_RDACK mission not end yet! CH_"<<core_id)
+			}
+	}
+
+
+
+//-------------------------------------get rd addr error from the Other DMAC or from ddr
+		if(trans.get_address() == DMAC_ADDR_ERR){
+			dmac_msg = (DMAC_MEM*)trans.get_data_ptr();
+NORMAL_REPORT_DMAC("get rd_addr_err cmd from other DMAC")
+#ifdef  DMAC_LOG
+for(int i = 0; i!=dmac_msg->u32ElemNum;i++){
+	DmacLog<<"["<<i<<"]'s addr = "<<dmac_msg->arrRWInfo[i].u32Addr<<endl;
+}
+#endif
+		switch (dmac_msg->u32ChanIdx)
+			{
+		case XSCH0_RD :	
+				ch_id = 0; 	
+				mission_over_reset(RD_REQ_DST_ADDR_ERR,ch_id);
+				DMARDBuff[ch_id].clear();
+				break;
+		case XMCH2_RD:
+				ch_id = 0x2; 	
+				mission_over_reset(RD_REQ_DST_ADDR_ERR,ch_id);
+				DMARDBuff[ch_id].clear();
+				break;
+
+				default:
+ERROR_REPORT_DMAC("ERROR dmac_msg->u32ChanIdx get")
+					return tlm::TLM_UPDATED;
+			}
+		}
+//----------------------------------------
+		return tlm::TLM_UPDATED;
+}
+
+
+
+
+
+
+void DMAC::clock_tick(){
+	unsigned int src_cout = 0;
+	unsigned int dst_cout = 0;
+		
+
+	for(int i = 0; i != CHANNEL_NUM; i++){
+//Be Master check wr start		
+		if(REGS.DMA_WR_MISSION_START[i].read() == 1){//get wr start signal
+NORMAL_REPORT_DMAC("Get DMA WR START signal, Be Master!")
+			if(dma_wr_mission_on[i].read() == 0){//check channel is idle or not
+//initialze src addr, len, step
+				if(REGS.XWCHi_CTL_R[i].read() & 0x1 == 1){//check CTL 0 bit
+					src_D_sel_wr[i] = 1;
+				}else{
+					src_D_sel_wr[i] = 0;
+				}
+				src_curr_addr_wr[i] = REGS.XWCHi_SRC_START_ADDR_R[i].read();
+				src_rem_x_len_wr[i] = REGS.XWCHi_SRC_LEN_X_R[i].read();	
+				src_rem_y_len_wr[i] =  src_D_sel_wr[i] ? REGS.XWCHi_SRC_LEN_Y_R[i].read() : 0;	
+				src_addr_x_step_wr[i] = REGS.XWCHi_SRC_ADDR_STEP_R[i].read() & 0xffff;//low 16 bit
+				src_addr_y_step_wr[i] = src_D_sel_wr[i] ? (REGS.XWCHi_SRC_ADDR_STEP_R[i].read()>>16) & 0xffff : 0;//high 16 bit
+//initialize dst addr, len, step
+				if(REGS.XWCHi_CTL_R[i].read() & 0x2 == 1){//check CTL 1 bit
+					dst_D_sel_wr[i] = 1;
+				}else{
+					dst_D_sel_wr[i] = 0;
+				}
+				dst_curr_addr_wr[i] = (REGS.XWCHi_DST_START_ADDRH_R[i].read()<<32) + REGS.XWCHi_DST_START_ADDRL_R[i].read();
+				dst_rem_x_len_wr[i] = REGS.XWCHi_DST_LEN_X_R[i].read();	
+				dst_rem_y_len_wr[i] = dst_D_sel_wr[i] ? REGS.XWCHi_DST_LEN_Y_R[i].read() : 0;	
+				dst_addr_x_step_wr[i] = REGS.XWCHi_DST_ADDR_STEP_R[i].read() & 0xffff;//low 16 bit
+				dst_addr_y_step_wr[i] = dst_D_sel_wr[i] ? (REGS.XWCHi_DST_ADDR_STEP_R[i].read()>>16) & 0xffff : 0;//high 16 bit				
+				
+				REGS.DMA_WR_MISSION_START[i].write(0);//reset
+			
+				src_cout = src_D_sel_wr[i] == 0 ? REGS.XWCHi_SRC_LEN_X_R[i].read() : REGS.XWCHi_SRC_LEN_X_R[i].read() * REGS.XWCHi_SRC_LEN_Y_R[i].read();
+				dst_cout = dst_D_sel_wr[i] == 0 ? REGS.XWCHi_DST_LEN_X_R[i].read() : REGS.XWCHi_DST_LEN_X_R[i].read() * REGS.XWCHi_DST_LEN_Y_R[i].read();
+
+				if(src_cout != dst_cout  || (src_cout == 0 && dst_cout == 0)){
+					mission_over_reset(WR_CONFIG_ERR,i);
+				}else{
+					dma_wr_mission_on[i].write(1);
+					switch(i){
+						case 0 : 	
+							REGS.write_reg(XMCH0_Start_Addr_reg + 0x1 , 0x0);//set wr busy
+							break;
+						case 0x2 : 	
+							REGS.write_reg(XMCH2_Start_Addr_reg + 0x1 , 0x0);//set wr busy
+							break;
+					}
+					TransPayload2core(0,1,i,DMAC_WR_REQ);//rd new
+				}
+			}else{
+ERROR_REPORT_DMAC("resent DMA_WR mission not end yet! CH_"<<i)
+			}
+		}
+
+
+
+
+//Be Master check rd start
+		if(REGS.DMA_RD_MISSION_START[i].read() == 1){
+NORMAL_REPORT_DMAC("Get DMA RD START signal, Be Master!")
+			if(dma_rd_mission_on[i].read() == 0){//check channel is idle or not
+//initialze src addr, len, step
+				if(REGS.XRCHi_CTL_R[i].read() & 0x1 == 1){//check CTL 0 bit
+					src_D_sel_rd[i] = 1;
+				}else{
+					src_D_sel_rd[i] = 0;
+				}
+				src_curr_addr_rd[i] = REGS.XRCHi_SRC_START_ADDR_R[i].read();
+				src_rem_x_len_rd[i] = REGS.XRCHi_SRC_LEN_X_R[i].read();	
+				src_rem_y_len_rd[i] =  src_D_sel_rd[i] ? REGS.XRCHi_SRC_LEN_Y_R[i].read() : 0;	
+				src_addr_x_step_rd[i] = REGS.XRCHi_SRC_ADDR_STEP_R[i].read() & 0xffff;//low 16 bit
+				src_addr_y_step_rd[i] = src_D_sel_rd[i] ? (REGS.XRCHi_SRC_ADDR_STEP_R[i].read()>>16) & 0xffff : 0;//high 16 bit
+
+//initialize dst addr, len, step
+				if(REGS.XRCHi_CTL_R[i].read() & 0x2 == 1){//check CTL 1 bit
+					dst_D_sel_rd[i] = 1;
+				}else{
+					dst_D_sel_rd[i] = 0;
+				}
+				dst_curr_addr_rd[i] =  (REGS.XRCHi_DST_START_ADDRH_R[i].read()<<32 )+  REGS.XRCHi_DST_START_ADDRL_R[i].read();
+				dst_rem_x_len_rd[i] = REGS.XRCHi_DST_LEN_X_R[i].read();	
+				dst_rem_y_len_rd[i] = dst_D_sel_rd[i] ? REGS.XRCHi_DST_LEN_Y_R[i].read() : 0;	
+				dst_addr_x_step_rd[i] = REGS.XRCHi_DST_ADDR_STEP_R[i].read() & 0xffff;//low 16 bit
+				dst_addr_y_step_rd[i] = dst_D_sel_rd[i] ? (REGS.XRCHi_DST_ADDR_STEP_R[i].read()>>16) & 0xffff : 0;//high 16 bit
+				
+				DMAC_MEM ptr;
+				memset(&ptr,0,sizeof(ptr));
+				ptr.u32ElemNum = 0x6;//D_sel,curr_addr,x_len,xstep,y_len,y_step
+				ptr.arrRWInfo[0].u32Addr = dst_D_sel_rd[i];
+				ptr.arrRWInfo[1].u32Addr = dst_curr_addr_rd[i];
+				ptr.arrRWInfo[2].u32Addr = dst_rem_x_len_rd[i];
+				ptr.arrRWInfo[3].u32Addr = dst_rem_y_len_rd[i];
+				ptr.arrRWInfo[4].u32Addr = dst_addr_x_step_rd[i];
+				ptr.arrRWInfo[5].u32Addr = dst_addr_y_step_rd[i];
+				
+				switch(i){
+					case 0	: ptr.u32ChanIdx = XMCH0_RD;break;
+					case 0x2: ptr.u32ChanIdx = XMCH2_RD;break;
+					default:
+ERROR_REPORT_DMAC("can not find ptr.u32ChanIdx")
+					break;
+				}
+				REGS.DMA_RD_MISSION_START[i].write(0);//reset
+
+				src_cout = src_D_sel_rd[i] == 0 ? REGS.XRCHi_SRC_LEN_X_R[i].read() : REGS.XRCHi_SRC_LEN_X_R[i].read() * REGS.XRCHi_SRC_LEN_Y_R[i].read();
+				dst_cout = dst_D_sel_rd[i] == 0 ? REGS.XRCHi_DST_LEN_X_R[i].read() : REGS.XRCHi_DST_LEN_X_R[i].read() * REGS.XRCHi_DST_LEN_Y_R[i].read();
+
+				if(src_cout != dst_cout || (src_cout == 0 && dst_cout == 0)){
+					mission_over_reset(RD_CONFIG_ERR,i);
+				}else{
+					dma_rd_mission_on[i].write(1);
+					switch(i){
+						case 0 : 	
+							REGS.write_reg(XMCH0_Start_Addr_reg + 0x21 , 0x0);//set rd busy
+							break;
+						case 0x2 : 	
+							REGS.write_reg(XMCH2_Start_Addr_reg + 0x21 , 0x0);//set rd busy
+							break;
+					}
+					TRANS2OTHER(tlm::BEGIN_REQ, DMAC_RD_REQ, i, (unsigned char*)&ptr, SC_ZERO_TIME);//rd new
+				}
+
+			}else{
+ERROR_REPORT_DMAC("resent DMA_RD mission not end yet! CH_"<<i)
+			}
+	}
+
+
+
+
+
+
+
+//Be Master for DMA_RD, check write Core or not
+		if(dma_rd_mission_on[i].read() == true && !DMARDBuff[i].empty()) {//dma rd on so wr core
+			if(c2d_xmchI_waccept[i].read() == false){
+				TransPayload2core(1,0,i,DMAC_RD_ACK);//wr old
+			}else{
+				TransPayload2core(1,1,i,DMAC_RD_ACK);//wr new
+			}
+		}
+			
+//Not DMA way to access DDR
+		if(!DMARDBuff[i].empty()){
+			tlm::tlm_phase PHASE = tlm::BEGIN_RESP;
+			sc_time DELAY = SC_ZERO_TIME;
+			tlm::tlm_generic_payload p_trans2core;
+			DMAC_MEM * ptr = (DMAC_MEM*)&DMARDBuff[i][0];
+			p_trans2core.set_data_ptr((unsigned char*)ptr);
+			if (DMARDBuff[2].size() == 2){
+				cout<<"get"<<endl;
+			}
+
+			p_trans2core.set_address(CORE_REQ_OUT_MEM);
+			targ_socket2core->nb_transport_bw(p_trans2core, PHASE, DELAY);
+		if(p_trans2core.get_response_status() == tlm::TLM_OK_RESPONSE ){
+			DMARDBuff[i].erase(DMARDBuff[i].begin());
+		}
+	}
+	
+
+
+
+
+//Be Master for DMA_WR, check read Core or not
+		if(dma_wr_mission_on[i].read() == true){//dma wr on so rd core
+			if(c2d_xmchI_raccept[i].read() == false){
+					TransPayload2core(0,0,i,DMAC_WR_REQ);//rd old
+				}else{
+					TransPayload2core(0,1,i,DMAC_WR_REQ);//rd new
+			}
+		}
+
+
+
+//Be Slave for DMA_WR, check write Core or not
+		if(!DMAWRBuff[i].empty()){
+			if(c2d_xschI_waccept[i].read() == false){
+				TransPayload2core(1,0,i,DMAC_WR_ACK);//wr old
+			}else{
+				TransPayload2core(1,1,i,DMAC_WR_ACK);//wr new
+			}
+		}
+
+
+
+
+
+//Be Slave for DMA_RD, check read Core or not
+		if(dma_rdack_mission_on[i].read() == true){
+			//if(Sdst_rem_x_len_rd[i] != 0 || Sdst_rem_y_len_rd[i] != 0 ){
+			if(c2d_xschI_raccept[i].read() == false){
+				TransPayload2core(0,0,i,DMAC_RD_REQ);//rd old
+				}else{
+				TransPayload2core(0,1,i,DMAC_RD_REQ);//rd new
+				}
+			//}
+		}
+	}	
+
+
+#ifdef DMAC_LOG
+		WriteLogFile();
+#endif
+
+
+}
+
+
+
+
+
+void DMAC::TransPayload2core(bool IsWrOrNot,bool TransNewOrnot,unsigned int CH_ID,DMAC_CMD CMD){
+//1,0	wr old
+//1,1	wr new
+//0,0	rd old
+//0,1	rd new
+	
+//------------------------------------------------src	
+	DMAC_CHANNEL ch_id;
+
+	switch(CH_ID){
+			case 0 : 
+				if(CMD == DMAC_WR_REQ){
+					ch_id = XMCH0_WR; //rd core	
+				}else if(CMD == DMAC_WR_ACK){
+					ch_id = XSCH0_WR; //wr core
+				}else if(CMD == DMAC_RD_REQ){
+					ch_id = XSCH0_RD; //wr core
+				}else if(CMD == DMAC_RD_ACK){
+					ch_id = XMCH0_RD; //rd core
+				}
+				break;
+
+			case 0x2 : 
+				if(CMD == DMAC_WR_REQ){
+					ch_id = XMCH2_WR; //rd core	
+				}else if(CMD == DMAC_RD_ACK){
+					ch_id = XMCH2_RD; //rd core
+				}
+				break;
+
+
+			default:cerr<<"error CH_ID"<<endl;return;
+	}
+
+
+
+
+//==========================================// rd Core new for be Slave rd
+	if(!IsWrOrNot && TransNewOrnot && ch_id == XSCH0_RD){
+		DMAC_MEM tmp;
+		memset(&tmp,0,sizeof(tmp));
+		tmp.u32ChanIdx = ch_id;
+		if(Sdst_D_sel_rd[CH_ID] == 0){//Sdst is 1D
+			tmp.u32ElemNum =  Sdst_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[CH_ID];
+			Sdst_rem_x_len_rd[CH_ID] -=  tmp.u32ElemNum ;
+			for(int i = 0; i != tmp.u32ElemNum; i++){
+				tmp.arrRWInfo[i].bolIsRead = true;
+				tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[CH_ID];
+				Sdst_curr_addr_rd[CH_ID] += Sdst_addr_x_step_rd[CH_ID];
+			}
+		}else{//src is 2D
+			if(Sdst_rem_y_len_rd[CH_ID] == Sdst_y_len_record[CH_ID]){//check first or not
+				Sdst_rem_y_len_rd[CH_ID] --;
+				tmp.u32ElemNum =  Sdst_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[CH_ID];
+				Sdst_rem_x_len_rd[CH_ID] -=  tmp.u32ElemNum ;
+				for(int i = 0; i != tmp.u32ElemNum; i++){
+					tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+					tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[CH_ID];
+					Sdst_curr_addr_rd[CH_ID] += Sdst_addr_x_step_rd[CH_ID];
+				}
+			}else{//not the first trans
+				if(Sdst_rem_x_len_rd[CH_ID] == 0){//check 1D is over or not
+					Sdst_rem_y_len_rd[CH_ID] --;
+					Sdst_rem_x_len_rd[CH_ID] = Sdst_x_len_record[CH_ID];
+					Sdst_curr_addr_rd[CH_ID] = Sdst_curr_addr_rd[CH_ID] + Sdst_addr_y_step_rd[CH_ID];
+					tmp.u32ElemNum =  Sdst_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[CH_ID];
+					Sdst_rem_x_len_rd[CH_ID] -=  tmp.u32ElemNum ;
+					for(int i = 0; i != tmp.u32ElemNum; i++){
+						tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+						tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[CH_ID];
+						Sdst_curr_addr_rd[CH_ID] += Sdst_addr_x_step_rd[CH_ID];
+					}
+				}else{//1D not over
+					tmp.u32ElemNum =  Sdst_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : Sdst_rem_x_len_rd[CH_ID];
+					Sdst_rem_x_len_rd[CH_ID] -=  tmp.u32ElemNum ;
+					for(int i = 0; i != tmp.u32ElemNum; i++){
+						tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+						tmp.arrRWInfo[i].u32Addr = Sdst_curr_addr_rd[CH_ID];
+						Sdst_curr_addr_rd[CH_ID] += Sdst_addr_x_step_rd[CH_ID];
+					}
+				}
+			}
+		}
+
+		bool DstAddrFlagRD = true;
+		for(int i = 0; i!=tmp.u32ElemNum;i++){
+			if(JudgeAddr(tmp.arrRWInfo[i].u32Addr)){
+					continue;
+			}else{
+				DstAddrFlagRD = false;
+				break;
+			}
+		}
+
+		if(!DstAddrFlagRD){
+			TRANS2OTHER(tlm::BEGIN_REQ, DMAC_ADDR_ERR, CH_ID,  (unsigned char*)&tmp, SC_ZERO_TIME);
+			mission_over_reset(RD_ACK,CH_ID);
+		}else{
+			recent_rdCoreForDMARD[CH_ID] = tmp;
+			TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID,  (unsigned char*)&tmp, SC_ZERO_TIME);
+		}
+	}	
+
+//==========================================// rd Core old for be Slave rd
+	if(!IsWrOrNot && !TransNewOrnot && ch_id == XSCH0_RD){
+	TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID,  (unsigned char*)&recent_rdCoreForDMARD[CH_ID], SC_ZERO_TIME);
+	}
+
+
+
+
+
+
+
+//==========================================//rd Core new for be Master wr
+	if( !IsWrOrNot && TransNewOrnot && (ch_id == XMCH0_WR || ch_id == XMCH2_WR)){
+		DMAC_MEM tmp;
+		memset(&tmp,0,sizeof(tmp));
+		tmp.u32ChanIdx = ch_id;
+		if(src_D_sel_wr[CH_ID] == 0){//src is 1D
+			tmp.u32ElemNum =  src_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_wr[CH_ID];
+			src_rem_x_len_wr[CH_ID] -=  tmp.u32ElemNum ;
+			WriteRemRegs(CH_ID,WR_SRC_X_REM,src_rem_x_len_wr[CH_ID]);
+
+			for(int i = 0; i != tmp.u32ElemNum; i++){
+				tmp.arrRWInfo[i].bolIsRead = true;
+				tmp.arrRWInfo[i].u32Addr = src_curr_addr_wr[CH_ID];
+				src_curr_addr_wr[CH_ID] += src_addr_x_step_wr[CH_ID];
+				WriteRemRegs(CH_ID,WR_SRC_CURR,src_curr_addr_wr[CH_ID]);
+
+			}
+		}else{//src is 2D
+			if(src_rem_y_len_wr[CH_ID] == REGS.XWCHi_SRC_LEN_Y_R[CH_ID].read()){//check first or not
+					src_rem_y_len_wr[CH_ID] --;
+					WriteRemRegs(CH_ID,WR_SRC_Y_REM,src_rem_y_len_wr[CH_ID]);
+
+					tmp.u32ElemNum =  src_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_wr[CH_ID];
+					src_rem_x_len_wr[CH_ID] -=  tmp.u32ElemNum ;
+					WriteRemRegs(CH_ID,WR_SRC_X_REM,src_rem_x_len_wr[CH_ID]);
+
+					for(int i = 0; i != tmp.u32ElemNum; i++){
+						tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+						tmp.arrRWInfo[i].u32Addr = src_curr_addr_wr[CH_ID];
+						src_curr_addr_wr[CH_ID] += src_addr_x_step_wr[CH_ID];
+						WriteRemRegs(CH_ID,WR_SRC_CURR,src_curr_addr_wr[CH_ID]);
+					}
+			}else{//not the first trans
+				if(src_rem_x_len_wr[CH_ID] == 0){//check 1D is over or not
+					src_rem_y_len_wr[CH_ID] --;
+					WriteRemRegs(CH_ID,WR_SRC_Y_REM,src_rem_y_len_wr[CH_ID]);
+
+					src_rem_x_len_wr[CH_ID] = REGS.XWCHi_SRC_LEN_X_R[CH_ID].read();
+					//WriteRemRegs(CH_ID,WR_SRC_X_REM,src_rem_x_len_wr[CH_ID]);
+
+					src_curr_addr_wr[CH_ID] = src_curr_addr_wr[CH_ID] + src_addr_y_step_wr[CH_ID];
+					WriteRemRegs(CH_ID,WR_SRC_CURR,src_curr_addr_wr[CH_ID]);
+
+					tmp.u32ElemNum =  src_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_wr[CH_ID];
+					src_rem_x_len_wr[CH_ID] -=  tmp.u32ElemNum ;
+					WriteRemRegs(CH_ID,WR_SRC_X_REM,src_rem_x_len_wr[CH_ID]);
+
+					for(int i = 0; i != tmp.u32ElemNum; i++){
+						tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+						tmp.arrRWInfo[i].u32Addr = src_curr_addr_wr[CH_ID];
+						src_curr_addr_wr[CH_ID] += src_addr_x_step_wr[CH_ID];
+						WriteRemRegs(CH_ID,WR_SRC_CURR,src_curr_addr_wr[CH_ID]);
+
+					}
+				}else{//1D not over
+					tmp.u32ElemNum =  src_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_wr[CH_ID];
+					src_rem_x_len_wr[CH_ID] -=  tmp.u32ElemNum ;
+					WriteRemRegs(CH_ID,WR_SRC_X_REM,src_rem_x_len_wr[CH_ID]);
+
+					for(int i = 0; i != tmp.u32ElemNum; i++){
+						tmp.arrRWInfo[i].bolIsRead = true;//rd Core
+						tmp.arrRWInfo[i].u32Addr = src_curr_addr_wr[CH_ID];
+						src_curr_addr_wr[CH_ID] += src_addr_x_step_wr[CH_ID];
+						WriteRemRegs(CH_ID,WR_SRC_CURR,src_curr_addr_wr[CH_ID]);
+
+					}
+				}
+			}
+		}
+					
+		bool SrcAddrFlagRD = true;
+		if(CH_ID == 0x0){
+			for(int i = 0; i!=tmp.u32ElemNum;i++){
+				if(JudgeAddr(tmp.arrRWInfo[i].u32Addr)){
+					continue;
+				}else{
+					SrcAddrFlagRD = false;
+					break;
+				}
+			}
+		}		
+
+			if(!SrcAddrFlagRD){//src addr is wrong
+				mission_over_reset(WR_REQ_SRC_ADDR_ERR,CH_ID);
+			}else{
+				recent_rdCoreForDMAWR[CH_ID] = tmp;
+				TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID,  (unsigned char*)&tmp, SC_ZERO_TIME);
+			}
+}
+
+//===============================================//rd Core old for be Master wr
+	if( !IsWrOrNot && !TransNewOrnot && (ch_id == XMCH0_WR || ch_id == XMCH2_WR)){
+	TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID,  (unsigned char*)&recent_rdCoreForDMAWR[CH_ID], SC_ZERO_TIME);
+	}
+
+
+
+
+
+
+//===========================================// wr Core new for be Slave wr
+	if(IsWrOrNot && TransNewOrnot && ch_id == XSCH0_WR){
+		DMAC_MEM * ptr  = &DMAWRBuff[CH_ID][0];
+		ptr->u32ChanIdx = ch_id;
+		recent_wrCoreForDMAWR[CH_ID] = *ptr;
+		TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID, (unsigned char *)ptr, SC_ZERO_TIME);
+	}
+//===========================================// wr Core old for be Slave wr
+	if(IsWrOrNot && !TransNewOrnot && ch_id == XSCH0_WR){
+		TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID,  (unsigned char*)&recent_wrCoreForDMAWR[CH_ID], SC_ZERO_TIME);
+	}
+
+
+
+
+//===============================================//wr Core new for be Master get rd back
+	if(IsWrOrNot && TransNewOrnot && (ch_id == XMCH0_RD || ch_id == XMCH2_RD)){
+		DMAC_MEM * ptr  = &DMARDBuff[CH_ID][0];
+		ptr->u32ChanIdx = ch_id;
+		ptr->bolAllWrReq = true;
+		if(src_D_sel_rd[CH_ID] == 0){//src is 1D
+			ptr->u32ElemNum =  src_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_rd[CH_ID];
+			src_rem_x_len_rd[CH_ID] -=  ptr->u32ElemNum ;
+			WriteRemRegs(CH_ID, RD_SRC_X_REM,src_rem_x_len_rd[CH_ID]);
+
+			for(int i = 0; i != ptr->u32ElemNum; i++){
+				ptr->arrRWInfo[i].bolIsRead = false;
+				ptr->arrRWInfo[i].u32Addr = src_curr_addr_rd[CH_ID];
+				src_curr_addr_rd[CH_ID] += src_addr_x_step_rd[CH_ID];
+				WriteRemRegs(CH_ID, RD_SRC_CURR, src_curr_addr_rd[CH_ID]);
+
+			}
+		}else{//src is 2D
+			if(src_rem_y_len_rd[CH_ID] == REGS.XRCHi_SRC_LEN_Y_R[CH_ID].read()){//check first or not
+				src_rem_y_len_rd[CH_ID] --;
+				WriteRemRegs(CH_ID, RD_SRC_Y_REM, src_rem_y_len_rd[CH_ID]);
+
+				ptr->u32ElemNum =  src_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_rd[CH_ID];
+				src_rem_x_len_rd[CH_ID] -=  ptr->u32ElemNum ;
+				WriteRemRegs(CH_ID, RD_SRC_X_REM,src_rem_x_len_rd[CH_ID]);
+
+				for(int i = 0; i != ptr->u32ElemNum; i++){
+					ptr->arrRWInfo[i].bolIsRead = false;//wr Core
+					ptr->arrRWInfo[i].u32Addr = src_curr_addr_rd[CH_ID];
+					src_curr_addr_rd[CH_ID] += src_addr_x_step_rd[CH_ID];
+					WriteRemRegs(CH_ID, RD_SRC_CURR, src_curr_addr_rd[CH_ID]);
+
+				}
+			}else{//not the first trans
+				if(src_rem_x_len_rd[CH_ID] == 0){//check 1D is over or not
+					src_rem_y_len_rd[CH_ID] --;
+					WriteRemRegs(CH_ID, RD_SRC_Y_REM, src_rem_y_len_rd[CH_ID]);
+
+					src_rem_x_len_rd[CH_ID] = REGS.XRCHi_SRC_LEN_X_R[CH_ID].read();
+					src_curr_addr_rd[CH_ID] = src_curr_addr_rd[CH_ID] + src_addr_y_step_rd[CH_ID];
+					WriteRemRegs(CH_ID, RD_SRC_CURR, src_curr_addr_rd[CH_ID]);
+
+					ptr->u32ElemNum =  src_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_rd[CH_ID];
+					src_rem_x_len_rd[CH_ID] -=  ptr->u32ElemNum ;
+					WriteRemRegs(CH_ID, RD_SRC_X_REM,src_rem_x_len_rd[CH_ID]);
+
+					for(int i = 0; i != ptr->u32ElemNum; i++){
+						ptr->arrRWInfo[i].bolIsRead = false;//wr Core
+						ptr->arrRWInfo[i].u32Addr = src_curr_addr_rd[CH_ID];
+						src_curr_addr_rd[CH_ID] += src_addr_x_step_rd[CH_ID];
+						WriteRemRegs(CH_ID, RD_SRC_CURR, src_curr_addr_rd[CH_ID]);
+
+					}
+				}else{//1D not over
+					ptr->u32ElemNum =  src_rem_x_len_rd[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : src_rem_x_len_rd[CH_ID];
+					src_rem_x_len_rd[CH_ID] -=  ptr->u32ElemNum ;
+					WriteRemRegs(CH_ID, RD_SRC_X_REM,src_rem_x_len_rd[CH_ID]);
+
+					for(int i = 0; i != ptr->u32ElemNum; i++){
+						ptr->arrRWInfo[i].bolIsRead = false;//wr Core
+						ptr->arrRWInfo[i].u32Addr = src_curr_addr_rd[CH_ID];
+						src_curr_addr_rd[CH_ID] += src_addr_x_step_rd[CH_ID];
+						WriteRemRegs(CH_ID, RD_SRC_CURR, src_curr_addr_rd[CH_ID]);
+
+					}
+				}
+			}
+		}
+				
+		bool SrcAddrFlagWR = true;
+			if(CH_ID == 0x0){
+		for(int i = 0; i!=ptr->u32ElemNum;i++){
+			if(JudgeAddr(ptr->arrRWInfo[i].u32Addr)){
+					continue;
+			}else{
+				SrcAddrFlagWR = false;
+				break;
+				}
+			}
+		}
+		if(!SrcAddrFlagWR){//src addr is wrong
+			mission_over_reset(RD_REQ_SRC_ADDR_ERR,CH_ID);
+		}else{
+			recent_wrCoreForDMARD[CH_ID] = *ptr;
+			TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID, (unsigned char *)ptr, SC_ZERO_TIME);
+		}
+
+	}
+//===============================================//wr Core old for be Master get rd back
+	if(IsWrOrNot && !TransNewOrnot && (ch_id == XMCH0_RD || ch_id == XMCH2_RD)){
+	TRANS2CORE(tlm::BEGIN_REQ, DMAC_REQ_CORE_MEM, CH_ID,  (unsigned char*)&recent_wrCoreForDMARD[CH_ID], SC_ZERO_TIME);
+
+	}
+}
+
+
+
+
+
+void  DMAC::TRANSFromCore(tlm::tlm_generic_payload& trans){
+	unsigned int CH_ID;
+
+	DMAC_MEM *Dptr = (DMAC_MEM *)trans.get_data_ptr();
+
+#ifdef  DMAC_LOG
+	for(int i = 0; i!=Dptr->u32ElemNum;i++){
+		DmacLog<<"["<<i<<"]'s addr = "<<Dptr->arrRWInfo[i].u32Addr<<"\t value= "<<Dptr->arrRWInfo[i].u32Value<<endl;
+	}
+#endif
+
+	switch(((DMAC_MEM *)trans.get_data_ptr())->u32ChanIdx){
+		case XMCH0_WR:
+			CH_ID = 0x0;
+			break;
+
+		case XSCH0_RD:
+			CH_ID = 0x0;
+			break;
+
+		case XMCH2_WR:
+			CH_ID = 0x2;
+
+
+		default:
+ERROR_REPORT_DMAC("not define CH_ID");
+			break;
+	}
+
+
+	if(((DMAC_MEM *)trans.get_data_ptr())->u32ChanIdx  == XMCH0_WR || 
+		((DMAC_MEM *)trans.get_data_ptr())->u32ChanIdx == XMCH2_WR
+		){//check rd data reason
+//--------------------------------------------------------------------------set dst addr
+		DMAC_MEM * ptr = (DMAC_MEM *) trans.get_data_ptr();//get rd Core result
+		ptr->bolAllWrReq = true;
+		if(dst_D_sel_wr[CH_ID] == 0){//src is 1D
+			dst_rem_x_len_wr[CH_ID] -=  ptr->u32ElemNum ;
+			WriteRemRegs(CH_ID, WR_DST_X_REM, dst_rem_x_len_wr[CH_ID]);
+
+			for(int i = 0; i != ptr->u32ElemNum; i++){
+				ptr->arrRWInfo[i].bolIsRead = false;
+				ptr->arrRWInfo[i].u32Addr = dst_curr_addr_wr[CH_ID];
+				dst_curr_addr_wr[CH_ID] += dst_addr_x_step_wr[CH_ID];
+				WriteRemRegs(CH_ID, WR_DST_CURR, dst_curr_addr_wr[CH_ID]);
+
+			}
+		}else{//src is 2D
+			if(dst_rem_y_len_wr[CH_ID] == REGS.XWCHi_DST_LEN_Y_R[CH_ID].read()){//check first or not
+				dst_rem_y_len_wr[CH_ID] --;
+				WriteRemRegs(CH_ID, WR_DST_Y_REM, dst_rem_x_len_wr[CH_ID]);
+
+				ptr->u32ElemNum =  dst_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : dst_rem_x_len_wr[CH_ID];
+				dst_rem_x_len_wr[CH_ID] -=  ptr->u32ElemNum ;
+				WriteRemRegs(CH_ID, WR_DST_X_REM, dst_rem_x_len_wr[CH_ID]);
+
+				for(int i = 0; i != ptr->u32ElemNum; i++){
+					ptr->arrRWInfo[i].bolIsRead = false;
+					ptr->arrRWInfo[i].u32Addr = dst_curr_addr_wr[CH_ID];
+					dst_curr_addr_wr[CH_ID] += dst_addr_x_step_wr[CH_ID];
+					WriteRemRegs(CH_ID, WR_DST_CURR, dst_curr_addr_wr[CH_ID]);
+
+				}
+			}else{//not the first trans
+				if(dst_rem_x_len_wr[CH_ID] == 0){//check 1D is over or not
+					dst_rem_y_len_wr[CH_ID] --;
+					WriteRemRegs(CH_ID, WR_DST_Y_REM, dst_rem_x_len_wr[CH_ID]);
+
+					dst_rem_x_len_wr[CH_ID] = REGS.XWCHi_DST_LEN_X_R[CH_ID].read();
+					dst_curr_addr_wr[CH_ID] = dst_curr_addr_wr[CH_ID] + dst_addr_y_step_wr[CH_ID];
+					WriteRemRegs(CH_ID, WR_DST_CURR, dst_curr_addr_wr[CH_ID]);
+					
+					ptr->u32ElemNum =  dst_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : dst_rem_x_len_wr[CH_ID];
+					dst_rem_x_len_wr[CH_ID] -=  ptr->u32ElemNum ;
+					WriteRemRegs(CH_ID, WR_DST_X_REM, dst_rem_x_len_wr[CH_ID]);
+
+					for(int i = 0; i != ptr->u32ElemNum; i++){
+						ptr->arrRWInfo[i].bolIsRead = false;
+						ptr->arrRWInfo[i].u32Addr = dst_curr_addr_wr[CH_ID];
+						dst_curr_addr_wr[CH_ID] += dst_addr_x_step_wr[CH_ID];
+						WriteRemRegs(CH_ID, WR_DST_CURR, dst_curr_addr_wr[CH_ID]);
+
+					}
+				}else{//1D not over
+					ptr->u32ElemNum =  dst_rem_x_len_wr[CH_ID] >= CH0_DATA_WIDTH_WORDS ? CH0_DATA_WIDTH_WORDS : dst_rem_x_len_wr[CH_ID];
+					dst_rem_x_len_wr[CH_ID] -=  ptr->u32ElemNum ;
+					WriteRemRegs(CH_ID, WR_DST_X_REM, dst_rem_x_len_wr[CH_ID]);
+					
+					for(int i = 0; i != ptr->u32ElemNum; i++){
+						ptr->arrRWInfo[i].bolIsRead = false;
+						ptr->arrRWInfo[i].u32Addr = dst_curr_addr_wr[CH_ID];
+						dst_curr_addr_wr[CH_ID] += dst_addr_x_step_wr[CH_ID];
+						WriteRemRegs(CH_ID, WR_DST_CURR, dst_curr_addr_wr[CH_ID]);
+
+					}
+				}
+			}
+		}
+		if(TRANS2OTHER(tlm::BEGIN_REQ, DMAC_WR_REQ, CH_ID,  (unsigned char*)ptr, SC_ZERO_TIME)){
+			if(dst_rem_x_len_wr[CH_ID] == 0 && dst_rem_y_len_wr[CH_ID] == 0){
+				mission_over_reset(WR_REQ,CH_ID);
+			}
+		}else{
+				mission_over_reset(WR_REQ_DST_ADDR_ERR,CH_ID);			
+		}
+		
+		
+	}
+
+
+	else if(((DMAC_MEM*)trans.get_data_ptr())->u32ChanIdx == XSCH0_RD){
+		DMAC_MEM * ptr = (DMAC_MEM *) trans.get_data_ptr();
+		TRANS2OTHER(tlm::BEGIN_REQ,DMAC_RD_ACK,CH_ID,(unsigned char*)ptr, SC_ZERO_TIME);
+	}
+
+
+
+
+}
+
+
+
+
+
+
+//all trans payload from Master to CORE behavior should call this function for maintenance later and behavior format
+void  DMAC::TRANS2CORE(tlm::tlm_phase PHASE,  DMAC_CMD CMD,unsigned int CH_ID, unsigned char* DATA_PTR , sc_time DELAY){
+
+	tlm::tlm_generic_payload p_trans2core;
+	DMAC_MEM * ptr = (DMAC_MEM*)DATA_PTR;
+	p_trans2core.set_data_ptr(DATA_PTR);
+	p_trans2core.set_address(CMD);
+	init_socket2core->nb_transport_fw(p_trans2core, PHASE, DELAY);
+
+	if(p_trans2core.get_response_status() == tlm::TLM_OK_RESPONSE ){//operate Core success
+		
+		if(((DMAC_MEM *)p_trans2core.get_data_ptr())->u32ChanIdx == XMCH0_WR ||
+			((DMAC_MEM *)p_trans2core.get_data_ptr())->u32ChanIdx ==XMCH2_WR){
+			c2d_xmchI_raccept[CH_ID].write(1);
+			if(src_rem_x_len_wr[CH_ID] == 0 && src_rem_y_len_wr[CH_ID] == 0){
+				mission_over_reset(WR_REQ_RD_CORE,CH_ID);
+			}
+		}
+		
+		else if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XSCH0_RD){
+			c2d_xschI_raccept[CH_ID].write(1);
+//cout<<"Slave get rd OK, time	:"<<sc_time_stamp().value()/1000<<endl;
+			if(Sdst_rem_x_len_rd[CH_ID] == 0 && Sdst_rem_y_len_rd[CH_ID] == 0 ){
+				mission_over_reset(RD_ACK,CH_ID);
+			}
+		}
+		
+		else if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XMCH0_RD ||
+				((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XMCH2_RD){
+			DMARDBuff[CH_ID].erase(DMARDBuff[CH_ID].begin());
+			c2d_xmchI_waccept[CH_ID].write(1);
+			   if(src_rem_x_len_rd[CH_ID] == 0 && src_rem_y_len_rd[CH_ID] == 0){
+				mission_over_reset(RD_REQ,CH_ID);
+			}
+		}
+		else if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XSCH0_WR){
+//cout<<"Slave get wr OK, time	:"<<sc_time_stamp().value()/1000<<endl;	
+			DMAWRBuff[CH_ID].erase(DMAWRBuff[CH_ID].begin());
+			c2d_xschI_waccept[CH_ID].write(1);
+		}
+
+	}else{
+
+		if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XMCH0_WR ||
+			((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XMCH2_WR ){
+			c2d_xmchI_raccept[CH_ID].write(0);
+		}
+		
+		else if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XSCH0_RD){
+			c2d_xschI_raccept[CH_ID].write(0);
+//cout<<"Slave get rd NOT OK, time	:"<<sc_time_stamp().value()/1000<<endl;
+		}
+		
+		else if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XMCH0_RD ||
+				((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XMCH2_RD){
+			c2d_xmchI_waccept[CH_ID].write(0);
+		}
+		
+		else if(((DMAC_MEM*)DATA_PTR)->u32ChanIdx == XSCH0_WR){
+			c2d_xschI_waccept[CH_ID].write(0);
+//cout<<"Slave get wr NOT OK, time	:"<<sc_time_stamp().value()/1000<<endl;	
+		}
+	}
+}
+
+
+
+
+
+//all dma date trans to other in just one trans
+bool  DMAC::TRANS2OTHER(tlm::tlm_phase PHASE,  DMAC_CMD CMD,unsigned int CH_ID,  unsigned char* DATA_PTR , sc_time DELAY){
+	tlm::tlm_generic_payload p_trans2other;
+	p_trans2other.set_data_ptr(DATA_PTR);
+	p_trans2other.set_address(CMD);
+	p_trans2other.set_data_length(core_id);  //use data length to label the core id
+
+	CH_ID = (CH_ID == 2 && CMD == DMAC_RD_REQ) ? XMCH2_RD : XMCH2_WR;
+
+	switch(CH_ID){
+		case 0x0:
+			init_socket2other->nb_transport_fw(p_trans2other, PHASE, DELAY);//trans2other core
+			break;
+		case XMCH2_WR:
+			init_socket2ddr->nb_transport_fw(p_trans2other, PHASE, DELAY);//trans2ddr
+			break;
+		case XMCH2_RD:
+			init_socket2ddr->nb_transport_fw(p_trans2other, PHASE, DELAY);//trans2ddr
+		//case XM
+	}
+
+	if(p_trans2other.get_response_status() == tlm::TLM_OK_RESPONSE){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+
+
+
+
+
+
+void  DMAC::mission_over_reset(mission_type Mtype, unsigned int ch_id){
+
+	//CH0 wr/rd interrupt code is both 35
+
+
+
+		switch(Mtype){
+
+
+		case WR_REQ_RD_CORE ://wr_req
+			dma_wr_mission_on[ch_id].write(0);//Be Master DMA WR over
+			src_D_sel_wr[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_wr[ch_id] = 0;
+			src_rem_x_len_wr[ch_id] = 0;	
+			src_rem_y_len_wr[ch_id] = 0;	
+			src_addr_x_step_wr[ch_id] = 0;
+			src_addr_y_step_wr[ch_id] = 0;
+			break;
+
+
+		case WR_REQ:
+			dst_D_sel_wr[ch_id] = 0;
+			dst_curr_addr_wr[ch_id] = 0;
+			dst_rem_x_len_wr[ch_id] = 0;
+			dst_rem_y_len_wr[ch_id] = 0;
+			dst_addr_x_step_wr[ch_id] = 0;
+			dst_addr_y_step_wr[ch_id] = 0;
+
+		switch(ch_id){
+			case 0x0 : 	
+				REGS.write_reg(XMCH0_Start_Addr_reg + 0x1 , 0x1);//stutas reset
+				WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+				break;
+
+			case 0x2 : 	
+				REGS.write_reg(XMCH2_Start_Addr_reg + 0x1 , 0x1);//stutas reset
+				WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+				break;
+		}
+
+			wr_interrupt[ch_id].write(1);
+//cout<<"wr over not trans interrupt time is	"<<dec<<(sc_time_stamp().value()/1000/10)<<endl;
+#ifdef  DMAC_LOG
+DmacLog<<" Be Master for DMA WR MISSION OVER Normally!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif			
+			break;
+
+		case WR_REQ_SRC_ADDR_ERR:
+			dma_wr_mission_on[ch_id].write(0);//Be Master DMA WR over
+			src_D_sel_wr[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_wr[ch_id] = 0;
+			src_rem_x_len_wr[ch_id] = 0;	
+			src_rem_y_len_wr[ch_id] = 0;	
+			src_addr_x_step_wr[ch_id] = 0;
+			src_addr_y_step_wr[ch_id] = 0;
+			dst_D_sel_wr[ch_id] = 0;
+			dst_curr_addr_wr[ch_id] = 0;
+			dst_rem_x_len_wr[ch_id] = 0;
+			dst_rem_y_len_wr[ch_id] = 0;
+			dst_addr_x_step_wr[ch_id] = 0;
+			dst_addr_y_step_wr[ch_id] = 0;
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA WR MISSION OVER ERROR (SRC_ADDR_ERR)!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif		
+			switch(ch_id){
+		case 0x0 :
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x00,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg + 0x1 , 0x231);	//DMA_WR but rd core src addr error, status 0x231
+			WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+			break;
+
+		case 0x2 :
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x00,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg + 0x1 , 0x231);	//DMA_WR but rd core src addr error, status 0x231
+			WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+			break;
+			}
+
+			wr_interrupt[ch_id].write(1);
+			break;
+
+
+		case WR_REQ_DST_ADDR_ERR:
+			dma_wr_mission_on[ch_id].write(0);//Be Master DMA WR over
+			src_D_sel_wr[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_wr[ch_id] = 0;
+			src_rem_x_len_wr[ch_id] = 0;	
+			src_rem_y_len_wr[ch_id] = 0;	
+			src_addr_x_step_wr[ch_id] = 0;
+			src_addr_y_step_wr[ch_id] = 0;
+
+			dst_D_sel_wr[ch_id] = 0;
+			dst_curr_addr_wr[ch_id] = 0;
+			dst_rem_x_len_wr[ch_id] = 0;
+			dst_rem_y_len_wr[ch_id] = 0;
+			dst_addr_x_step_wr[ch_id] = 0;
+			dst_addr_y_step_wr[ch_id] = 0;
+
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA WR MISSION OVER ERROR (DST_ADDR_ERR)!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			switch(ch_id){
+		case 0x0 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x00,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg+0x1 , 0x431);	
+			WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+			break;
+		case 0x2 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x00,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg+0x1 , 0x431);	
+			WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+			break;
+			}
+			wr_interrupt[ch_id].write(1);
+			break;
+
+
+
+		case RD_REQ: //rd_req
+			dma_rd_mission_on[ch_id].write(0);//Be Master DMA RD over
+
+			src_D_sel_rd[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_rd[ch_id] = 0;
+			src_rem_x_len_rd[ch_id] = 0;	
+			src_rem_y_len_rd[ch_id] = 0;	
+			src_addr_x_step_rd[ch_id] = 0;
+			src_addr_y_step_rd[ch_id] = 0;
+
+			dst_D_sel_rd[ch_id] = 0;
+			dst_curr_addr_rd[ch_id] = 0;
+			dst_rem_x_len_rd[ch_id] = 0;
+			dst_rem_y_len_rd[ch_id] = 0;
+			dst_addr_x_step_rd[ch_id] = 0;
+			dst_addr_y_step_rd[ch_id] = 0;
+
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA RD MISSION OVER Normally!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			switch(ch_id){
+		case 0x0 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg + 0x21 , 0x1);	
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+		case 0x2 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg + 0x21 , 0x1);	
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+
+			}
+			rd_interrupt[ch_id].write(1);
+			break;
+
+
+		case RD_REQ_DST_ADDR_ERR: //rd_req
+			dma_rd_mission_on[ch_id].write(0);//Be Master DMA RD over
+			src_D_sel_rd[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_rd[ch_id] = 0;
+			src_rem_x_len_rd[ch_id] = 0;	
+			src_rem_y_len_rd[ch_id] = 0;	
+			src_addr_x_step_rd[ch_id] = 0;
+			src_addr_y_step_rd[ch_id] = 0;
+			dst_D_sel_rd[ch_id] = 0;
+			dst_curr_addr_rd[ch_id] = 0;
+			dst_rem_x_len_rd[ch_id] = 0;
+			dst_rem_y_len_rd[ch_id] = 0;
+			dst_addr_x_step_rd[ch_id] = 0;
+			dst_addr_y_step_rd[ch_id] = 0;
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA RD MISSION OVER ERROR  (DST_ADDR_ERR)!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			switch(ch_id){
+		case 0x0 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg + 0x21 , 0x431);
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+		case 0x2 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg + 0x21 , 0x431);
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+			}
+			rd_interrupt[ch_id].write(1);
+			break;
+
+
+
+		case RD_REQ_SRC_ADDR_ERR: //rd_req
+			dma_rd_mission_on[ch_id].write(0);//Be Master DMA RD over
+			src_D_sel_rd[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_rd[ch_id] = 0;
+			src_rem_x_len_rd[ch_id] = 0;	
+			src_rem_y_len_rd[ch_id] = 0;	
+			src_addr_x_step_rd[ch_id] = 0;
+			src_addr_y_step_rd[ch_id] = 0;
+			dst_D_sel_rd[ch_id] = 0;
+			dst_curr_addr_rd[ch_id] = 0;
+			dst_rem_x_len_rd[ch_id] = 0;
+			dst_rem_y_len_rd[ch_id] = 0;
+			dst_addr_x_step_rd[ch_id] = 0;
+			dst_addr_y_step_rd[ch_id] = 0;
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA RD MISSION OVER ERROR  (SRC_ADDR_ERR)!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			switch(ch_id){
+		case 0x0 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg + 0x21 , 0x231);	
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+		case 0x2 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg + 0x21 , 0x231);	
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+			}
+			rd_interrupt[ch_id].write(1);
+			break;
+
+
+
+		case RD_ACK: //rd_ack
+			dma_rdack_mission_on[ch_id].write(0);
+			Sdst_x_len_record[ch_id]= 0;
+			Sdst_y_len_record[ch_id]= 0;
+			Sdst_D_sel_rd[ch_id]= 0;//0-1d,1-2d
+			Sdst_curr_addr_rd[ch_id]= 0;
+			Sdst_rem_x_len_rd[ch_id]= 0;	
+			Sdst_rem_y_len_rd[ch_id]= 0;	
+			Sdst_addr_x_step_rd[ch_id]= 0;
+			Sdst_addr_y_step_rd[ch_id]= 0;
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Slave for DMA RD ACK MISSION OVER Normally !!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			break;
+
+
+		case WR_CONFIG_ERR:
+			dma_wr_mission_on[ch_id].write(0);//Be Master DMA WR over
+			src_D_sel_wr[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_wr[ch_id] = 0;
+			src_rem_x_len_wr[ch_id] = 0;	
+			src_rem_y_len_wr[ch_id] = 0;	
+			src_addr_x_step_wr[ch_id] = 0;
+			src_addr_y_step_wr[ch_id] = 0;
+			dst_D_sel_wr[ch_id] = 0;
+			dst_curr_addr_wr[ch_id] = 0;
+			dst_rem_x_len_wr[ch_id] = 0;
+			dst_rem_y_len_wr[ch_id] = 0;
+			dst_addr_x_step_wr[ch_id] = 0;
+			dst_addr_y_step_wr[ch_id] = 0;
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA WR MISSION OVER ERROR  (WR_CONFIG_ERR)!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			switch(ch_id){
+		case 0x0 :
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x00,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg + 0x1 , 0x131);	//DMA_WR CONFIG error set Wstatus  0x131
+			WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+			break;
+		case 0x2 :
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x00,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg + 0x1 , 0x131);	//DMA_WR CONFIG error set Wstatus  0x131
+			WriteRemRegs(ch_id, WR_OVER);//write other regs except stutas
+			break;
+			}
+			wr_interrupt[ch_id].write(1);
+			break;
+
+		case RD_CONFIG_ERR: //rd_req
+			dma_rd_mission_on[ch_id].write(0);//Be Master DMA RDover
+			src_D_sel_rd[ch_id] = 0;//0-1d,1-2d 
+			src_curr_addr_rd[ch_id] = 0;
+			src_rem_x_len_rd[ch_id] = 0;	
+			src_rem_y_len_rd[ch_id] = 0;	
+			src_addr_x_step_rd[ch_id] = 0;
+			src_addr_y_step_rd[ch_id] = 0;
+			dst_D_sel_rd[ch_id] = 0;
+			dst_curr_addr_rd[ch_id] = 0;
+			dst_rem_x_len_rd[ch_id] = 0;
+			dst_rem_y_len_rd[ch_id] = 0;
+			dst_addr_x_step_rd[ch_id] = 0;
+			dst_addr_y_step_rd[ch_id] = 0;
+			//give interrupt to Core
+#ifdef  DMAC_LOG
+			DmacLog<<" Be Master for DMA RD MISSION OVER ERROR  (RD_CONFIG_ERR)!!"<<endl;
+			//WriteLog("DMA_WR over!");
+#endif
+			switch(ch_id){
+		case 0x0 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH0_Start_Addr_reg + 0x21 , 0x131);
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+		case 0x2 : 
+			//REGS.write_reg(XMCH0_Start_Addr_reg + 0x20,0x0);//start reset
+			REGS.write_reg(XMCH2_Start_Addr_reg + 0x21 , 0x131);
+			WriteRemRegs(ch_id, RD_OVER);//write other regs except stutas
+			break;
+			}
+			rd_interrupt[ch_id].write(1);
+			break;
+
+
+
+		default:
+ERROR_REPORT_DMAC("mission_over reset get wrong type")
+				break;
+		}
+	
+}
+
+
+
+bool DMAC::JudgeAddr(unsigned int addr){
+		
+	if(addr >= BLK0_LOW_ADDR && addr <= BLK0_HIGH_ADDR){
+		return true;
+	}
+	
+	if(addr >= BLK1_LOW_ADDR && addr <= BLK1_HIGH_ADDR){
+		return true;
+	}
+
+	if(addr >= BLK2_LOW_ADDR && addr <= BLK2_HIGH_ADDR){
+		return true;
+	}
+
+	if(addr >= BLK3_LOW_ADDR && addr <= BLK3_HIGH_ADDR){
+		return true;
+	}
+
+	if(addr >= BLK4_LOW_ADDR && addr <= BLK4_HIGH_ADDR){
+		return true;
+	}
+
+	if(addr >= BLK5_LOW_ADDR && addr <= BLK5_HIGH_ADDR){
+		return true;
+	}
+
+	return false;
+
+}
+
+
+
+void DMAC::WriteRemRegs(unsigned int ch_id, RegsType tt, unsigned int val){
+			
+
+
+
+	unsigned int baseaddr; bool baseaddr_flag = false;
+	unsigned int fulladdr; bool fulladdr_flag = false;	
+
+	switch(ch_id){
+
+		case 0 :{
+			baseaddr_flag = true;
+			baseaddr = XMCH0_Start_Addr_reg;
+
+			break;
+				}
+
+		case 2 :{
+			baseaddr_flag = true;
+			baseaddr = XMCH2_Start_Addr_reg;
+
+			break;
+				}
+
+		case 3 :{
+			baseaddr_flag = true;
+			baseaddr = XMCH3_Start_Addr_reg;
+
+			break;
+				}
+
+		default:{
+ERROR_REPORT_DMAC("get wrong ch_id")
+			break;
+				}
+	}
+
+	if(tt == WR_OVER){
+		REGS.write_reg(baseaddr + 0x00, val);
+		REGS.write_reg(baseaddr + 0x02, val);
+		//REGS.write_reg(baseaddr + 0x10, val);
+		//REGS.write_reg(baseaddr + 0x11, val);
+		//REGS.write_reg(baseaddr + 0x12, val);
+		//REGS.write_reg(baseaddr + 0x13, val);
+		//REGS.write_reg(baseaddr + 0x14, val);
+		REGS.write_reg(baseaddr + 0x15, val);
+		REGS.write_reg(baseaddr + 0x16, val);
+		//REGS.write_reg(baseaddr + 0x18, val);
+		//REGS.write_reg(baseaddr + 0x19, val);
+		//REGS.write_reg(baseaddr + 0x1a, val);
+		//REGS.write_reg(baseaddr + 0x1b, val);
+		//REGS.write_reg(baseaddr + 0x1c, val);
+		REGS.write_reg(baseaddr + 0x1d, val);
+		REGS.write_reg(baseaddr + 0x1e, val);
+		return ;
+	}
+
+	if(tt == RD_OVER){
+		REGS.write_reg(baseaddr + 0x20, val);
+		REGS.write_reg(baseaddr + 0x22, val);
+		//REGS.write_reg(baseaddr + 0x30, val);
+		//REGS.write_reg(baseaddr + 0x31, val);
+		//REGS.write_reg(baseaddr + 0x32, val);
+		//REGS.write_reg(baseaddr + 0x33, val);
+		//REGS.write_reg(baseaddr + 0x34, val);
+		REGS.write_reg(baseaddr + 0x35, val);
+		REGS.write_reg(baseaddr + 0x36, val);
+		//REGS.write_reg(baseaddr + 0x38, val);
+		//REGS.write_reg(baseaddr + 0x39, val);
+		//REGS.write_reg(baseaddr + 0x3a, val);
+		//REGS.write_reg(baseaddr + 0x3b, val);
+		//REGS.write_reg(baseaddr + 0x3c, val);
+		REGS.write_reg(baseaddr + 0x3d, val);
+		REGS.write_reg(baseaddr + 0x3e, val);
+		return;
+	}
+
+
+	switch(tt){
+
+		case WR_SRC_CURR:		
+			fulladdr = baseaddr + 0x14; 
+			fulladdr_flag = true; 
+			break;
+		case WR_SRC_X_REM:		
+			fulladdr = baseaddr + 0x15; 
+			fulladdr_flag = true; 
+			break;
+		case WR_SRC_Y_REM:		
+			fulladdr = baseaddr + 0x16; 
+			fulladdr_flag = true;
+			break;
+	
+		case WR_DST_CURR:		
+			fulladdr = baseaddr + 0x1c; 
+			fulladdr_flag = true; 
+			break;
+		case WR_DST_X_REM:		
+			fulladdr = baseaddr + 0x1d; 
+			fulladdr_flag = true; 
+			break;
+		case WR_DST_Y_REM:		
+			fulladdr = baseaddr + 0x1e; 
+			fulladdr_flag = true; 
+			break;
+
+		case RD_SRC_CURR:		
+			fulladdr = baseaddr + 0x34; 
+			fulladdr_flag = true; 
+			break;
+		case RD_SRC_X_REM:		
+			fulladdr = baseaddr + 0x35; 
+			fulladdr_flag = true; 
+			break;
+		case RD_SRC_Y_REM:		
+			fulladdr = baseaddr + 0x36; 
+			fulladdr_flag = true; 
+			break;
+
+		case RD_DST_CURR:		
+			fulladdr = baseaddr + 0x3c; 
+			fulladdr_flag = true; 
+			break;
+		case RD_DST_X_REM:		
+			fulladdr = baseaddr + 0x3d; 
+			fulladdr_flag = true; 
+			break;
+		case RD_DST_Y_REM:		
+			fulladdr = baseaddr + 0x3e; 
+			fulladdr_flag = true; 
+			break;
+
+		default: break;
+	}
+
+
+	if(!baseaddr_flag){
+ERROR_REPORT_DMAC("can not get wr regs base addr!")
+	return;
+	}
+
+
+	if(!fulladdr){
+ERROR_REPORT_DMAC("can not get wr regs full addr!")
+	return;
+	}
+
+	REGS.write_reg(fulladdr, val);
+
+
+}
+
+
+
+
+
+void DMAC::WriteLog(string str){
+
+	fstream logout;
+
+	logout.open("dmaclog.txt",fstream::out|fstream::app);
+
+	if(!logout){
+		cout<<"open DMAC log file fail!!"<<endl;
+	}else{
+		cout<<"open DMAC log file right!!"<<endl;
+		time_t t = time(NULL);
+		char tmp[64];
+		strftime(tmp,sizeof(tmp),"%Y %m %d %X", localtime(&t));
+		logout<<tmp;
+
+		logout<<"		current cycles is "<<(sc_time_stamp().value()/1000/10);
+		logout<<"		core_"<<core_id<<" :"<<"  "<<str<<endl;
+
+		logout.close();
+
+	}
+}
+
+
+
+
+
+void DMAC::ShiftRegs(){
+	
+		REGS.GLB_STATUS_reg.shift();		
+		
+		REGS.HCH_START_R.shift();					
+		REGS.HCH_STATUS_R.shift();					
+		REGS.HCH_CTL_R.shift();						
+		REGS.HCH_DST_START_ADDRH_R.shift();			
+		REGS.HCH_SRC_START_ADDR_R.shift();			
+		REGS.HCH_SRC_LEN_X_R.shift();				
+		REGS.HCH_SRC_ADDR_STEP_R.shift();				
+		REGS.HCH_SRC_LEN_Y_R.shift();					
+		REGS.HCH_SRC_CURR_ADDR_R.shift();				
+		REGS.HCH_SRC_LEN_REM_X_R.shift();				
+		REGS.HCH_SRC_LEN_REM_Y_R.shift();				
+		REGS.HCH_DST_START_ADDRL_R.shift();				
+		REGS.HCH_DST_LEN_X_R.shift();					
+		REGS.HCH_DST_ADDR_STEP_R.shift();				
+		REGS.HCH_DST_LEN_Y_R.shift();					
+		REGS.HCH_DST_CURR_ADDR_R.shift();				
+		REGS.HCH_DST_LEN_REM_X_R.shift();				
+		REGS.HCH_DST_LEN_REM_Y_R.shift();				
+
+
+		for(int i = 0 ; i!=CHANNEL_NUM ; i++ ){
+
+			REGS.XWCHi_START_R[i].shift();				
+			REGS.XWCHi_STATUS_R[i].shift();			
+			REGS.XWCHi_CTL_R[i].shift();				
+			REGS.XWCHi_DST_START_ADDRH_R[i].shift();	
+			REGS.XWCHi_SRC_START_ADDR_R[i].shift();	
+			REGS.XWCHi_SRC_LEN_X_R[i].shift();			
+			REGS.XWCHi_SRC_ADDR_STEP_R[i].shift();		
+			REGS.XWCHi_SRC_LEN_Y_R[i].shift();			
+			REGS.XWCHi_SRC_CURR_ADDR_R[i].shift();		
+			REGS.XWCHi_SRC_LEN_REM_X_R[i].shift();		
+			REGS.XWCHi_SRC_LEN_REM_Y_R[i].shift();		
+			REGS.XWCHi_DST_START_ADDRL_R[i].shift();	
+			REGS.XWCHi_DST_LEN_X_R[i].shift();			
+			REGS.XWCHi_DST_ADDR_STEP_R[i].shift();		
+			REGS.XWCHi_DST_LEN_Y_R[i].shift();			
+			REGS.XWCHi_DST_CURR_ADDR_R[i].shift();		
+			REGS.XWCHi_DST_LEN_REM_X_R[i].shift();		
+			REGS.XWCHi_DST_LEN_REM_Y_R[i].shift();		
+
+			REGS.XRCHi_START_R[i].shift();				
+			REGS.XRCHi_STATUS_R[i].shift();			
+			REGS.XRCHi_CTL_R[i].shift();				
+			REGS.XRCHi_DST_START_ADDRH_R[i].shift();	
+			REGS.XRCHi_SRC_START_ADDR_R[i].shift();	
+			REGS.XRCHi_SRC_LEN_X_R[i].shift();			
+			REGS.XRCHi_SRC_ADDR_STEP_R[i].shift();		
+			REGS.XRCHi_SRC_LEN_Y_R[i].shift();			
+			REGS.XRCHi_SRC_ADDR_CURR_R[i].shift();		
+			REGS.XRCHi_SRC_LEN_REM_X_R[i].shift();		
+			REGS.XRCHi_SRC_LEN_REM_Y_R[i].shift();		
+			REGS.XRCHi_DST_START_ADDRL_R[i].shift();	
+			REGS.XRCHi_DST_LEN_X_R[i].shift();			
+			REGS.XRCHi_DST_ADDR_STEP_R[i].shift();		
+			REGS.XRCHi_DST_LEN_Y_R[i].shift();			
+			REGS.XRCHi_DST_CURR_ADDR_R[i].shift();		
+			REGS.XRCHi_DST_LEN_REM_X_R[i].shift();		
+			REGS.XRCHi_DST_LEN_REM_Y_R[i].shift();
+
+		}
+			
+		//	REGS.ShadowRegVec.clear();
+
+}
+
+
+
+bool  DMAC::SystemCfgRegWr(unsigned int addr,	unsigned int val){
+			
+
+	DMAC_RW_REG_S p_rwreg;
+	p_rwreg.u32Addr = addr;
+	p_rwreg.u32Value = val;
+
+	tlm::tlm_phase PHASE = tlm::BEGIN_REQ;
+	sc_time DELAY = SC_ZERO_TIME;
+
+	tlm::tlm_generic_payload p_trans2SysCfgReg;
+
+	p_trans2SysCfgReg.set_data_ptr((unsigned char*)&p_rwreg);
+
+	p_trans2SysCfgReg.set_address(CORE_REQ_WR_REG);
+
+	init_socket2SyscfgReg->nb_transport_fw(p_trans2SysCfgReg, PHASE, DELAY);
+
+	if(p_trans2SysCfgReg.get_response_status() == tlm::TLM_OK_RESPONSE){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+
+
+
+bool  DMAC::SystemCfgRegRd(unsigned int addr,   unsigned int & result){
+		
+	DMAC_RW_REG_S p_rwreg;
+	p_rwreg.u32Addr = addr;
+	p_rwreg.u32Value = 0xcdcdcdcd;
+
+	tlm::tlm_phase PHASE = tlm::BEGIN_REQ;
+	sc_time DELAY = SC_ZERO_TIME;
+
+	tlm::tlm_generic_payload p_trans2SysCfgReg;
+
+	p_trans2SysCfgReg.set_data_ptr((unsigned char*)&p_rwreg);
+
+	p_trans2SysCfgReg.set_address(CORE_REQ_RD_REG);
+
+	init_socket2SyscfgReg->nb_transport_fw(p_trans2SysCfgReg, PHASE, DELAY);
+
+	if(p_trans2SysCfgReg.get_response_status() == tlm::TLM_OK_RESPONSE){
+		result = p_rwreg.u32Value;
+		return true;
+	}else{
+		return false;
+	}	
+}
+
+
+
+
+bool  DMAC::OutMemRW(DMAC_MEM* dmac_mem_ptr){
+
+	if(dmac_mem_ptr->u32ElemNum == 0){
+		return false;
+	}
+	
+	unsigned int cnt = dmac_mem_ptr->u32ElemNum ;
+	bool result = true;
+	bool haveread = false;
+	bool read_ddr = false;
+	bool write_ddr = false;
+
+
+	for(int i = 0 ; i!= cnt; i++){
+
+		if( dmac_mem_ptr->arrRWInfo[i].u32Addr >= GlobalRegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= GlobalRegBase + GlobalRegMaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= MCRCRRegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= MCRCRRegBase + MCRCRRegMaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= PMARegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= PMARegBase + PMARegMaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= PCIERegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= PCIERegBase + PCIERegMaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= SRIORegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= SRIORegBase + SRIORegMaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= IPCRegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= IPCRegBase + IPCRegMaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= CLK_RST_RegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= CLK_RST_RegBase + CLK_RST_MaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= TCR_WDT_RegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr <= TCR_WDT_RegBase + TCR_WDT_MaxOffset
+		||	dmac_mem_ptr->arrRWInfo[i].u32Addr >= HSRegBase && dmac_mem_ptr->arrRWInfo[i].u32Addr < HSRegBase + HSRegNum)
+		
+		{
+			if(dmac_mem_ptr->arrRWInfo[i].bolIsRead){
+				if(SystemCfgRegRd(dmac_mem_ptr->arrRWInfo[i].u32Addr, dmac_mem_ptr->arrRWInfo[i].u32Value)){
+					haveread = true;	
+					continue;
+				}else{
+						result = false;
+						break;
+				}
+			}else{
+				if(SystemCfgRegWr(dmac_mem_ptr->arrRWInfo[i].u32Addr,dmac_mem_ptr->arrRWInfo[i].u32Value)){
+						continue;
+				}else{
+						result = false;
+						break;
+				}
+			}
+		}
+
+		if(dmac_mem_ptr->arrRWInfo[i].u32Addr  >= Global_Start_Addr_reg && dmac_mem_ptr->arrRWInfo[i].u32Addr<= Global_End_Addr_reg
+		|| dmac_mem_ptr->arrRWInfo[i].u32Addr >= HMCH0_Start_Addr_reg && dmac_mem_ptr->arrRWInfo[i].u32Addr <= HMCH0_End_Addr_reg	
+		|| dmac_mem_ptr->arrRWInfo[i].u32Addr >= XMCH0_Start_Addr_reg && dmac_mem_ptr->arrRWInfo[i].u32Addr <= XMCH3_End_Addr_reg)
+		{
+			if(!dmac_mem_ptr->arrRWInfo[i].bolIsRead){
+				if(REGS.write_reg(dmac_mem_ptr->arrRWInfo[i].u32Addr,dmac_mem_ptr->arrRWInfo[i].u32Value)){
+					continue;
+				}else{
+					result = false;
+					break;
+				}
+			}else{
+				if(REGS.read_reg(dmac_mem_ptr->arrRWInfo[i].u32Addr,dmac_mem_ptr->arrRWInfo[i].u32Value)){
+					continue;
+				}else{
+					result = false;
+					break;
+				}
+			}
+		}
+		if(dmac_mem_ptr->arrRWInfo[i].u32Addr  >= DDRDataStart && dmac_mem_ptr->arrRWInfo[i].u32Addr<= DDRDataStart+DDRData_MaxOffset)
+		{
+			if (!dmac_mem_ptr->arrRWInfo[i].bolIsRead){
+				write_ddr = true;
+			}else{
+				read_ddr = true;
+			}
+			continue;
+		}else{
+			result = false;
+			break;
+		}
+
+	}
+
+
+	if(result && write_ddr){
+		TRANS2OTHER(tlm::BEGIN_REQ, DMAC_WR_REQ, XMCH2_WR,  (unsigned char*)dmac_mem_ptr, SC_ZERO_TIME);
+	}
+	if(result && read_ddr){
+		//TRANS2OTHER(tlm::BEGIN_REQ, DMAC_RD_REQ, XMCH2_RD,  (unsigned char*)dmac_mem_ptr, SC_ZERO_TIME);
+		TRANS2OTHER(tlm::BEGIN_REQ, DMAC_RD_REQ_DDR, XMCH2_RD,  (unsigned char*)dmac_mem_ptr, SC_ZERO_TIME);
+	}
+
+
+	if(result && haveread){
+		tlm::tlm_generic_payload p_trans2core;
+		tlm::tlm_phase PHASE = tlm::BEGIN_RESP;
+		sc_time tt = SC_ZERO_TIME;
+
+		p_trans2core.set_data_ptr((unsigned char*)dmac_mem_ptr);
+
+		p_trans2core.set_address(CORE_REQ_OUT_MEM);
+
+		targ_socket2core->nb_transport_bw(p_trans2core, PHASE, tt);	
+	}
+		return result;
+
+}
+
+
+
+
+#ifdef DMAC_LOG
+
+void DMAC::WriteLogFile(){
+
+	RegFileLog<<"Cycle "<<(sc_time_stamp().value()/1000 - 5)/10<<endl;
+
+	//RegFileLog<<"reg_name:"<<  REGS.GLB_STATUS_reg.name<< "val = " << REGS.GLB_STATUS_reg.m_out<<endl;
+
+/*
+	RegFileLog<<"reg_name:"<<  REGS.HCH_START_R.name<< "val = " << REGS.HCH_START_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_STATUS_R.name<< "val = " << REGS.HCH_STATUS_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_CTL_R.name<< "val = " << REGS.HCH_CTL_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_START_ADDRH_R.name<< "val = " << REGS.HCH_DST_START_ADDRH_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_START_ADDR_R.name<< "val = " << REGS.HCH_SRC_START_ADDR_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_LEN_X_R.name<< "val = " << REGS.HCH_SRC_LEN_X_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_ADDR_STEP_R.name<< "val = " << REGS.HCH_SRC_ADDR_STEP_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_LEN_Y_R.name<< "val = " << REGS.HCH_SRC_LEN_Y_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_CURR_ADDR_R.name<< "val = " << REGS.HCH_SRC_CURR_ADDR_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_LEN_REM_X_R.name<< "val = " << REGS.HCH_SRC_LEN_REM_X_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_SRC_LEN_REM_Y_R.name<< "val = " << REGS.HCH_SRC_LEN_REM_Y_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_START_ADDRL_R.name<< "val = " << REGS.HCH_DST_START_ADDRL_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_LEN_X_R.name<< "val = " << REGS.HCH_DST_LEN_X_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_ADDR_STEP_R.name<< "val = " << REGS.HCH_DST_ADDR_STEP_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_LEN_Y_R.name<< "val = " << REGS.HCH_DST_LEN_Y_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_CURR_ADDR_R.name<< "val = " << REGS.HCH_DST_CURR_ADDR_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_LEN_REM_X_R.name<< "val = " << REGS.HCH_DST_LEN_REM_X_R.m_out<<endl;
+	RegFileLog<<"reg_name:"<<  REGS.HCH_DST_LEN_REM_Y_R.name<< "val = " << REGS.HCH_DST_LEN_REM_Y_R.m_out<<endl;
+	*/	
+
+
+	RegFileLog<<hex;
+	RegFileLog<<REGS.XWCHi_START_R[0].m_out<<"(0x"<<REGS.XWCHi_START_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_STATUS_R[0].m_out<<"(0x"<<REGS.XWCHi_STATUS_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_CTL_R[0].m_out<<"(0x"<<REGS.XWCHi_CTL_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_START_ADDRH_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_START_ADDRH_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_START_ADDR_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_START_ADDR_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_LEN_X_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_LEN_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_ADDR_STEP_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_ADDR_STEP_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_LEN_Y_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_LEN_Y_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_CURR_ADDR_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_CURR_ADDR_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_LEN_REM_X_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_LEN_REM_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_SRC_LEN_REM_Y_R[0].m_out<<"(0x"<<REGS.XWCHi_SRC_LEN_REM_Y_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_START_ADDRL_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_START_ADDRL_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_LEN_X_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_LEN_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_ADDR_STEP_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_ADDR_STEP_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_LEN_Y_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_LEN_Y_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_CURR_ADDR_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_CURR_ADDR_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_LEN_REM_X_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_LEN_REM_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XWCHi_DST_LEN_REM_Y_R[0].m_out<<"(0x"<<REGS.XWCHi_DST_LEN_REM_Y_R[0].offset_addr<<")"<<endl;;
+
+	RegFileLog<<REGS.XRCHi_START_R[0].m_out<<"(0x"<<REGS.XRCHi_START_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_STATUS_R[0].m_out<<"(0x"<<REGS.XRCHi_STATUS_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_CTL_R[0].m_out<<"(0x"<<REGS.XRCHi_CTL_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_START_ADDRH_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_START_ADDRH_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_START_ADDR_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_START_ADDR_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_LEN_X_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_LEN_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_ADDR_STEP_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_ADDR_STEP_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_LEN_Y_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_LEN_Y_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_ADDR_CURR_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_ADDR_CURR_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_LEN_REM_X_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_LEN_REM_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_SRC_LEN_REM_Y_R[0].m_out<<"(0x"<<REGS.XRCHi_SRC_LEN_REM_Y_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_START_ADDRL_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_START_ADDRL_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_LEN_X_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_LEN_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_ADDR_STEP_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_ADDR_STEP_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_LEN_Y_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_LEN_Y_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_CURR_ADDR_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_CURR_ADDR_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_LEN_REM_X_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_LEN_REM_X_R[0].offset_addr<<")\t";
+	RegFileLog<<REGS.XRCHi_DST_LEN_REM_Y_R[0].m_out<<"(0x"<<REGS.XRCHi_DST_LEN_REM_Y_R[0].offset_addr<<")"<<endl;
+	
+
+
+
+
+}
+#endif

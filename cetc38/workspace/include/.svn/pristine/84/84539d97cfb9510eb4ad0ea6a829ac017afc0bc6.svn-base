@@ -1,0 +1,2060 @@
+
+#include "sc_iss.h"
+
+#ifdef DSP_WIN32
+    #pragma warning( disable : 4554 )
+#endif
+
+//----------------------------------------------------------
+void sc_iss::InitResSLK()
+{
+	memset(m_arrResSLK, 0, sizeof(m_arrResSLK));
+	for (int i = 0; i < RES_SLK_SIZE - 1; i++)
+	{
+		m_arrResSLK[i].bolInUse = false;
+		m_arrResSLK[i].u32Next = i + 1;
+	}
+
+	m_arrResSLK[RES_SLK_SIZE - 1].bolInUse = false;  // GRui 8-9
+	m_arrResSLK[RES_SLK_SIZE - 1].u32Next = 0;
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::GetResSLKNumInUse()
+{
+	DSPU32 u32ElemNum = 0;
+
+	for (int i = 1; i < RES_SLK_SIZE; i++)
+	{
+		if (m_arrResSLK[i].bolInUse)
+		{
+			u32ElemNum++;
+		}
+	}
+
+	return u32ElemNum;
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::MallocResSLK()
+{
+	DSPU32 u32SLKIdx;
+
+	// m_arrResSLK[0] is the head of SLK.
+	u32SLKIdx = m_arrResSLK[0].u32Next;
+	if (u32SLKIdx != 0)
+	{
+		m_arrResSLK[0].u32Next = m_arrResSLK[u32SLKIdx].u32Next;
+		m_arrResSLK[u32SLKIdx].bolInUse = true;
+	}
+	else
+	{
+		printf("MallocResSLK failed: elem num is %d currently\n", GetResSLKNumInUse());
+	}
+
+	return u32SLKIdx;
+}
+//----------------------------------------------------------
+bool sc_iss::FreeResSLK(DSPU32 p_u32SLKIdx)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx > (RES_SLK_SIZE - 1)) )
+	{
+		return false;
+	}
+
+	if (m_arrResSLK[p_u32SLKIdx].bolInUse)
+	{
+		memset(&m_arrResSLK[p_u32SLKIdx], 0, sizeof(RES_SLK_ELEM));
+		m_arrResSLK[p_u32SLKIdx].bolInUse = false;
+		m_arrResSLK[p_u32SLKIdx].u32Next = m_arrResSLK[0].u32Next;
+		m_arrResSLK[0].u32Next = p_u32SLKIdx;
+	}
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::FreeSlotCalcRes(DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx > (RES_SLK_SIZE - 1)) )
+	{
+		return false;
+	}
+
+	if (m_arrResSLK[p_u32SLKIdx].bolInUse)
+	{
+		u8Units = m_arrResSLK[p_u32SLKIdx].slot_res_used.u8UnitsUseCalc;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ((u8Units >> i) & 0x1 != 0)
+			{
+				// '1' means corresponding resource is in use
+				m_dsp_res_tbl.arrALU[i] &= ~m_arrResSLK[p_u32SLKIdx].slot_res_used.u8ALUs[i];
+				m_dsp_res_tbl.arrMUL[i] &= ~m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i];
+				m_dsp_res_tbl.arrSHF[i] &= ~m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SHFs[i];
+				m_dsp_res_tbl.arrSPU[i] &= ~m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SPUs[i];
+			}
+		}
+	}	
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::ClrSLKElem(DSPU32 p_u32SLKIdx)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx > (RES_SLK_SIZE - 1)) )
+	{
+		return false;
+	}
+
+	memset(&m_arrResSLK[p_u32SLKIdx].slot_res_used, 0, sizeof(SLOT_RES_USED));
+	return true;
+}
+
+//----------------------------------------------------------
+bool sc_iss::SetGenRegIdx(DSPU32 p_u32RegIdx, DSPU64 &p_u64RegMask)
+{
+	DSPU64 u64Temp = 1;
+
+	if (p_u32RegIdx > (REG_NUM_OF_UNIT - 1))
+	{
+		PrintToCerr("SetGenRegIdx: Reg index is invalid\n");
+		return false;
+	}
+
+	u64Temp = u64Temp << p_u32RegIdx;
+	p_u64RegMask |= u64Temp;
+
+	return true;
+}
+
+//----------------------------------------------------------
+bool sc_iss::SetCalcResIdx(DSPU32 p_u32CalcResIdx, DSPU8 &p_u8CalcResMask)
+{
+	char u8Temp = 1;
+
+	if (p_u32CalcResIdx > 7)
+	{
+		PrintToCerr("SetCalcResIdx: Calc Res index is invalid\n");
+		return false;
+	}
+
+	u8Temp = u8Temp << p_u32CalcResIdx;
+	p_u8CalcResMask |= u8Temp;
+
+	return true;
+}
+//-----------------------------------------------------------------
+bool sc_iss::IsCalcResIdxSet(DSPU32 p_u32CalcResIdx, DSPU8 p_u8CalcResMask)
+{
+	bool bolIsSet;
+
+	if (p_u32CalcResIdx > 7)
+	{
+		PrintToCerr("IsCalcResIdxSet: Calc Res index is invalid\n");
+		return false;
+	}
+
+	p_u8CalcResMask = p_u8CalcResMask >> p_u32CalcResIdx;
+	bolIsSet = ( (p_u8CalcResMask & 0x1) == 1 )? true:false;
+
+	return bolIsSet;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_alu_or_shf(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	m_arrResSLK[p_u32SLKIdx].slot_res_used.u8UnitsUseCalc = u8Units;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			bolOK = false;
+			
+			//to allocate requested number of ALUs
+			if ( (p_sResNeeded.i32ALUNum != 0) && (p_sResNeeded.u8ALUs == 0) )//属性为ALU
+			{
+				for (int j = 0; j < p_sResNeeded.i32ALUNum; j++)
+				{
+					bolOK = false;
+					for (int k = 0; k < ALU_NUM_OF_UNIT; k++)
+					{
+						if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrALU[i]))
+						{
+							SetCalcResIdx(k, m_dsp_res_tbl.arrALU[i]);
+							SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8ALUs[i]);
+							bolOK = true;
+							break;
+						}
+					}
+
+					if (!bolOK)
+					{
+						PrintToCerr("malloc_calc_res: No enough ALU resource!\n");
+						return false;
+					}
+				}
+			}
+			else  //属性为ALU/SHF
+			{
+				bolOK = false;
+				if(((p_sResNeeded.IsAssigned>>i) & 1) == 0)
+				{
+					for (int k = 0; k < ALU_NUM_OF_UNIT; k++)
+					{
+						if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrALU[i]))
+						{
+							SetCalcResIdx(k, m_dsp_res_tbl.arrALU[i]);
+							SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8ALUs[i]);
+							bolOK = true;
+							break;
+						}
+					}
+					if (!bolOK)
+					{
+						PrintToCerr("malloc_calc_res: No enough ALU resource!\n");
+						return false;
+					}
+				}
+				
+			}//to allocate requested number of ALUs			
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_abfpr_wr_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			// 若涉及当前宏
+		
+			if ( p_sResNeeded.bolABFPRWrBus )
+			{
+				// 若当前指令需要使用ABFPR写总线
+			
+				if ( !GIsBitSet(m_dsp_res_tbl.u32ABFPRWrBusRes, i) )
+				{
+					// 若当前宏中的ABFPR写总线尚未被分配
+
+					// 标记该资源已经被分配
+					m_dsp_res_tbl.u32ABFPRWrBusRes = GSetBit(m_dsp_res_tbl.u32ABFPRWrBusRes, i);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u32ABFPRWrBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32ABFPRWrBusMask, i);
+				}
+				else
+				{
+					printf("malloc_abfpr_wr_bus: No enough abfpr_wr_bus resource!\n");
+					return false;
+				}
+
+			} // if ( p_sResNeeded.bolABFPRWrBus )
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+		
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_abfpr_rd_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			// 若涉及当前宏
+		
+			if ( p_sResNeeded.bolABFPRRdBus )
+			{
+				// 若当前指令需要使用ABFPR读总线
+			
+				if ( !GIsBitSet(m_dsp_res_tbl.u32ABFPRRdBusRes, i) )
+				{
+					// 若当前宏中的ABFPR读总线尚未被分配
+
+					// 标记该资源已经被分配
+					m_dsp_res_tbl.u32ABFPRRdBusRes = GSetBit(m_dsp_res_tbl.u32ABFPRRdBusRes, i);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u32ABFPRRdBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32ABFPRRdBusMask, i);
+				}
+				else
+				{
+					printf("malloc_abfpr_rd_bus: No enough abfpr_rd_bus resource!\n");
+					return false;
+				}
+
+			} // if ( p_sResNeeded.bolABFPRRdBus )
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+		
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+
+//----------------------------------------------------------
+bool sc_iss::malloc_areg_rd_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			// 若涉及当前宏
+		
+			if ( p_sResNeeded.bolAddrRegRdBus )
+			{
+				// 若当前指令需要使用地址寄存器读总线
+			
+				if ( !GIsBitSet(m_dsp_res_tbl.u32AddrRegRdBusRes, i * 2) )
+				{				
+					// 若当前宏中的地址寄存器读总线0尚未被分配
+					// (每个宏中有两条地址寄存器读总线)
+
+					// 标记该资源已经被分配
+					m_dsp_res_tbl.u32AddrRegRdBusRes = GSetBit(m_dsp_res_tbl.u32AddrRegRdBusRes, i * 2);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegRdBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegRdBusMask, i * 2);
+				}
+				else if ( !GIsBitSet(m_dsp_res_tbl.u32AddrRegRdBusRes, i * 2 + 1) )
+				{
+					// 若当前宏中的地址寄存器读总线1尚未被分配
+
+					// 标记该资源已经被分配
+					m_dsp_res_tbl.u32AddrRegRdBusRes = GSetBit(m_dsp_res_tbl.u32AddrRegRdBusRes, i * 2 + 1);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegRdBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegRdBusMask, i * 2 + 1);
+				}
+				else
+				{
+					printf("malloc_areg_rd_bus: No enough areg_rd_bus resource!\n");
+					return false;
+				}
+
+			} // if ( p_sResNeeded.bolAddrRegRdBus )
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+		
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_areg_wr_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			// 若涉及当前宏
+		
+			if ( p_sResNeeded.bolAddrRegWrBus )
+			{
+				// 若当前指令需要使用地址寄存器写总线
+			
+				if ( !GIsBitSet(m_dsp_res_tbl.u32AddrRegWrBusRes, i * 2) )
+				{				
+					// 若当前宏中的地址寄存器写总线0尚未被分配
+					// (每个宏中有两条地址寄存器写总线)
+
+					// 标记该资源已经被分配
+					m_dsp_res_tbl.u32AddrRegWrBusRes = GSetBit(m_dsp_res_tbl.u32AddrRegWrBusRes, i * 2);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegWrBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegWrBusMask, i * 2);
+				}
+				else if ( !GIsBitSet(m_dsp_res_tbl.u32AddrRegWrBusRes, i * 2 + 1) )
+				{
+					// 若当前宏中的地址寄存器写总线1尚未被分配
+
+					// 标记该资源已经被分配
+					m_dsp_res_tbl.u32AddrRegWrBusRes = GSetBit(m_dsp_res_tbl.u32AddrRegWrBusRes, i * 2 + 1);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegWrBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32AddrRegWrBusMask, i * 2 + 1);
+				}
+				else
+				{
+					printf("malloc_areg_wr_bus: No enough areg_wr_bus resource!\n");
+					return false;
+				}
+
+			} // if ( p_sResNeeded.bolAddrRegWrBus )
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+		
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_inner_rd_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+		
+	if ( p_sResNeeded.bolInnerRdBus )
+	{
+		// 若当前指令需要使用内部数据读总线
+	
+		if ( !GIsBitSet(m_dsp_res_tbl.u32InnerRdBusRes, 0) )
+		{				
+			// 若内部数据读总线0尚未被分配
+			// (每个DSP核心中有两条内部数据读总线)
+
+			// 标记该资源已经被分配
+			m_dsp_res_tbl.u32InnerRdBusRes = GSetBit(m_dsp_res_tbl.u32InnerRdBusRes, 0);
+			// 将分配到的资源信息携带在当前指令的流水线上
+			m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerRdBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerRdBusMask, 0);
+		}
+		else if ( !GIsBitSet(m_dsp_res_tbl.u32InnerRdBusRes, 1) )
+		{
+			// 若内部数据读总线1尚未被分配
+
+			// 标记该资源已经被分配
+			m_dsp_res_tbl.u32InnerRdBusRes = GSetBit(m_dsp_res_tbl.u32InnerRdBusRes, 1);
+			// 将分配到的资源信息携带在当前指令的流水线上
+			m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerRdBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerRdBusMask, 1);
+		}
+		else
+		{
+			printf("malloc_inner_rd_bus: No enough inner_rd_bus resource!\n");
+			return false;
+		}
+
+	} // if ( p_sResNeeded.bolInnerRdBus )
+
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_inner_wr_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+		
+	if ( p_sResNeeded.bolInnerWrBus )
+	{
+		// 若当前指令需要使用内部数据写总线
+	
+		if ( !GIsBitSet(m_dsp_res_tbl.u32InnerWrBusRes, 0) )
+		{				
+			// 若内部数据写总线0尚未被分配
+			// (每个DSP核心中有两条内部数据写总线)
+
+			// 标记该资源已经被分配
+			m_dsp_res_tbl.u32InnerWrBusRes = GSetBit(m_dsp_res_tbl.u32InnerWrBusRes, 0);
+			// 将分配到的资源信息携带在当前指令的流水线上
+			m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerWrBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerWrBusMask, 0);
+		}
+		else if ( !GIsBitSet(m_dsp_res_tbl.u32InnerWrBusRes, 1) )
+		{
+			// 若内部数据写总线1尚未被分配
+
+			// 标记该资源已经被分配
+			m_dsp_res_tbl.u32InnerWrBusRes = GSetBit(m_dsp_res_tbl.u32InnerWrBusRes, 1);
+			// 将分配到的资源信息携带在当前指令的流水线上
+			m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerWrBusMask = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32InnerWrBusMask, 1);
+		}
+		else
+		{
+			printf("malloc_inner_wr_bus: No enough inner_wr_bus resource!\n");
+			return false;
+		}
+
+	} // if ( p_sResNeeded.bolInnerWrBus )
+
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_calc_res(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	m_arrResSLK[p_u32SLKIdx].slot_res_used.u8UnitsUseCalc = u8Units;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			/*
+			//to allocate requested number of ALUs
+			if ( (p_sResNeeded.i32ALUNum != 0) && (p_sResNeeded.u8ALUs == 0) )
+			{
+				for (int j = 0; j < p_sResNeeded.i32ALUNum; j++)
+				{
+					bolOK = false;
+					for (int k = 0; k < ALU_NUM_OF_UNIT; k++)
+					{
+						if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrALU[i]))
+						{
+							SetCalcResIdx(k, m_dsp_res_tbl.arrALU[i]);
+							SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8ALUs[i]);
+							bolOK = true;
+							break;
+						}
+					}
+
+					if (!bolOK)
+					{
+						PrintToCerr("malloc_calc_res: No enough ALU resource!\n");
+						return false;
+					}
+				}
+			} //to allocate requested number of ALUs
+			*/
+
+			//to allocate requested number of MULs
+			if ( (p_sResNeeded.i32MULNum != 0) && (p_sResNeeded.u8MULs == 0) )
+			{
+				for (int j = 0; j < p_sResNeeded.i32MULNum; j++)
+				{
+					bolOK = false;
+					for (int k = 0; k < MUL_NUM_OF_UNIT; k++)
+					{
+						if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrMUL[i]))
+						{
+							SetCalcResIdx(k, m_dsp_res_tbl.arrMUL[i]);
+							SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i]);
+							bolOK = true;
+							break;
+						}
+					}
+
+					if (!bolOK)
+					{
+						PrintToCerr("malloc_calc_res: No enough MUL resource!\n");
+						return false;
+					}
+				}
+			} //to allocate requested number of MULs
+
+			//to allocate requested number of SHFs
+			if ( (p_sResNeeded.i32SHFNum != 0) && (p_sResNeeded.u8SHFs == 0) )
+			{
+				for (int j = 0; j < p_sResNeeded.i32SHFNum; j++)
+				{
+					bolOK = false;
+					for (int k = 0; k < SHF_NUM_OF_UNIT; k++)
+					{
+						if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrSHF[i]))
+						{
+							SetCalcResIdx(k, m_dsp_res_tbl.arrSHF[i]);
+							SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SHFs[i]);
+							bolOK = true;
+							break;
+						}
+					}
+
+					if (!bolOK)
+					{
+						PrintToCerr("malloc_calc_res: No enough SHF resource!\n");
+						return false;
+					}
+				}
+			} //to allocate requested number of SHFs
+
+			//to allocate requested number of SPUs
+			if ( (p_sResNeeded.i32SPUNum != 0) && (p_sResNeeded.u8SPUs == 0) )
+			{		
+				for (int j = 0; j < p_sResNeeded.i32SPUNum; j++)
+				{
+					bolOK = false;
+					for (int k = 0; k < SPU_NUM_OF_UNIT; k++)
+					{
+						if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrSPU[i]))
+						{
+							SetCalcResIdx(k, m_dsp_res_tbl.arrSPU[i]);
+							SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SPUs[i]);
+							bolOK = true;
+							break;
+						}
+					}
+
+					if (!bolOK)
+					{
+						PrintToCerr("malloc_calc_res: No enough SPU resource!\n");
+						return false;
+					}
+				}
+			} //to allocate requested number of SPU
+
+		} // if the current unit is in use
+
+	} //for each unit
+
+	return true;
+}
+//----------------------------------------------------------
+bool sc_iss::malloc_spec_calc_res(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	DSPU8 u8CalcResMask;
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	m_arrResSLK[p_u32SLKIdx].slot_res_used.u8UnitsUseCalc = u8Units;
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		if ((u8Units & (0x1 << i)) != 0) // find out the units related
+		{
+			//specific ALUs are needed
+			if ( p_sResNeeded.u8ALUs != 0 )
+			{
+				// if specific ALUs are used already, ie. resource conflict found.
+				if ((m_dsp_res_tbl.arrALU[i] & p_sResNeeded.u8ALUs) != 0)
+				{
+					PrintToCerr("malloc_spec_calc_res: Use of ALU conflict!\n");
+					return false;
+				}
+				else
+				{
+					// allocate specific ALUs to current instruction
+					m_dsp_res_tbl.arrALU[i] |= p_sResNeeded.u8ALUs;
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8ALUs[i] |= p_sResNeeded.u8ALUs;
+				}				
+			} // if (p_sResNeeded.u8ALUs != 0)
+
+			//specific MULs are needed
+			if ( p_sResNeeded.u8MULs != 0 )
+			{
+				if ((m_dsp_res_tbl.arrMUL[i] & p_sResNeeded.u8MULs) == 0)
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= p_sResNeeded.u8MULs;
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= p_sResNeeded.u8MULs;
+				}	
+				else
+				{
+					// if specific MULs are used already, ie. resource conflict found.
+					PrintToCerr("malloc_spec_calc_res: Use of MUL conflict!\n");
+					return false;
+				}	
+
+			} // if (p_sResNeeded.u8MULs != 0)
+			else if ( p_sResNeeded.bolGrp2MUL )
+			{
+				u8CalcResMask = 0x3;
+				if ((m_dsp_res_tbl.arrMUL[i] & u8CalcResMask) == 0)
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= u8CalcResMask;
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= u8CalcResMask;
+				}
+				else if ( (m_dsp_res_tbl.arrMUL[i] & (u8CalcResMask << 2)) == 0 ) // try another group option
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= (u8CalcResMask << 2);
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= (u8CalcResMask << 2);
+				}
+				else if ( (m_dsp_res_tbl.arrMUL[i] & (u8CalcResMask << 4)) == 0 ) // try another group option
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= (u8CalcResMask << 4);
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= (u8CalcResMask << 4);
+				}
+				else if ( (m_dsp_res_tbl.arrMUL[i] & (u8CalcResMask << 6)) == 0 ) // try another group option
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= (u8CalcResMask << 6);
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= (u8CalcResMask << 6);
+				}
+				else
+				{
+					// if specific MULs are used already, ie. resource conflict found.
+					PrintToCerr("malloc_spec_calc_res: Use of MUL conflict!\n");
+					return false;
+				}
+
+			} // else if ( p_sResNeeded.bolGrp2MUL )
+			else if ( p_sResNeeded.bolGrp4MUL )
+			{
+				u8CalcResMask = 0xF;
+				if ((m_dsp_res_tbl.arrMUL[i] & u8CalcResMask) == 0)
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= u8CalcResMask;
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= u8CalcResMask;
+				}
+				else if ( (m_dsp_res_tbl.arrMUL[i] & (u8CalcResMask << 4)) == 0 ) // try another group option
+				{
+					// if specific MULs are not used yet, 
+					// then allocate specific MULs to current instruction
+					m_dsp_res_tbl.arrMUL[i] |= (u8CalcResMask << 4);
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i] |= (u8CalcResMask << 4);
+				}
+				else
+				{
+					// if specific MULs are used already, ie. resource conflict found.
+					PrintToCerr("malloc_spec_calc_res: Use of MUL conflict!\n");
+					return false;
+				}
+
+			} // else if ( p_sResNeeded.bolGrp4MUL )
+
+			//to allocate specific SHFs
+			if (p_sResNeeded.u8SHFs != 0)
+			{
+				//specific SHF will be used
+				if ((m_dsp_res_tbl.arrSHF[i] & p_sResNeeded.u8SHFs) != 0)
+				{
+					PrintToCerr("malloc_spec_calc_res: Use of SHF conflict!\n");
+					return false;
+				}
+				else
+				{
+					m_dsp_res_tbl.arrSHF[i] |= p_sResNeeded.u8SHFs;
+					m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SHFs[i] |= p_sResNeeded.u8SHFs;
+				}				
+			} // if (p_sResNeeded.u8SHFs != 0)
+
+		} // if the current unit is in use
+
+	} //for each unit
+
+	return true;
+}
+//----------------------------------------------------------
+void sc_iss::RstDCResNeeded()
+{
+	memset(m_arrDCResNeeded, 0, sizeof(SLOT_RES_NEEDED) * MAX_INUM_LINE );
+}
+//----------------------------------------------------------
+void sc_iss::RstResTbl()
+{
+	memset(&m_dsp_res_tbl, 0, sizeof(DSP_RES_TBL) );
+}
+//----------------------------------------------------------
+void sc_iss::RstWBRegResult()
+{
+	memset(m_arrWBGenRegInfo, 0, sizeof(REG_RESULT) * 16 * HZD_GEN_BUFF_LEN );
+}
+//----------------------------------------------------------
+//  p_u32SlotNum: slot number of one instruction line
+//  p_pSlotsResIdx: address of the buffer storing indexes malloced for each slot 
+//  注: 对于双字指令，其每个字都分配一个m_arrDCResNeeded[]和p_pSLKIdxs[]存储空间，
+//      但是仅第一个字对应的m_arrDCResNeeded[]和p_pSLKIdxs[]存储空间中含有效信息。
+//
+bool sc_iss::malloc_res_needed(DSPU32 p_u32SlotNum, unsigned int *p_pSLKIdxs)
+{
+	bool bolUseSpecCalc;
+	bool bolMUL4Grp = false;
+	bool bolMUL2Grp = false;
+	DSPU32 i32ALUNum = 0;
+	bool bolOneALUOrSHF = false;
+
+	if (p_u32SlotNum > MAX_INUM_LINE)
+	{
+		PrintToCerr("malloc_res_needed: parameter is error!\n");
+		return false;
+	}
+
+	// malloc specific calc resource
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		bolUseSpecCalc = m_arrDCResNeeded[i].bolUseSpecCalc;
+		bolMUL4Grp = m_arrDCResNeeded[i].bolGrp4MUL;
+		bolMUL2Grp = m_arrDCResNeeded[i].bolGrp2MUL;
+		if (bolUseSpecCalc && (!bolMUL4Grp) && (!bolMUL2Grp))
+		{
+			if (malloc_spec_calc_res(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_spec_calc_res!\n");
+			}
+		}
+	}
+
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		bolUseSpecCalc = m_arrDCResNeeded[i].bolUseSpecCalc;
+		bolMUL4Grp = m_arrDCResNeeded[i].bolGrp4MUL;
+		if (bolUseSpecCalc && bolMUL4Grp)
+		{
+			if (malloc_spec_calc_res(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_spec_calc_res!\n");
+			}
+		}
+	}
+
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		bolUseSpecCalc = m_arrDCResNeeded[i].bolUseSpecCalc;
+		bolMUL2Grp = m_arrDCResNeeded[i].bolGrp2MUL;
+		if (bolUseSpecCalc && bolMUL2Grp)
+		{
+			if (malloc_spec_calc_res(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_spec_calc_res!\n");
+			}
+		}
+	}
+
+	//
+	//排除自动占用ALU
+	// malloc no specific calc resource
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{
+		bolUseSpecCalc = m_arrDCResNeeded[i].bolUseSpecCalc;		
+		i32ALUNum = m_arrDCResNeeded[i].i32ALUNum;
+		if (!bolUseSpecCalc && i32ALUNum==0)
+		{
+			if (malloc_calc_res(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_calc_res!\n");
+			}
+		}
+	}
+	//限定使用SHF分配ALU/SHF
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{
+		bolUseSpecCalc = m_arrDCResNeeded[i].bolUseSpecCalc;
+		bolOneALUOrSHF = m_arrDCResNeeded[i].bolOneALUOrSHF;
+		if (!bolUseSpecCalc && bolOneALUOrSHF)
+		{
+			if (malloc_calc_res_ALUSHF_SHF(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_calc_res!\n");
+			}
+		}
+	}
+	
+	//剩余ALU/SHF和ALU自动
+	// malloc calc resource between ALU and SHF
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{
+		if ( (m_arrDCResNeeded[i].bolOneALUOrSHF && m_arrDCResNeeded[i].IsAssigned!=m_arrDCResNeeded[i].u8UnitsUseCalc) 
+			|| (!m_arrDCResNeeded[i].bolOneALUOrSHF && m_arrDCResNeeded[i].i32ALUNum!=0) )
+		{
+			if (malloc_alu_or_shf(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_calc_res!\n");
+			}
+		}
+	}
+
+	//--------------------通道分配--------------------
+
+	// 分配ABFPR读通道
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolABFPRRdBus )
+		{
+			if (malloc_abfpr_rd_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_abfpr_rd_bus!\n");
+			}
+		}
+	}
+
+	// 分配ABFPR写通道
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolABFPRWrBus )
+		{
+			if (malloc_abfpr_wr_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_abfpr_wr_bus!\n");
+			}
+		}
+	}
+	/*
+	// 分配SBFPR读通道
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolSBFPRRdBus )
+		{
+			if (malloc_sbfpr_rd_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_sbfpr_rd_bus!\n");
+			}
+		}
+	}
+
+	// 分配sBFPR写通道
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolSBFPRWrBus )
+		{
+			if (malloc_sbfpr_wr_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_sbfpr_wr_bus!\n");
+			}
+		}
+	}
+	*/
+	// 分配地址寄存器读通道
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolAddrRegRdBus )
+		{
+			if (malloc_areg_rd_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_areg_rd_bus!\n");
+			}
+		}
+	}
+
+	// 分配地址寄存器写通道
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolAddrRegWrBus )
+		{
+			if (malloc_areg_wr_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_areg_wr_bus!\n");
+			}
+		}
+	}
+
+	// 分配内部数据读总线
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolInnerRdBus )
+		{
+			if (malloc_inner_rd_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_inner_rd_bus!\n");
+			}
+		}
+	}
+
+	// 分配内部数据写总线
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolInnerWrBus )
+		{
+			if (malloc_inner_wr_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_inner_wr_bus!\n");
+			}
+		}
+	}
+
+	// add by zx 分配UVW立即数总线
+	for (int i = 0; i < p_u32SlotNum; i++)
+	{		
+		if ( m_arrDCResNeeded[i].bolUVWImmBus)
+		{
+			if (malloc_UVW_Imm_bus(m_arrDCResNeeded[i], p_pSLKIdxs[i]) == false)
+			{
+				PrintToCerr("malloc_res_needed: Failed in malloc_UVW_Imm_bus!\n");
+			}
+		}
+	}
+
+	//add by zx 分配UVW的加法/移位器部件
+	//因为在m_arrDCResNeeded的数据类型中用bolUAdd,bolWAdd,bolWAdd完全可以表示该资源的使用分配
+	//所以这里不再继续填写分配代码
+	//与硬件测试,直接在打印函数中使用bolUAdd,bolWAdd,bolWAdd即可
+	return true;
+}
+
+//----------------------------------------------------------
+DSPU32 sc_iss::GetALUIdx(char p_chrALUMask, int p_intTheNum)
+{
+	int i;
+	// don't init intIdx to '-1', otherwise, it will break down the system in error condition
+	int intIdx = 0; 
+
+	for (i = 0; i < ALU_NUM_OF_UNIT; i++)
+	{
+		if ( ( (p_chrALUMask >> i) & 1) != 0)
+		{
+			p_intTheNum--;
+			if (p_intTheNum == 0)
+			{
+				intIdx = i;
+				return intIdx;
+			}			
+		}
+	}
+
+	PrintToCerr("GetALUIdx: Can't find valid ALU index\n");
+	return intIdx;
+}
+//----------------------------------------------------------
+int sc_iss::GetMULIdx(char p_chrMULMask, int p_intTheNum)
+{
+	int i;
+	int intIdx = 0;
+
+	for (i = 0; i < MUL_NUM_OF_UNIT; i++)
+	{
+		if ( ( (p_chrMULMask >> i) & 1) != 0)
+		{
+			p_intTheNum--;
+			if (p_intTheNum == 0)
+			{
+				intIdx = i;
+				return intIdx;
+			}			
+		}
+	}
+	PrintToCerr("GetMULIdx: Can't find valid MUL index\n");
+
+	return intIdx;
+}
+//----------------------------------------------------------
+int sc_iss::GetSHFIdx(char p_chrSHFMask, int p_intTheNum)
+{
+	int i;
+	int intIdx = 0;
+
+	for (i = 0; i < SHF_NUM_OF_UNIT; i++)
+	{
+		if ( ( (p_chrSHFMask >> i) & 1) != 0)
+		{
+			p_intTheNum--;
+			if (p_intTheNum == 0)
+			{
+				intIdx = i;
+				return intIdx;
+			}			
+		}
+	}
+	PrintToCerr("GetSHFIdx: Can't find valid SHF index\n");
+	
+	return intIdx;
+}
+
+//----------------------------------------------------------
+// GRQ here
+DSPU32 sc_iss::SetALUCFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	//return (p_u32OrigStat & 0xFFFFFF03 | (p_u32NewStat & 0xFFFFFFFC));
+	return (p_u32OrigStat & 0xFFFFFF80 | p_u32NewStat);
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::SetALUFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	return (p_u32OrigStat & 0xFFFFFF80 | p_u32NewStat);
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::SetMULCFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	//return (p_u32OrigStat & 0xFFFFFF03 | (p_u32NewStat & 0xFFFFFFFC));
+	return (p_u32OrigStat & 0xFFFFFF80 | p_u32NewStat);
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::SetMULFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	return (p_u32OrigStat & 0xFFFFFF80 | p_u32NewStat);
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::SetSHFCFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	//return (p_u32OrigStat & 0xFFFFFF03 | (p_u32NewStat & 0xFFFFFFFC));
+	return (p_u32OrigStat & 0xFFFFFF80 | p_u32NewStat);
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::SetSHFFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	return (p_u32OrigStat & 0xFFFFFF80 | p_u32NewStat);
+}
+//----------------------------------------------------------
+DSPU32 sc_iss::SetSPUFlags(DSPU32 p_u32OrigStat, DSPU32 p_u32NewStat)
+{
+	return (p_u32OrigStat & 0xFFFFFFF0 | p_u32NewStat);
+}
+
+//----------------------------------------------------------
+void sc_iss::UpdateOAFlags()
+{
+	int i, j;
+	DSPU32 u32FAR, u32FOR;
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		u32FAR = 0xFFFFFFFF;
+		u32FOR = 0;
+		for (j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			u32FOR |= u32ri_ALUFR[i][ j ];
+			u32FAR &= u32ri_ALUFR[i][ j ];
+		}
+		WrALUFOR(i, u32FOR);
+		WrALUFAR(i, u32FAR);
+
+		//------------------------------------------------------
+		u32FAR = 0xFFFFFFFF;
+		u32FOR = 0;
+		for (j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			u32FOR |= u32ri_MULFR[i][ j ];
+			u32FAR &= u32ri_MULFR[i][ j ];
+		}
+		WrMULFOR(i, u32FOR);
+		WrMULFAR(i, u32FAR);
+
+		//------------------------------------------------------
+		u32FAR = 0xFFFFFFFF;
+		u32FOR = 0;
+		for (j = 0; j < SHF_NUM_OF_UNIT; j++)
+		{
+			u32FOR |= u32ri_SHFFR[i][ j ];
+			u32FAR &= u32ri_SHFFR[i][ j ];
+		}
+		WrSHFFOR(i, u32FOR);
+		WrSHFFAR(i, u32FAR);
+	}
+}
+
+
+bool sc_iss::DetectHzd_DC2(DSPU32 *p_pSLKIdx, DSPU32 p_u32SlotNum, DSPU32 *p_arrSrcRegs, DSPU32 p_u32Phase)
+{
+	bool bolAreg_is_greg = false;
+	DSPU32 u32SLKIdx;
+	DSPU32 arrDregsIDX[MAX_INUM_LINE];
+	DSPU32 u32DestIdx;
+	DSPU32 u32BpRegs, u32DestRegs;
+
+	enum {U_IDX, V_IDX, W_IDX, MAX_IDX};
+
+	ISS_ASSERT( p_u32SlotNum <= MAX_INUM_LINE );
+
+	for(int i = 0; i < p_u32SlotNum; i++)
+	{
+		u32SLKIdx = p_pSLKIdx[i];
+
+		bolAreg_is_greg = m_arrResSLK[u32SLKIdx].slot_res_used.bolareg_is_greg;
+		if ( !bolAreg_is_greg )
+		{
+			continue;		
+		}
+		
+		if ( m_arrResSLK[u32SLKIdx].slot_res_used.u32DestU )
+		{
+			u32DestRegs = m_arrResSLK[u32SLKIdx].slot_res_used.u32DestU;
+			u32BpRegs = (u32DestRegs & p_arrSrcRegs[U_IDX]);
+			if(u32BpRegs != 0)
+			{
+				#ifdef STALL_REASON_LOG
+				LogPipeStall(AREG_HAZARD, PIPE_EX.DC1_DC2.m_right.uint32r_pc, U_IDX, GetLSB_32(u32BpRegs), p_u32Phase);
+				#endif				
+				return true;
+			}
+		}
+		else if ( m_arrResSLK[u32SLKIdx].slot_res_used.u32DestV )
+		{
+			u32DestRegs = m_arrResSLK[u32SLKIdx].slot_res_used.u32DestV;
+			u32BpRegs = (u32DestRegs & p_arrSrcRegs[V_IDX]);
+			if(u32BpRegs != 0)
+			{
+				#ifdef STALL_REASON_LOG
+				LogPipeStall(AREG_HAZARD, PIPE_EX.DC1_DC2.m_right.uint32r_pc, V_IDX, GetLSB_32(u32BpRegs), p_u32Phase);
+				#endif				
+				return true;
+			}		
+		}
+		else if ( m_arrResSLK[u32SLKIdx].slot_res_used.u32DestW )
+		{
+			u32DestRegs = m_arrResSLK[u32SLKIdx].slot_res_used.u32DestW;
+			u32BpRegs = (u32DestRegs & p_arrSrcRegs[W_IDX]);
+			if(u32BpRegs != 0)
+			{
+				#ifdef STALL_REASON_LOG
+				LogPipeStall(AREG_HAZARD, PIPE_EX.DC1_DC2.m_right.uint32r_pc, W_IDX, GetLSB_32(u32BpRegs), p_u32Phase);
+				#endif				
+				return true;
+			}		
+		}
+	}
+	return false;
+}
+
+
+//-----------------------------------------------------------------------------------------------------------------------
+DSPU32 sc_iss::GetGPRHzdMode(DSPU32 *p_pSlotCurr, DSPU32 *p_pSLKIdxCurr, DSPU32 p_u32SlotNumCurr, 
+	DSPU32 *p_pSlotBef, DSPU32 *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef,
+	DSPU32 *p_pSrcPageIdx, DSPU32 *p_pDestPageIdx)
+{
+	DSPU32 i, j, k;
+	DSPU32 u32Mode = 0;
+	DSPU64 u64SrcRegs, u64DestRegs;
+	DSPU32 u32SrcPageIdx, u32DestPageIdx;
+	bool bolMemAcs, bolRead, bolUseSpecificPage, bolDestHL;
+	
+	ISS_ASSERT(p_u32SlotNumCurr >= 1 && p_u32SlotNumCurr <= MAX_INUM_LINE);
+	ISS_ASSERT(p_u32SlotNumBef >= 1 && p_u32SlotNumBef <= MAX_INUM_LINE);
+
+	for (i = 0; i < p_u32SlotNumCurr; i++)
+	{
+		bolMemAcs = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolMemAcs;
+		bolRead = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolRead;
+
+		for (j = 0; j < p_u32SlotNumBef; j++)
+		{
+			ISS_ASSERT( p_pSLKIdxCurr[i] != 0 && p_pSLKIdxCurr[i] < RES_SLK_SIZE );
+			ISS_ASSERT( p_pSLKIdxBef[j] != 0 && p_pSLKIdxBef[j] < RES_SLK_SIZE );
+
+			for(k = 0; k < NUM_OF_UNITS; k++)
+			{
+				// SrcReg related info
+				bolUseSpecificPage = m_arrResSLK[p_pSLKIdxCurr[i]].slot_res_used.bolUseSpecificPage;
+				u32SrcPageIdx = bolUseSpecificPage ? (m_arrResSLK[p_pSLKIdxCurr[i]].slot_res_used.u32SrcPageIdx) : p_pSrcPageIdx[k];
+				u64SrcRegs = m_arrResSLK[p_pSLKIdxCurr[i]].slot_res_used.arrSrcGenRegs[k];
+
+				// DestReg related info
+				bolUseSpecificPage = m_arrResSLK[p_pSLKIdxBef[j]].slot_res_used.bolUseSpecificPage;
+				u32DestPageIdx = bolUseSpecificPage ? (m_arrResSLK[p_pSLKIdxBef[j]].slot_res_used.u32SrcPageIdx) : p_pDestPageIdx[k];
+				u64DestRegs = m_arrResSLK[p_pSLKIdxBef[j]].slot_res_used.arrDestGenRegs[k];
+				bolDestHL = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.bolDestHL;
+
+				if ( ((u64SrcRegs & u64DestRegs) != 0 ) && (u32SrcPageIdx == u32DestPageIdx) )
+				{
+					u32Mode = GSetBit(u32Mode, 0);
+
+					if(bolMemAcs && !bolRead)
+					{
+						u32Mode = GSetBit(u32Mode, 1);
+					}			
+					if(bolDestHL)
+					{
+						u32Mode = GSetBit(u32Mode, 3);
+					}
+				}
+			}						
+		}
+	}
+	return u32Mode;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------
+// bit 0 is "1" indicate data hazard about GenReg detected.
+// bit 1 is "1" indicate data hazard about GenReg detected and 
+//                                hazard instruction include memory write instruction.
+// bit 3 is "1" indicate data hazard detected on HL regs.
+
+// CASE 1: Micro-req (mem-write insns)
+
+bool sc_iss::GetGenRegHazardMode1(
+	unsigned int p_u32MPSLKIdx,
+	unsigned int *p_pSlotBef, unsigned int *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef, 
+	DSPU32 *p_pSrcPageIdx, DSPU32 *p_pDestPageIdx, DSPU32 p_u32Phase)
+{
+	DSPU32 i, j;
+	DSPU32 u32Mode = 0;
+	DSPU32 u32MemWrNum = 0;
+	DSPU32 u32SrcUnitIdx;
+	DSPU64 u64DestRegs;
+	DSPU32 u32SrcRegIdx, u32SrcPageIdx, u32DestPageIdx;
+	bool bolDestHL;
+
+	u32MemWrNum = m_arrMemPipeSLK[p_u32MPSLKIdx].u32WrElemNum;
+
+	// attention about SlotNum
+	if ( (u32MemWrNum < 1) || (u32MemWrNum > (BANK_NUM_PERBLK*BLK_NUM_PERCORE)) )
+	{
+		PrintToCerr("GetGenRegHazardMode: u32MemWrNum is invalid");
+		return false;
+	}
+
+	if ( (p_u32SlotNumBef < 1) || (p_u32SlotNumBef > MAX_INUM_LINE) )	
+	{
+		PrintToCerr("GetGenRegHazardMode: p_u32SlotNumBef is invalid");
+		return false;
+	}
+
+	for (i = 0; i < u32MemWrNum; i++)
+	{
+		//==============================================
+		// Special write doesn't need to check GPR hazard
+		if(GIsBitSet(m_arrMemPipeSLK[p_u32MPSLKIdx].u32SpecWrMask, i))
+			continue;
+		
+		u32SrcUnitIdx = m_arrMemPipeSLK[p_u32MPSLKIdx].arrUnitIdx[i];
+		// SrcReg related info
+		u32SrcPageIdx = m_arrMemPipeSLK[p_u32MPSLKIdx].arrSrcPageIdx[i];
+		u32SrcRegIdx = m_arrMemPipeSLK[p_u32MPSLKIdx].arrRegIdx[i];
+		for (j = 0; j < p_u32SlotNumBef; j++)
+		{
+			if ( (p_pSLKIdxBef[ j ] == 0) || (p_pSLKIdxBef[j] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("GetGenRegHazardMode: p_pSLKIdxBef[ j ] is invalid\n");
+				return false;
+			}
+
+			// DestReg related info
+			u32DestPageIdx = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.u32DestPageIdx;
+			u64DestRegs = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.arrDestGenRegs[u32SrcUnitIdx];	// Note: DestReg is RegMask
+			bolDestHL = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.bolDestHL;
+
+			if ( ( GIsBitSet64(u64DestRegs, u32SrcRegIdx)) && (u32SrcPageIdx == u32DestPageIdx) )
+			{
+				u32Mode = GSetBit(u32Mode, 0);
+				
+				// all mem write insns are handled in this function
+				u32Mode = GSetBit(u32Mode, 1);
+
+				if (bolDestHL)
+					u32Mode = GSetBit(u32Mode, 3);
+
+#ifdef STALL_REASON_LOG
+					if(PIPE_EX.DC4_AC.m_right.uint32r_pc == 0)
+					{
+						LogPipeStall(GPR_HAZARD_MR, PIPE_EX.DC3_DC4.m_right.uint32r_pc, u32SrcUnitIdx, u32SrcRegIdx, p_u32Phase);
+					}
+					else
+					{
+						LogPipeStall(GPR_HAZARD_MR, PIPE_EX.DC4_AC.m_right.uint32r_pc, u32SrcUnitIdx, u32SrcRegIdx, p_u32Phase);
+					}
+#endif
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+// CASE 2: Normal insn-line (exclude mem-write insns)
+
+bool sc_iss::GetGenRegHazardMode2(
+	unsigned int *p_pSlotsCurr, unsigned int *p_pSLKIdxCurr, DSPU32 p_u32SlotNumCurr, 
+	unsigned int *p_pSlotsBef, unsigned int *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef,
+	DSPU32 *p_pSrcPageIdx, DSPU32 *p_pDestPageIdx, DSPU32 p_u32Phase)
+{
+	DSPU32 i, j, k;
+	DSPU32 u32Mode = 0;
+	DSPU64 u64SrcRegs, u64DestRegs;
+	DSPU32 u32SrcPageIdx, u32DestPageIdx;
+	bool bolMemAcs, bolRead, bolUseSpecificPage, bolDestHL;
+	
+	// attention about SlotNum
+	if ( (p_u32SlotNumCurr < 1) || (p_u32SlotNumCurr > MAX_INUM_LINE) )
+	{
+		PrintToCerr("GetGenRegHazardMode: p_u32SlotNumCurr is invalid");
+		return false;
+	}
+
+	if ( (p_u32SlotNumBef < 1) || (p_u32SlotNumBef > MAX_INUM_LINE) )
+	{
+		PrintToCerr("GetGenRegHazardMode: p_u32SlotNumBef is invalid");
+		return false;
+	}
+
+	for (i = 0; i < p_u32SlotNumCurr; i++)
+	{
+		bolMemAcs  = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolMemAcs;
+		bolRead    = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolRead;
+
+		// mem write insns has been handled in GetGenRegHazardMode1
+		if (bolMemAcs && (!bolRead)) 
+			continue;
+		
+		for (j = 0; j < p_u32SlotNumBef; j++)
+		{
+			if ( (p_pSLKIdxCurr[i] == 0) || (p_pSLKIdxCurr[i] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("GetGenRegHazardMode: p_pSLKIdxCurr[i] is invalid\n");
+				return false;
+			}
+
+			if ( (p_pSLKIdxBef[ j ] == 0) || (p_pSLKIdxBef[j] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("GetGenRegHazardMode: p_pSLKIdxBef[ j ] is invalid\n");
+				return false;
+			}
+
+			for(k = 0; k < NUM_OF_UNITS; k++)
+			{
+				// SrcReg related info
+				u32SrcPageIdx = m_arrResSLK[p_pSLKIdxCurr[i]].slot_res_used.u32SrcPageIdx;
+				u64SrcRegs = m_arrResSLK[p_pSLKIdxCurr[i]].slot_res_used.arrSrcGenRegs[k];
+
+				// DestReg related info
+				u32DestPageIdx = m_arrResSLK[p_pSLKIdxBef[j]].slot_res_used.u32SrcPageIdx;
+				u64DestRegs = m_arrResSLK[p_pSLKIdxBef[j]].slot_res_used.arrDestGenRegs[k];
+				bolDestHL = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.bolDestHL;
+
+				if ( ((u64SrcRegs & u64DestRegs) != 0 ) && (u32SrcPageIdx == u32DestPageIdx) )
+				{
+					u32Mode = GSetBit(u32Mode, 0);
+
+					if(bolDestHL)
+						u32Mode = GSetBit(u32Mode, 3);
+#ifdef STALL_REASON_LOG
+					DSPU64 u64ConfRegs = u64SrcRegs & u64DestRegs;
+					LogPipeStall(GPR_HAZARD_NI, PIPE_EX.DC4_AC.m_right.uint32r_pc, k, GetLSB_64(u64ConfRegs), p_u32Phase);
+#endif
+					return true;
+				}
+			}
+						
+		}
+	}
+
+	return false;
+
+}
+
+//----------------------------------------------------------
+bool sc_iss::GenRegForward(DSPU32 &p_u32Result, DSPU32 p_u32SLKIdx, DSPU32 p_u32Unit, DSPU32 p_u32RegIdx)
+{
+	return false;  // BWDSP104x doesn't support data forward for GPR
+}
+
+//----------------------------------------------------------
+bool sc_iss::SetWBGenRegInfo(DSPU32 p_u32Slot, DSPU32 p_u32ElemIdx, DSPU8 p_u8Unit, DSPU8 p_u8RegIdx, DSPU32 p_u32Value)
+{
+	return true; // BWDSP104x doesn't support data forward for GRP
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32ElemIdx >= HZD_GEN_BUFF_LEN) )
+	{
+		PrintToCerr("SetWBGenRegInfo: Invalid parameter!");
+		return false;
+	}
+
+	m_arrWBGenRegInfo[p_u32Slot][p_u32ElemIdx].bolInUse = true;
+	m_arrWBGenRegInfo[p_u32Slot][p_u32ElemIdx].u8Unit = p_u8Unit;
+	m_arrWBGenRegInfo[p_u32Slot][p_u32ElemIdx].u8RegIdx = p_u8RegIdx;
+	m_arrWBGenRegInfo[p_u32Slot][p_u32ElemIdx].u32Value = p_u32Value;
+
+	return true;
+}
+//----------------------------------------------------------
+// format of mask: 0b26 BLK5 BLK4 BLK3 BLK2 BLK1 BLK0 (LSB)
+//
+DSPU32 sc_iss::GetAddrBlkMask(DSPU32 p_u32MemAddr)
+{
+	DSPU32 u32BlkMask = 0;
+	if ( (p_u32MemAddr >= BLK0_LOW_ADDR) && (p_u32MemAddr <= BLK0_HIGH_ADDR) )
+	{
+		u32BlkMask = 0x1;
+	}
+	else if ( (p_u32MemAddr >= BLK1_LOW_ADDR) && (p_u32MemAddr <= BLK1_HIGH_ADDR) )
+	{
+		u32BlkMask = 0x2;
+	}
+	else if ( (p_u32MemAddr >= BLK2_LOW_ADDR) && (p_u32MemAddr <= BLK2_HIGH_ADDR) )
+	{
+		u32BlkMask = 0x4;
+	}
+	else if ( (p_u32MemAddr >= BLK3_LOW_ADDR) && (p_u32MemAddr <= BLK3_HIGH_ADDR) )
+	{
+		u32BlkMask = 0x8;
+	}
+	else if ( (p_u32MemAddr >= BLK4_LOW_ADDR) && (p_u32MemAddr <= BLK4_HIGH_ADDR) )
+	{
+		u32BlkMask = 0x10;
+	}
+	else if ( (p_u32MemAddr >= BLK5_LOW_ADDR) && (p_u32MemAddr <= BLK5_HIGH_ADDR) )
+	{
+		u32BlkMask = 0x20;
+	}
+	else
+	{
+		u32BlkMask = 0x40;
+	}
+
+	return u32BlkMask;
+}
+//----------------------------------------------------------
+// 判断一条指令访问的block是否符合要求。
+// 有效条件:一条指令只能访问一个block
+// 掩码格式: 0b26 BLK5 BLK4 BLK3 BLK2 BLK1 BLK0 (LSB)
+//
+/*
+bool IsBlkMaskValid(DSPU32 p_u32BlkMask)
+{
+	bool bolRtn = false;
+
+	if ( (p_u32BlkMask == 4) || (p_u32BlkMask == 2) || (p_u32BlkMask == 1) )
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32BlkMask == 8) || (p_u32BlkMask == 16) || (p_u32BlkMask == 32) )
+	{
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+*/
+//----------------------------------------------------------
+bool sc_iss::malloc_UVW_Imm_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+	bool flag = false;
+		
+	if ( p_sResNeeded.bolUVWImmBus)
+	{
+		for(int i=0;i<4;i++)
+		{
+			if ( !GIsBitSet(m_dsp_res_tbl.u32UVWImm, i) )
+			{
+				m_dsp_res_tbl.u32UVWImm= GSetBit(m_dsp_res_tbl.u32UVWImm, i);
+				m_arrResSLK[p_u32SLKIdx].slot_res_used.u32UVWImm = GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32UVWImm, i);
+				flag = true;
+				break;
+			}
+		}
+
+		if(flag)
+		{
+			return true;
+		}
+		else
+		{
+			printf("malloc_UVW_Imm_bus: No enough inner_rd_bus resource!\n");
+			return false;
+		}
+
+	} // if ( p_sResNeeded.bolInnerRdBus )
+
+
+	return flag;
+}
+
+//----------------------------------------------------------
+bool sc_iss::malloc_calc_res_ALUSHF_SHF(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	m_arrResSLK[p_u32SLKIdx].slot_res_used.u8UnitsUseCalc = u8Units;
+	p_sResNeeded.IsAssigned = 0;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			bolOK = false;
+			for (int k = 0; k < SHF_NUM_OF_UNIT; k++)
+			{
+				if (!IsCalcResIdxSet(k, m_dsp_res_tbl.arrSHF[i]))
+				{
+					SetCalcResIdx(k, m_dsp_res_tbl.arrSHF[i]);
+					SetCalcResIdx(k, m_arrResSLK[p_u32SLKIdx].slot_res_used.u8SHFs[i]);
+					SetCalcResIdx(i,p_sResNeeded.IsAssigned);
+					bolOK = true;
+					break;
+				}
+			}
+
+			if (!bolOK)
+			{
+				PrintToCerr("malloc_alu_or_shf: No enough resource!\n");
+				//return false;
+			}	
+
+		} // if the current unit is in use
+
+	} //for each unit
+
+	return true;
+}
+
+#if 0
+
+//-----------------------------------------------------------------------------------------------------------------------
+// 返回1表示关于STAB相关,返回0表示未检测到相关性。
+//
+bool sc_iss::IsSTABHazard(unsigned int *p_pSLKIdxCurr, DSPU32 p_u32SlotNumCurr, unsigned int *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef, DSPU32 p_u32Phase)
+{
+	bool bolRdSTABCurr, bolWrSTABBef;
+	DSPU8 u8SHFCurr, u8SHFBef;
+	DSPU32 u32STABBlkCurr, u32STABBlkBef;
+
+	// attention about SlotNum
+	if ( (p_u32SlotNumCurr < 1) || (p_u32SlotNumCurr > MAX_INUM_LINE) )
+	{
+		printf("IsSTABHazard: p_u32SlotNumCurr is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32SlotNumBef < 1) || (p_u32SlotNumBef > MAX_INUM_LINE) )
+	{
+		printf("IsSTABHazard: p_u32SlotNumBef is invalid\n");
+		return false;
+	}
+
+	for (int i = 0; i < p_u32SlotNumCurr; i++)
+	{
+		for (int j = 0; j < p_u32SlotNumBef; j++)
+		{
+			if ( (p_pSLKIdxCurr[i] == 0) || (p_pSLKIdxCurr[i] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("IsSTABHazard: p_pSLKIdxCurr[i] is invalid\n");
+				return false;
+			}
+
+			if ( (p_pSLKIdxBef[ j ] == 0) || (p_pSLKIdxBef[j] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("IsSTABHazard: p_pSLKIdxBef[ j ] is invalid\n");
+				return false;
+			}
+
+			for (int k = 0; k < NUM_OF_UNITS; k++)
+			{
+				// 当前指令行信息
+				bolRdSTABCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolRdSTAB;
+				u8SHFCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.u8SHFs[k];
+				u32STABBlkCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.u32STABMask;
+
+				// 前方指令行信息
+				bolWrSTABBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.bolWrSTAB;
+				u8SHFBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.u8SHFs[k];
+				u32STABBlkBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.u32STABMask;
+
+				if ( ((u8SHFCurr & u8SHFBef) != 0) && ((u32STABBlkCurr & u32STABBlkBef) != 0) && bolRdSTABCurr && bolWrSTABBef )
+				{
+					// 检测到关于STAB相关
+#ifdef STALL_REASON_LOG
+					LogPipeStall(STAB_HAZARD, PIPE_EX.DC4_AC.m_right.uint32r_pc, k, ~0U, p_u32Phase);
+#endif
+					return true;
+				}
+
+			} // for (k = 0; k < NUM_OF_UNITS; k++)
+
+		} // for (j = 0; j < u32SlotNum1; j++)
+
+	} // for (i = 0; i < u32SlotNum0; i++)
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------
+// 返回1表示关于SACC相关,返回0表示未检测到相关性。
+//
+bool sc_iss::IsSACCHazard(unsigned int *p_pSLKIdxCurr, DSPU32 p_u32SlotNumCurr, unsigned int *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef, DSPU32 p_u32Phase)
+{
+	bool bolRdSACCCurr, bolWrSACCBef;
+	DSPU8 u8SHFCurr, u8SHFBef;
+
+	// attention about SlotNum
+	if ( (p_u32SlotNumCurr < 1) || (p_u32SlotNumCurr > MAX_INUM_LINE) )
+	{
+		printf("IsSACCHazard: p_u32SlotNumCurr is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32SlotNumBef < 1) || (p_u32SlotNumBef > MAX_INUM_LINE) )
+	{
+		printf("IsSACCHazard: p_u32SlotNumBef is invalid\n");
+		return false;
+	}
+
+	for (int i = 0; i < p_u32SlotNumCurr; i++)
+	{
+		for (int j = 0; j < p_u32SlotNumBef; j++)
+		{
+			if ( (p_pSLKIdxCurr[i] == 0) || (p_pSLKIdxCurr[i] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("GetGenRegHazardMode: p_pSLKIdxCurr[i] is invalid\n");
+				return false;
+			}
+
+			if ( (p_pSLKIdxBef[ j ] == 0) || (p_pSLKIdxBef[j] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("GetGenRegHazardMode: p_pSLKIdxBef[ j ] is invalid\n");
+				return false;
+			}
+
+			for (int k = 0; k < NUM_OF_UNITS; k++)
+			{
+				// 当前指令行信息
+				bolRdSACCCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolRdSACC;
+				u8SHFCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.u8SHFs[k];
+
+				// 前方指令行信息
+				bolWrSACCBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.bolWrSACC;
+				u8SHFBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.u8SHFs[k];
+
+				if ( ((u8SHFCurr & u8SHFBef) != 0) && bolRdSACCCurr && bolWrSACCBef )
+				{
+					// 检测到关于SACC相关
+#ifdef STALL_REASON_LOG
+					LogPipeStall(SACC_HAZARD, PIPE_EX.DC4_AC.m_right.uint32r_pc, k, ~0U, p_u32Phase);
+#endif
+					return true;
+				}
+
+			} // for (k = 0; k < NUM_OF_UNITS; k++)
+
+		} // for (j = 0; j < u32SlotNum1; j++)
+
+	} // for (i = 0; i < u32SlotNum0; i++)
+
+	return false;
+}
+
+DSPU32 sc_iss::DetectAddrRegHazard_DC2(unsigned int *p_pSlotsCurr, unsigned int *p_pSLKIdxCurr, DSPU32 p_u32SlotNumCurr, unsigned int *p_pSlotsBef, unsigned int *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef)
+{
+	DSPU32 i, j;
+	DSPU32 u32Mode = 0;
+	DSPU32 u32SrcARegs, u32DestARegs;
+
+	// attention about SlotNum
+	if ( (p_u32SlotNumCurr < 1) || (p_u32SlotNumCurr > MAX_INUM_LINE) )
+	{
+		PrintToCerr("DetectAddrRegHazard_DC2: p_u32SlotNumCurr is invalid\n");
+		return 0;
+	}
+
+	if ( (p_u32SlotNumBef < 1) || (p_u32SlotNumBef > MAX_INUM_LINE) )
+	{
+		PrintToCerr("DetectAddrRegHazard_DC2: p_u32SlotNumBef is invalid\n");
+		return 0;
+	}
+
+	for (i = 0; i < p_u32SlotNumCurr; i++)
+	{
+		for (j = 0; j < p_u32SlotNumBef; j++)
+		{
+			if ( (p_pSLKIdxCurr[i] == 0) || (p_pSLKIdxCurr[i] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("DetectAddrRegHazard_DC2: p_pSLKIdxCurr[i] is invalid\n");
+				return 0;
+			}
+
+			if ( (p_pSLKIdxBef[ j ] == 0) || (p_pSLKIdxBef[j] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("DetectAddrRegHazard_DC2: p_pSLKIdxBef[ j ] is invalid\n");
+				return 0;
+			}			
+
+			if ( (m_arrResSLK[ p_pSLKIdxCurr[i] ].bolHoldInfo != true) || (m_arrResSLK[ p_pSLKIdxBef[ j ] ].bolHoldInfo != true) )
+			{
+				continue;
+			}
+
+			u32SrcARegs = m_arrResSLK[ p_pSLKIdxCurr[ i ] ].slot_res_used.u32SrcU;
+			u32DestARegs = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.u32DestU;
+
+			if ( (u32SrcARegs & u32DestARegs) != 0 ) {
+				u32Mode = GSetBit(u32Mode, 2);
+				return u32Mode;
+			}	
+		
+			u32SrcARegs = m_arrResSLK[ p_pSLKIdxCurr[ i ] ].slot_res_used.u32SrcV;
+			u32DestARegs = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.u32DestV;
+			if ( (u32SrcARegs & u32DestARegs) != 0 ) {
+				u32Mode = GSetBit(u32Mode, 2);
+				return u32Mode;
+			}	
+
+			u32SrcARegs = m_arrResSLK[ p_pSLKIdxCurr[ i ] ].slot_res_used.u32SrcW;
+			u32DestARegs = m_arrResSLK[ p_pSLKIdxBef[ j ] ].slot_res_used.u32DestW;
+			if ( (u32SrcARegs & u32DestARegs) != 0 ) {
+				u32Mode = GSetBit(u32Mode, 2);
+				return u32Mode;
+			}	
+		} // for (j = 0; j < u32SlotNum1; j++)
+
+	} // for (i = 0; i < u32SlotNum0; i++)
+
+	return u32Mode;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------
+// 返回1表示关于SC相关,返回0表示未检测到相关性。
+//
+DSPU32 sc_iss::IsSCHazard(unsigned int *p_pSLKIdxCurr, DSPU32 p_u32SlotNumCurr, unsigned int *p_pSLKIdxBef, DSPU32 p_u32SlotNumBef)
+{
+	bool bolRdSCCurr, bolWrSCBef;
+	DSPU8 u8SHFCurr, u8SHFBef;
+
+	// attention about SlotNum
+	if ( (p_u32SlotNumCurr < 1) || (p_u32SlotNumCurr > MAX_INUM_LINE) )
+	{
+		printf("IsSCHazard: p_u32SlotNumCurr is invalid\n");
+		return 0;
+	}
+
+	if ( (p_u32SlotNumBef < 1) || (p_u32SlotNumBef > MAX_INUM_LINE) )
+	{
+		printf("IsSCHazard: p_u32SlotNumBef is invalid\n");
+		return 0;
+	}
+
+	for (int i = 0; i < p_u32SlotNumCurr; i++)
+	{
+		for (int j = 0; j < p_u32SlotNumBef; j++)
+		{
+			if ( (p_pSLKIdxCurr[i] == 0) || (p_pSLKIdxCurr[i] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("IsSCHazard: p_pSLKIdxCurr[i] is invalid\n");
+				return 0;
+			}
+
+			if ( (p_pSLKIdxBef[ j ] == 0) || (p_pSLKIdxBef[j] >= RES_SLK_SIZE) )
+			{
+				PrintToCerr("IsSCHazard: p_pSLKIdxBef[ j ] is invalid\n");
+				return 0;
+			}
+
+			for (int k = 0; k < NUM_OF_UNITS; k++)
+			{
+				// 当前指令行信息
+				bolRdSCCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.bolRdSC;
+				u8SHFCurr = m_arrResSLK[ p_pSLKIdxCurr[i] ].slot_res_used.u8SHFs[k];
+
+				// 前方指令行信息
+				bolWrSCBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.bolWrSC;
+				u8SHFBef = m_arrResSLK[ p_pSLKIdxBef[j] ].slot_res_used.u8SHFs[k];
+
+				if ( ((u8SHFCurr & u8SHFBef) != 0) && bolRdSCCurr && bolWrSCBef )
+				{
+					// 检测到关于SACC相关
+					return 1;
+				}
+
+			} // for (k = 0; k < NUM_OF_UNITS; k++)
+
+		} // for (j = 0; j < u32SlotNum1; j++)
+
+	} // for (i = 0; i < u32SlotNum0; i++)
+
+	return 0;
+}
+
+/*
+//----------------------------------------------------------
+bool malloc_sbfpr_wr_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			// 若涉及当前宏
+		
+			if ( p_sResNeeded.bolSBFPRWrBus )
+			{
+				// 若当前指令需要使用SBFPR写总线
+			
+				if ( !GIsBitSet(m_dsp_res_tbl.u32SBFPRWrBusRes, i) )
+				{
+					// 若当前宏中的SBFPR写总线尚未被分配
+
+					// 标记该资源已经被分配
+					GSetBit(m_dsp_res_tbl.u32SBFPRWrBusRes, i);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32SBFPRWrBusMask, i);
+				}
+				else
+				{
+					printf("malloc_sbfpr_wr_bus: No enough sbfpr_wr_bus resource!\n");
+					return false;
+				}
+
+			} // if ( p_sResNeeded.bolSBFPRWrBus )
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+		
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+//----------------------------------------------------------
+bool malloc_sbfpr_rd_bus(SLOT_RES_NEEDED &p_sResNeeded, DSPU32 p_u32SLKIdx)
+{
+	DSPU8 u8Units;
+	bool bolOK;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		return false;
+	}
+
+	u8Units = p_sResNeeded.u8UnitsUseCalc;
+	for (int i = 0; i < NUM_OF_UNITS; i++)	// four units
+	{
+		if ((u8Units & (0x1 << i)) != 0)
+		{
+			// 若涉及当前宏
+		
+			if ( p_sResNeeded.bolSBFPRRdBus )
+			{
+				// 若当前指令需要使用SBFPR读总线
+			
+				if ( !GIsBitSet(m_dsp_res_tbl.u32SBFPRRdBusRes, i) )
+				{
+					// 若当前宏中的SBFPR读总线尚未被分配
+
+					// 标记该资源已经被分配
+					GSetBit(m_dsp_res_tbl.u32SBFPRRdBusRes, i);
+					// 将分配到的资源信息携带在当前指令的流水线上
+					GSetBit(m_arrResSLK[p_u32SLKIdx].slot_res_used.u32SBFPRRdBusMask, i);
+				}
+				else
+				{
+					printf("malloc_sbfpr_rd_bus: No enough sbfpr_rd_bus resource!\n");
+					return false;
+				}
+
+			} // if ( p_sResNeeded.bolSBFPRRdBus )
+
+		} // if ((u8Units & (0x1 << i)) != 0)
+		
+	} // for (int i = 0; i < NUM_OF_UNITS; i++)
+
+	return true;
+}
+*/
+
+//-----------------------------------------------------------------------------------------------------------------------
+// bit 2 is "1" indicate data hazard about AddrReg detected.
+//
+bool sc_iss::DetectAddrRegHazard_DC2(DSPU32 p_u32SlotNum, DSPU32 *p_pSLKIdx, 
+	DSPU32 *p_pSrcRegs, DSPU32 *p_pDregsIDX, DSPU32 p_u32SrcLvl, DSPU32 p_u32Phase)
+{
+	DSPU32 u32SLKIdx;
+	DSPU32 u32DestRegs, u32BpRegs = 0;
+	bool bolAreg_is_greg;
+	int i, j;
+
+	if ( (p_u32SlotNum < 1) || (p_u32SlotNum > MAX_INUM_LINE) )
+	{
+		PrintToCerr("DetectAddrRegHazard_DC2: p_u32SlotNum is invalid\n");
+		return 0;
+	}
+
+	enum UVW_IDX{U_IDX, V_IDX, W_IDX, MAX_IDX};
+
+	for(i = 0; i < p_u32SlotNum; i++) {
+		u32SLKIdx = p_pSLKIdx[i];
+		if ( (u32SLKIdx == 0) || (u32SLKIdx >= RES_SLK_SIZE) ) {
+			PrintToCerr("DetectAddrRegHazard_DC2: u32SLKIdx is invalid\n");
+			return false;
+		}
+
+		bolAreg_is_greg = m_arrResSLK[u32SLKIdx].slot_res_used.bolareg_is_greg;
+		switch(p_pDregsIDX[i]) {
+			case U_IDX:
+				u32DestRegs = m_arrResSLK[u32SLKIdx].slot_res_used.u32DestU;
+				u32BpRegs = (u32DestRegs & p_pSrcRegs[U_IDX]);
+				if(u32BpRegs != 0) {
+					for(j = 0; j < REG_NUM_OF_ADDRUNIT; j++) {
+						// DestRegs are written in (Un = xRs) or SrcRegs is in high level ISR
+						if(GIsBitSet(u32BpRegs, j) && bolAreg_is_greg)
+						{
+							#ifdef STALL_REASON_LOG
+							LogPipeStall(AREG_HAZARD, PIPE_EX.DC1_DC2.m_right.uint32r_pc, U_IDX, GetLSB_32(u32BpRegs), p_u32Phase);
+							#endif
+							return true;
+						}
+					}
+				}
+				break;
+			case V_IDX:
+				u32DestRegs = m_arrResSLK[u32SLKIdx].slot_res_used.u32DestV;
+				u32BpRegs = (u32DestRegs & p_pSrcRegs[V_IDX]);
+				if(u32BpRegs != 0) {
+					for(j = 0; j < REG_NUM_OF_ADDRUNIT; j++) {
+						// DestRegs are written in (Un = xRs) or SrcRegs is in high level ISR					
+						if(GIsBitSet(u32BpRegs, j) && bolAreg_is_greg)
+						{
+							#ifdef STALL_REASON_LOG
+							LogPipeStall(AREG_HAZARD, PIPE_EX.DC1_DC2.m_right.uint32r_pc, V_IDX, GetLSB_32(u32BpRegs), p_u32Phase);
+							#endif
+							return true;
+						}
+					}
+				}
+				break;
+			case W_IDX:
+				u32DestRegs = m_arrResSLK[u32SLKIdx].slot_res_used.u32DestW;
+				u32BpRegs = (u32DestRegs & p_pSrcRegs[W_IDX]);
+				if(u32BpRegs != 0) {
+					for(j = 0; j < REG_NUM_OF_ADDRUNIT; j++) {
+						// DestRegs are written in (Un = xRs) or SrcRegs is in high level ISR						
+						if(GIsBitSet(u32BpRegs, j) && bolAreg_is_greg)
+						{
+							#ifdef STALL_REASON_LOG
+							LogPipeStall(AREG_HAZARD, PIPE_EX.DC1_DC2.m_right.uint32r_pc, W_IDX, GetLSB_32(u32BpRegs), p_u32Phase);
+							#endif
+							return true;
+						}
+					}
+				}
+				break;
+			default:
+				break;
+		}
+	}
+	return false;
+
+}
+
+
+#endif

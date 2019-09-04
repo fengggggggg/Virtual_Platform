@@ -1,0 +1,226 @@
+/*
+ *mmac.cpp
+ *
+ *Created on: Jun 4, 2014
+ *Author:	liugu
+*/
+
+#include "mmac.h"
+#include <vector>
+using namespace std;
+
+mmac::mmac(sc_module_name module_name)
+:name(module_name)
+,m_arbiter_PEQ("arbiter_PEQ")
+,m_back_PEQ("back_PEQ")
+,StartPC(0x0)
+{
+	/*Variable initializing*/
+	/*Sockets binding*/
+	for(int i=0;i<CORE_NUMBER;i++){
+		target_socket_from_core[i].bind(*this);
+	}
+	for(int i=0;i<DDR_NUMBER;i++){
+		initiator_socket_to_ddr[i].bind(*this);
+	}
+	initiator_socket_to_pmem.bind(*this);
+
+	/*Clock tick function initializing*/
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+
+	/*Register arbiter_method as call back function of m_arbiter_PEQ*/
+	SC_METHOD(arbiter_method);
+	sensitive<<clk.pos();// m_arbiter_PEQ.get_event();			//Each cycle only one request will be responded
+	dont_initialize();
+
+	/*Register response_method as call back function of m_back_PEQ*/	//Each cycle only one response will be sent back
+	SC_METHOD(response_method);
+	sensitive<<clk.pos();//m_back_PEQ.get_event();
+	dont_initialize();
+}
+
+/*payloads backward from pmem or ddr*/
+tlm_sync_enum mmac::nb_transport_bw(
+	tlm_generic_payload &trans,
+	tlm_phase &phase,
+	sc_time &t){
+	/*TODO:TBD*/
+	if(phase == BEGIN_RESP_CACHE_LINE){
+		m_back_PEQ.notify(trans,t);
+		phase = END_RESP_CACHE_LINE;
+		return TLM_UPDATED;
+	}
+	return TLM_ACCEPTED;
+}
+
+/*send payloads to mmac from cores*/
+tlm_sync_enum mmac::nb_transport_fw(
+	tlm_generic_payload &trans,
+	tlm_phase &phase,
+	sc_time &t){
+	/*TODO:TBD*/
+	if(phase == BEGIN_REQ_CACHE_LINE){
+		m_arbiter_PEQ.notify(trans,t);
+		phase = END_REQ_CACHE_LINE;
+		return TLM_UPDATED;
+	}
+	return TLM_ACCEPTED;
+}
+
+/*Clock main function*/
+void mmac::clock_tick(){
+	//DEBUG_out<<"clock_tick"<<endl;
+	/*TODO:TBD*/
+	return;
+}
+
+/*Call back functions for PEQs*/
+void mmac::arbiter_method()
+{
+	tlm::tlm_generic_payload *trans_ptr;	//pointer to current pending trans
+	tlm::tlm_sync_enum status = tlm::TLM_COMPLETED;
+
+	bool flag = false;
+	vector<tlm::tlm_generic_payload *> emerging_queue;
+	
+	while((trans_ptr = m_arbiter_PEQ.get_next_transaction()) != NULL){
+		/*if(!flag){
+		//Found an emerging trans
+		DEBUG_out<<"REQ@0x"<<hex<<trans_ptr->get_address()<<endl;	
+		//TODO: process this trans
+
+		tlm_phase phase = BEGIN_REQ_CACHE_LINE;
+		sc_core::sc_time delay = SC_ZERO_TIME;
+		initiator_socket_to_pmem->nb_transport_fw(*trans_ptr,phase,delay);
+		flag = true;
+		}else{
+			sc_core::sc_time delay = sc_time(10,SC_NS);
+			m_arbiter_PEQ.notify(*trans_ptr,delay);
+		}*/
+		emerging_queue.push_back(trans_ptr);
+	}
+	/*
+	if(!emerging_queue.empty()){
+		//Pick up a high priority transaction to gain the mmac. Now priority is equal to core_id, the smaller the higher
+		unsigned int curr_pick = 0;
+		unsigned int curr_pick_idx = 0;
+		unsigned int curr_pick_coreid =0;
+		CoreID_extension *p_ext;
+		emerging_queue[0]->get_extension(p_ext);
+		curr_pick = curr_pick_coreid = p_ext->core_id;
+		
+		for(vector<tlm::tlm_generic_payload>::size_type ix = 0; ix != emerging_queue.size(); ++ix){
+			tlm::tlm_generic_payload *p_trans = emerging_queue[ix];
+			p_trans->get_extension(p_ext);
+			if(p_ext->core_id < curr_pick){
+				curr_pick = p_ext->core_id;
+				curr_pick_idx = ix;
+				curr_pick_coreid = p_ext->core_id;
+			}
+		}
+		//DEBUG_out<<"Queue has "<<emerging_queue.size()<<" request"<<endl;
+		//DEBUG_out<<"Sellect a core"<<curr_pick_coreid<<" to gain the control of mmac"<<endl;
+		//Send out the picked transaction from picked core
+		tlm_phase phase= BEGIN_REQ_CACHE_LINE;
+		sc_core::sc_time delay = SC_ZERO_TIME;
+			
+		//Arbiter here
+		unsigned int target_addr = (*emerging_queue[curr_pick_idx]).get_address();
+		if(target_addr >= 0x80000000 && target_addr <0xc0000000){
+			initiator_socket_to_ddr[0]->nb_transport_fw(*emerging_queue[curr_pick_idx],phase,delay);
+		}else if(target_addr >= 0xc0000000){
+			initiator_socket_to_ddr[1]->nb_transport_fw(*emerging_queue[curr_pick_idx],phase,delay);
+		}else{
+			initiator_socket_to_pmem->nb_transport_fw(*emerging_queue[curr_pick_idx],phase,delay);
+	  }
+		//Other transactions will be enqueued again
+		for(vector<tlm::tlm_generic_payload>::size_type ix = 0;ix != emerging_queue.size(); ++ix){
+			if(ix != curr_pick_idx){
+				sc_core::sc_time delay_suspend = sc_time(10,SC_NS);
+				m_arbiter_PEQ.notify(*emerging_queue[ix],delay_suspend);
+			}
+		}
+	}*/
+	/*Send all request at the same cycle*/
+	if(!emerging_queue.empty()){
+		for(vector<tlm::tlm_generic_payload>::size_type ix = 0;ix !=emerging_queue.size(); ++ix){
+			unsigned int target_addr = (*emerging_queue[ix]).get_address();
+			CoreID_extension *id_extension ;
+			(*emerging_queue[ix]).get_extension(id_extension);
+			unsigned int core_id = id_extension->core_id;
+			tlm_phase phase= BEGIN_REQ_CACHE_LINE;
+			sc_core::sc_time delay = SC_ZERO_TIME;
+			if(target_addr >= 0x80000000 && target_addr <0xc0000000){
+				initiator_socket_to_ddr[0]->nb_transport_fw(*emerging_queue[ix],phase,delay);
+			}else if(target_addr >= 0xc0000000){
+				initiator_socket_to_ddr[1]->nb_transport_fw(*emerging_queue[ix],phase,delay);
+			}else if((target_addr >= StartPC) && (target_addr <= (StartPC+0x200000))){//For test private sram
+				initiator_socket_to_pmem->nb_transport_fw(*emerging_queue[ix],phase,delay);
+			}else if((target_addr >= 0x0b000000) && (target_addr < 0x0b200000)){
+				initiator_socket_to_pmem->nb_transport_fw(*emerging_queue[ix],phase,delay);
+			}else if((target_addr >= 0x0) && (target_addr <= 0x17FFF)){//For test share sram
+				initiator_socket_to_pmem->nb_transport_fw(*emerging_queue[ix],phase,delay);
+			}else if((target_addr >= 0xE20000) && (target_addr <= 0xE2FFFF)){//For test private sram
+				initiator_socket_to_pmem->nb_transport_fw(*emerging_queue[ix],phase,delay);
+			}else{
+				printf("pc 0x%x is illegale at core_id = %d\n",target_addr,core_id);
+			}
+
+		}
+	}
+	
+
+	//next_trigger( m_arbiter_PEQ.get_event());	//??? Can this line be removed???
+}
+
+void mmac::response_method()
+{
+	tlm::tlm_generic_payload *trans_ptr;	//pointer to current pending trans
+	tlm::tlm_sync_enum status = tlm::TLM_COMPLETED;
+
+	vector<tlm::tlm_generic_payload *> emerging_queue;
+	while((trans_ptr = m_back_PEQ.get_next_transaction()) != NULL){
+		//Found an emerging trans
+
+		//TODO: process this trans
+		/*
+		CoreID_extension *p_ext;
+		trans_ptr->get_extension(p_ext);
+		tlm_phase phase= BEGIN_RESP_CACHE_LINE;
+		sc_core::sc_time delay = SC_ZERO_TIME;
+		target_socket_from_core[p_ext->core_id]->nb_transport_bw(*trans_ptr,phase,delay);
+		*/
+		emerging_queue.push_back(trans_ptr);
+	}
+
+	/*if(!emerging_queue.empty()){
+		//Choose a response to send back to core
+		//We just send back the first transaction we get
+		CoreID_extension * p_ext;
+		emerging_queue[0]->get_extension(p_ext);
+		
+		tlm_phase phase = BEGIN_RESP_CACHE_LINE;
+		sc_core::sc_time delay = SC_ZERO_TIME;
+		target_socket_from_core[p_ext->core_id]->nb_transport_bw(*emerging_queue[0],phase,delay);
+	}*/
+	/*Send all resp recieved*/
+	if(!emerging_queue.empty()){
+		for(vector<tlm::tlm_generic_payload>::size_type ix = 0;ix !=emerging_queue.size(); ++ix){
+			CoreID_extension * p_ext;
+			emerging_queue[ix]->get_extension(p_ext);
+		
+			tlm_phase phase = BEGIN_RESP_CACHE_LINE;
+			sc_core::sc_time delay = SC_ZERO_TIME;
+			target_socket_from_core[p_ext->core_id]->nb_transport_bw(*emerging_queue[ix],phase,delay);
+		}
+	}
+	
+
+//	next_trigger( m_back_PEQ.get_event());		//???
+}
+void mmac::setStartPC(unsigned int p_StartPC)
+{
+	StartPC = p_StartPC;
+}

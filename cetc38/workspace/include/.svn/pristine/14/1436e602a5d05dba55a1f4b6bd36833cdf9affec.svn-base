@@ -1,0 +1,1641 @@
+
+#include "sc_iss.h"
+
+//-----------------------------------------------------------------------------
+void sc_iss::ShiftGREGs()
+{
+	int i, j;
+	
+//	memcpy(u2ro_BPB, u2ri_BPB, sizeof(u2ri_BPB));
+	if(m_bolUpdateBPB)
+	{
+		u2ro_BPB[m_u32BPBIdx] = u2ri_BPB[m_u32BPBIdx];
+	}
+	memcpy(u32ro_R, u32ri_R, sizeof(u32ri_R));
+	memcpy(u64ro_SHF_SACC, u64ri_SHF_SACC, NUM_OF_UNITS * SHF_NUM_OF_UNIT * sizeof(DSP_BIT64));
+
+	u64r_PMASK.shift();
+	u64r_INTReg0.shift();
+	u64r_INTReg1.shift();	
+	bolr_UseCustomINT.shift();
+	bolr_UseRealINT.shift();	
+	bolr_UseRTLINT.shift();
+	bolr_TestEnd.shift();	
+
+	u64r_SameINT.shift();
+
+	u32r_CyclesL.shift();
+	u32r_CyclesH.shift();
+	u32r_FPC.shift();
+	u32r_EPC.shift();
+	u32r_EX_NPC.shift();	
+	u32r_CoreID.shift();
+	u32r_SITR.shift();
+	u32r_IMACR.shift();
+	u32r_IMAFR.shift();	
+	u32r_CIDR.shift();
+	u32r_REGFS.shift();
+	u32r_NestLvlAftIRET_AC_EX.shift();
+
+	u32r_SeqCounter_EMIT.shift();
+	u32r_SeqCounter_DC1.shift();
+	u32r_SeqCounter_DC2.shift();
+	u32r_SeqCounter_DC3.shift();
+	u32r_SeqCounter_DC4.shift();
+	u32r_SeqCounter_AC.shift();
+	u32r_SeqCounter_EX.shift();
+	u32r_SeqCounter_WB.shift();
+
+	bolr_SavedBranchValid.shift();
+	u32r_SavedBranchINTLvl.shift();
+	u32r_SavedBranchPC.shift();
+	u32r_CBTgtAddr.shift();
+	bolr_CBEn.shift();
+
+	u32r_CacheBusySavedPC.shift();
+	bolr_CacheBusyISRFlushed.shift();
+	bolr_FpcUsedISRFlushed.shift();
+	bolr_ISRFlushedOnce.shift();
+		
+	for (i = 0; i < 5; i++)
+	{
+		u32r_CFGCE[ i ].shift();
+	}
+	for (i = 0; i < 3; i++)
+	{
+		for (j = 0; j < 9; j++)
+		{
+			u32r_DMRWCFR_ACEX[ i ][ j ].shift();
+			u32r_DMRWCFR_EXWB[ i ][ j ].shift();
+		}
+	}
+	//------------------------ ALU Regs ----------------------------
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{		
+		for ( j = 0; j < ALU_NUM_OF_UNIT; j++ )
+		{
+			u32r_ALUCON_AC[ i ][ j ].shift();
+			u32r_ALUA_EX[ i ][ j ].shift();
+			u32r_ALUB_EX[ i ][ j ].shift();
+			u32r_ALUCR_EX[ i ][ j ].shift();
+			u32r_ALUFR_EX[ i ][ j ].shift();
+			u32r_ALU_ACF[ i ][ j ].shift();
+		}
+		
+		u32r_ALU_BKFlag[ i ].shift();
+		u32r_ALUFAR[i].shift();
+		u32r_ALUFOR[i].shift();
+
+	}
+	//------------------------ MUL Regs ----------------------------
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{		
+		for ( j = 0; j < MUL_NUM_OF_UNIT; j++ )
+		{
+			u32r_MULA_EX[ i ][ j ].shift();
+			u32r_MULB_EX[ i ][ j ].shift();
+			u32r_MULCR_EX[ i ][ j ].shift();
+			u32r_MULFR_EX[ i ][ j ].shift();
+		}
+		u32r_MULFAR[i].shift();
+		u32r_MULFOR[i].shift();
+		u32r_MULCUTR[i].shift();
+
+	}
+	//------------------------ SHF Regs ----------------------------
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{		
+		for ( j = 0; j < SHF_NUM_OF_UNIT; j++ )
+		{
+			u32r_SHFA_AC[ i ][ j ].shift();
+			u32r_SHFB_AC[ i ][ j ].shift();
+			u32r_SHFCR_AC[ i ][ j ].shift();
+			u32r_SHFA_EX[ i ][ j ].shift();
+			u32r_SHFB_EX[ i ][ j ].shift();
+			u32r_SHFCR_EX[ i ][ j ].shift();
+			
+			u32_SHF_SCF[i][j].shift();
+			u32r_SHF_SLTAR[i][j].shift();
+			u32r_SHFER[i][j].shift();
+		}
+
+		u32r_SHF_BKFlag[ i ].shift();
+		u32r_SHFFAR[i].shift();
+		u32r_SHFFOR[i].shift();
+		u32r_SHFCUTR[i].shift();
+
+	} 
+	//------------------------ SPU Regs ----------------------------
+	for (i = 0; i < NUM_OF_UNITS; i++)
+	{
+		u32r_SPUA_AC[ i ].shift();
+		u32r_SPUB_AC[ i ].shift();
+		u32r_SPUCR_AC[ i ].shift();
+		u32r_SPUA_EX[ i ].shift();
+		u32r_SPUB_EX[ i ].shift();
+		u32r_SPUCR_EX[ i ].shift();
+
+	}
+}
+//-----------------------------------------------------------------------------------
+int sc_iss::ShiftCustomRegs()
+{
+/*
+	#ifdef  BWSIM_PUB_MODE
+	if (!g_bolDoShfReg)
+	{
+		return -1;
+	}
+	#endif
+*/	
+
+	ShiftIABP0();
+	ShiftIABP1();
+	ShiftFlags();
+	ShiftRegs_EXWB();
+	ShiftRegs_ACEX();
+	return 0;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ShiftIABP0()
+{
+	if (!m_bolStallIABP0)
+	{
+		memcpy(m_arrIABP0Out, m_arrIABP0In, IAB_WIDTH * sizeof(DSPU32));
+	}	
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ShiftIABP1()
+{
+	if (!m_bolStallIABP1)
+	{
+		memcpy(m_arrIABP1Out, m_arrIABP1In, IAB_WIDTH * sizeof(DSPU32));
+	}	
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::ShiftFlags()
+{
+	memcpy(u32ro_ALUFR, u32ri_ALUFR, NUM_OF_UNITS * ALU_NUM_OF_UNIT * 4);
+	memcpy(u32ro_MULFR, u32ri_MULFR, NUM_OF_UNITS * MUL_NUM_OF_UNIT * 4);
+	memcpy(u32ro_SHFFR, u32ri_SHFFR, NUM_OF_UNITS * SHF_NUM_OF_UNIT * 4);
+	memcpy(u32ro_SPUFR, u32ri_SPUFR, NUM_OF_UNITS * 4);
+	bolro_INTOccur = bolri_INTOccur;
+	i32ro_INTLvl = i32ri_INTLvl;
+	bolro_AtomO = bolri_AtomO;
+	u32ro_CGCR = u32ri_CGCR;
+	bolro_Idle = bolri_Idle;
+	u32ro_GCSR = u32ri_GCSR;
+	UpdateILAT();
+	u64ro_ILAT = u64ri_ILAT;
+	u64ro_IMASK = u64ri_IMASK;
+	u64ro_ICTLR = u64ri_ICTLR;
+
+	u32ro_ITMRh = u32ri_ITMRh;
+	u32ro_ITMRl = u32ri_ITMRl;
+	memcpy(u32ro_INTSrc, u32ri_INTSrc, sizeof(u32ri_INTSrc));
+	
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ShiftRegs_ACEX()
+{
+	int  i;
+
+	if ( !m_bolStall_ACEX )
+	{		
+		memcpy(u32ro_IVT, u32ri_IVT, 64 * 4);
+		memcpy(u32ro_IRA, u32ri_IRA, 64 * 4);
+
+		for (i = 0; i < NUM_OF_UNITS; i++)
+		{
+			u32ro_ALUCR[i] = u32ri_ALUCR[i];
+			u32ro_MULCR[i] = u32ri_MULCR[i];
+			u32ro_SHFCR[i] = u32ri_SHFCR[i];
+			u32ro_SPUCR[i] = u32ri_SPUCR[i];
+			u32ro_CPredReg[i] = u32ri_CPredReg[i];
+			u32ro_GPLYR[i] = u32ri_GPLYR[i];
+			u32ro_LC[i] = u32ri_LC[i];
+		}
+
+		memcpy(u32ro_ALU_CON, u32ri_ALU_CON, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSPU32));
+		
+		memcpy(u64ro_ALU_DFIRR, u64ri_ALU_DFIRR, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSP_BIT64));
+		memcpy(u32ro_U, u32ri_U, REG_NUM_OF_ADDRUNIT * sizeof(DSPU32));
+		memcpy(u32ro_V, u32ri_V, REG_NUM_OF_ADDRUNIT * sizeof(DSPU32));
+		memcpy(u32ro_W, u32ri_W, REG_NUM_OF_ADDRUNIT * sizeof(DSPU32));
+
+
+		u32ro_BAR = u32ri_BAR;
+		u32ro_SRP = u32ri_SRP;
+		u32ro_CJMP = u32ri_CJMP;
+
+		u32ro_IINT_TxEN = u32ri_IINT_TxEN;
+		u32ro_IINTN_Tx= u32ri_IINTN_Tx;
+		for (i = 0; i < 8; i++)
+		{
+			u32ro_IINTN_Rx[i] = u32ri_IINTN_Rx[i];
+		}
+		
+		u32ro_IRET_ADDR_ACEX = u32ri_IRET_ADDR_ACEX;
+
+	} // if ( !m_bolStall_ACEX )
+
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ShiftRegs_EXWB()
+{
+	if ( !m_bolStall_EXWB )
+	{		
+		u32ro_ExcpPC = u32ri_ExcpPC;
+		u32ro_ExcpCode = u32ri_ExcpCode;
+
+		memcpy(u32ro_ALU_CA, u32ri_ALU_CA, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSPU32));
+		memcpy(u40ro_ALU_ACC, u40ri_ALU_ACC, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSP_BIT40));
+		memcpy(u8ro_ALU_EXP, u8ri_ALU_EXP, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSPU8));
+
+		memcpy(u80ro_MUL_MACC, u80ri_MUL_MACC, NUM_OF_UNITS * MUL_NUM_OF_UNIT * sizeof(NEW_DSP_BIT80));
+		memcpy(u128ro_MUL_MACC, u128ri_MUL_MACC, NUM_OF_UNITS * MUL_NUM_OF_UNIT * sizeof(DSP_BIT128));
+
+
+		memcpy(u32ro_ALU_DFER, u32ri_ALU_DFER, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSPU32));
+		memcpy(u64ro_ALU_DFMR, u64ri_ALU_DFMR, NUM_OF_UNITS * ALU_NUM_OF_UNIT * sizeof(DSP_BIT64));
+		//memcpy(u64ro_SHF_SACC, u64ri_SHF_SACC, NUM_OF_UNITS * SHF_NUM_OF_UNIT * sizeof(DSP_BIT64));
+
+	} // if ( !m_bolStall_EXWB )
+
+}
+//-----------------------------------------------------------------------------
+DSPU32 sc_iss::RdALUFAR(DSPU32 p_u32MacroIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("RdALUFAR: Invalid parameter\n");
+		}
+	else
+		{
+			u32Rtn = u32r_ALUFAR[p_u32MacroIdx];
+		}
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------
+void sc_iss::WrALUFAR(DSPU32 p_u32MacroIdx, DSPU32 p_u32Value)
+{
+	DSPU32 u32Mask = 0x00007F7F;
+
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("WrALUFAR: Invalid parameter\n");
+		}
+	else
+		{
+			u32r_ALUFAR[p_u32MacroIdx] = p_u32Value & u32Mask;
+		}
+}
+//-----------------------------------------------------------------------------
+DSPU32 sc_iss::RdALUFOR(DSPU32 p_u32MacroIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("RdALUFOR: Invalid parameter\n");
+		}
+	else
+		{
+			u32Rtn = u32r_ALUFOR[p_u32MacroIdx];
+		}
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------
+void sc_iss::WrALUFOR(DSPU32 p_u32MacroIdx, DSPU32 p_u32Value)
+{
+	DSPU32 u32Mask = 0x00007F7F;
+
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("WrALUFOR: Invalid parameter\n");
+		}
+	else
+		{
+			u32r_ALUFOR[p_u32MacroIdx] = p_u32Value & u32Mask;
+		}
+}
+//-----------------------------------------------------------------------------
+DSPU32 sc_iss::RdSHFFAR(DSPU32 p_u32MacroIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("RdSHFFAR: Invalid parameter\n");
+		}
+	else
+		{
+			u32Rtn = u32r_SHFFAR[p_u32MacroIdx];
+		}
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------
+void sc_iss::WrSHFFAR(DSPU32 p_u32MacroIdx, DSPU32 p_u32Value)
+{
+	DSPU32 u32Mask = 0x00007F7F;
+
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("WrSHFFAR: Invalid parameter\n");
+		}
+	else
+		{
+			u32r_SHFFAR[p_u32MacroIdx] = p_u32Value & u32Mask;
+		}
+}
+//-----------------------------------------------------------------------------
+DSPU32 sc_iss::RdSHFFOR(DSPU32 p_u32MacroIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("RdSHFFOR: Invalid parameter\n");
+		}
+	else
+		{
+			u32Rtn = u32r_SHFFOR[p_u32MacroIdx];
+		}
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------
+void sc_iss::WrSHFFOR(DSPU32 p_u32MacroIdx, DSPU32 p_u32Value)
+{
+	DSPU32 u32Mask = 0x00007F7F;
+
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("WrSHFFOR: Invalid parameter\n");
+		}
+	else
+		{
+			u32r_SHFFOR[p_u32MacroIdx] = p_u32Value & u32Mask;
+		}
+}
+//-----------------------------------------------------------------------------
+DSPU32 sc_iss::RdMULFAR(DSPU32 p_u32MacroIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("RdMULFAR: Invalid parameter\n");
+		}
+	else
+		{
+			u32Rtn = u32r_MULFAR[p_u32MacroIdx];
+		}
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------
+void sc_iss::WrMULFAR(DSPU32 p_u32MacroIdx, DSPU32 p_u32Value)
+{
+	DSPU32 u32Mask = 0x00007F7F;
+
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("WrMULFAR: Invalid parameter\n");
+		}
+	else
+		{
+			u32r_MULFAR[p_u32MacroIdx] = p_u32Value & u32Mask;
+		}
+}
+//-----------------------------------------------------------------------------
+DSPU32 sc_iss::RdMULFOR(DSPU32 p_u32MacroIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("RdMULFOR: Invalid parameter\n");
+		}
+	else
+		{
+			u32Rtn = u32r_MULFOR[p_u32MacroIdx];
+		}
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------
+void sc_iss::WrMULFOR(DSPU32 p_u32MacroIdx, DSPU32 p_u32Value)
+{
+	DSPU32 u32Mask = 0x00007F7F;
+
+	if(p_u32MacroIdx>=NUM_OF_UNITS)
+		{
+			PrintToCerr("WrMULFOR: Invalid parameter\n");
+		}
+	else
+		{
+			u32r_MULFOR[p_u32MacroIdx] = p_u32Value & u32Mask;
+		}
+}
+
+
+//====================================================================
+DSPU32 sc_iss::ReadALUCR(DSPU32  p_u32MacroIdx)
+{
+	return u32ro_ALUCR[p_u32MacroIdx % NUM_OF_UNITS];
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::WriteALUCR(DSPU32  p_u32MacroIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	DSPU32 u32Mask = 0x0000000E;
+
+	u32ri_ALUCR[p_u32MacroIdx % NUM_OF_UNITS] = p_u32Value & u32Mask;
+	if (p_bolIsInOut)
+	{			
+		u32ro_ALUCR[p_u32MacroIdx % NUM_OF_UNITS] = p_u32Value & u32Mask;
+	}		
+
+}
+//-----------------------------------------------------------------------------------
+DSP_BIT128  sc_iss::ReadMACC(DSPU32  p_u32UnitIdx, DSPU32  p_u32MULIdx)
+{
+	DSP_BIT128  xu128Rtn;
+
+	xu128Rtn.u32HH = 0;
+	xu128Rtn.u32HL = 0;
+	xu128Rtn.u32LH = 0;
+	xu128Rtn.u32LL = 0;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32MULIdx >= MUL_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadMACC: Invalid parameter\n");
+	}
+	else
+	{
+		xu128Rtn = u128ro_MUL_MACC[p_u32UnitIdx][p_u32MULIdx];
+	}
+
+	return  xu128Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::WriteMACC(DSPU32  p_u32UnitIdx, DSPU32  p_u32MULIdx, DSP_BIT128  p_xu128Value)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32MULIdx >= MUL_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteMACC: Invalid parameter\n");
+	}
+	else
+	{
+		u128ri_MUL_MACC[p_u32UnitIdx][p_u32MULIdx] = p_xu128Value;
+	}
+
+	return  bolRtn;
+}
+//-----------------------------------------------------------------------------------
+void  sc_iss::ReadACC_48(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSP_BIT48 &p_ACCValue)
+{
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadACC_48: Invalid parameter\n");
+		return;
+	}
+	
+	p_ACCValue.u32Low = u40ro_ALU_ACC[p_u32UnitIdx][p_u32ALUIdx].u32Low;
+	p_ACCValue.u8Mid = u40ro_ALU_ACC[p_u32UnitIdx][p_u32ALUIdx].u8High;
+	p_ACCValue.u8High = u8ro_ALU_EXP[p_u32UnitIdx][p_u32ALUIdx];
+}
+//-----------------------------------------------------------------------------------
+DSP_BIT40  sc_iss::ReadACC(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSP_BIT40  xu40Rtn;
+
+	xu40Rtn.u32Low = 0;
+	xu40Rtn.u8High = 0;
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadACC: Invalid parameter\n");
+	}
+	else
+	{
+		xu40Rtn = u40ro_ALU_ACC[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  xu40Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool  sc_iss::WriteACC_48(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, const DSP_BIT48  &p_b48ACC)
+{
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("WriteACC: Invalid parameter\n");
+		return false;
+	}
+	
+	u40ri_ALU_ACC[p_u32UnitIdx][p_u32ALUIdx].u32Low = p_b48ACC.u32Low;
+	u40ri_ALU_ACC[p_u32UnitIdx][p_u32ALUIdx].u8High = p_b48ACC.u8Mid;
+	u8ri_ALU_EXP[p_u32UnitIdx][p_u32ALUIdx] = p_b48ACC.u8High;
+
+	return  true;
+}
+
+//-----------------------------------------------------------------------------------
+bool  sc_iss::WriteACC(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSP_BIT40  p_xu40Value)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteACC: Invalid parameter\n");
+	}
+	else
+	{
+		u40ri_ALU_ACC[p_u32UnitIdx][p_u32ALUIdx] = p_xu40Value;
+	}
+
+	return  bolRtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU8 sc_iss::ReadACCExp(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSPU8  u8Rtn = 0xFF;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadACCExp: Invalid parameter\n");
+	}
+	else
+	{
+		u8Rtn = u8ro_ALU_EXP[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return u8Rtn;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteACCExp(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSPU8 p_u8Value)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteACCExp: Invalid parameter\n");
+	}
+	else
+	{
+		u8ri_ALU_EXP[p_u32UnitIdx][p_u32ALUIdx] = p_u8Value;
+	}
+
+	return  bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadCON(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadCON: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_ALU_CON[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteCON(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteCON: Invalid parameter\n");
+	}
+	else
+	{
+		u32ri_ALU_CON[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+	}
+
+	return  bolRtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteSPUCR(DSPU32  p_u32UnitIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	bool  bolRtn = true;
+	DSPU32 u32Mask = 0x00000002;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		bolRtn = false;
+		PrintToCerr("WriteSPUCR: Invalid parameter\n");
+	}
+	else
+	{
+		p_u32Value = p_u32Value & u32Mask;
+		u32ri_SPUCR[p_u32UnitIdx] = p_u32Value;
+		if (p_bolIsInOut)
+		{			
+			u32ro_SPUCR[p_u32UnitIdx] = p_u32Value;
+		}
+		
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteSHFCR(DSPU32  p_u32UnitIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	bool  bolRtn = true;
+	DSPU32 u32Mask = 0xA;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		bolRtn = false;
+		PrintToCerr("WriteSHFCR: Invalid parameter\n");
+	}
+	else
+	{
+		p_u32Value = p_u32Value & u32Mask;
+		u32ri_SHFCR[p_u32UnitIdx] = p_u32Value;
+		if (p_bolIsInOut)
+		{			
+			u32ro_SHFCR[p_u32UnitIdx] = p_u32Value;
+		}
+		
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteMULCR(DSPU32  p_u32UnitIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	bool  bolRtn = true;
+	//DSPU32 u32Mask = 0x0073F1F2;
+	DSPU32 u32Mask = 0x6;  //使用第1位、第2位其余为保留
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		bolRtn = false;
+		PrintToCerr("WriteMULCR: Invalid parameter\n");
+	}
+	else
+	{
+		p_u32Value = p_u32Value & u32Mask;
+		u32ri_MULCR[p_u32UnitIdx] = p_u32Value;
+		if (p_bolIsInOut)
+		{			
+			u32ro_MULCR[p_u32UnitIdx] = p_u32Value;
+		}
+		
+	}
+
+	return bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteALUBKFlag(DSPU32  p_u32UnitIdx, DSPU32 p_u32Value)
+{
+	bool  bolRtn = true;
+	DSPU32 u32Mask = 0x00000003;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		bolRtn = false;
+		PrintToCerr("WriteALUBKFlag: Invalid parameter\n");
+	}
+	else
+	{
+		u32r_ALU_BKFlag[p_u32UnitIdx] = p_u32Value & u32Mask;
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteSHFBKFlag(DSPU32  p_u32UnitIdx, DSPU32 p_u32Value)
+{
+	bool  bolRtn = true;
+	DSPU32 u32Mask = 0x00000003; // GRQ
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		bolRtn = false;
+		PrintToCerr("WriteSHFBKFlag: Invalid parameter\n");
+	}
+	else
+	{
+		u32r_SHF_BKFlag[p_u32UnitIdx] = p_u32Value & u32Mask;
+	}
+
+	return bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadMULCR(DSPU32  p_u32UnitIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		PrintToCerr("ReadMULCR: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_MULCR[p_u32UnitIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadSHFCR(DSPU32  p_u32UnitIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		PrintToCerr("ReadSHFCR: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_SHFCR[p_u32UnitIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadSPUCR(DSPU32  p_u32UnitIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		PrintToCerr("ReadSPUCR: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_SPUCR[p_u32UnitIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadALUCA(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadALUCA: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_ALU_CA[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteALUCA(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteALUCA: Invalid parameter\n");
+	}
+	else
+	{
+		u32ri_ALU_CA[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+	}
+
+	return  bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadALUDFER(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadALUDFR: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_ALU_DFER[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteALUDFER(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteALUDFR: Invalid parameter\n");
+	}
+	else
+	{
+		u32ri_ALU_DFER[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+	}
+
+	return  bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSP_BIT64 sc_iss::ReadALUDFIRR(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSP_BIT64  u64Rtn;
+	u64Rtn.u32Low = 0xFFFFFFFF;
+	u64Rtn.u32High = 0xFFFFFFFF;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadALUDFR: Invalid parameter\n");
+	}
+	else
+	{
+		u64Rtn.u32Low = u64ro_ALU_DFIRR[p_u32UnitIdx][p_u32ALUIdx].u32Low;
+		u64Rtn.u32High = u64ro_ALU_DFIRR[p_u32UnitIdx][p_u32ALUIdx].u32High;
+	}
+
+	return u64Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteALUDFIRR(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSPU32 p_u32Value, bool IsHigh)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteALUDFR: Invalid parameter\n");
+	}
+	else
+	{
+		if(IsHigh)
+		{
+			u64ri_ALU_DFIRR[p_u32UnitIdx][p_u32ALUIdx].u32High = p_u32Value;
+		}
+		else
+		{
+			u64ri_ALU_DFIRR[p_u32UnitIdx][p_u32ALUIdx].u32Low = p_u32Value;
+		}
+		
+	}
+	return  bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSP_BIT64 sc_iss::ReadALUDFMR(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx)
+{
+	DSP_BIT64  u64Rtn;
+	u64Rtn.u32Low = 0xFFFFFFFF;
+	u64Rtn.u32High = 0xFFFFFFFF;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		PrintToCerr("ReadALUDFR: Invalid parameter\n");
+	}
+	else
+	{
+		u64Rtn.u32Low = u64ro_ALU_DFMR[p_u32UnitIdx][p_u32ALUIdx].u32Low;
+		u64Rtn.u32High = u64ro_ALU_DFMR[p_u32UnitIdx][p_u32ALUIdx].u32High;
+	}
+
+	return u64Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteALUDFMR(DSPU32  p_u32UnitIdx, DSPU32  p_u32ALUIdx, DSPU32 p_u32Value, bool IsHigh)
+{
+	bool  bolRtn = true;
+
+	if ( (p_u32UnitIdx >= NUM_OF_UNITS) || (p_u32ALUIdx >= ALU_NUM_OF_UNIT) )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteALUDFR: Invalid parameter\n");
+	}
+	else
+	{
+		if(IsHigh)
+		{
+			u64ri_ALU_DFMR[p_u32UnitIdx][p_u32ALUIdx].u32High = p_u32Value;
+		}
+		else
+		{
+			u64ri_ALU_DFMR[p_u32UnitIdx][p_u32ALUIdx].u32Low = p_u32Value;
+		}
+		
+	}
+	return  bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadGPLYR(DSPU32  p_u32UnitIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+
+	if (p_u32UnitIdx >= NUM_OF_UNITS)
+	{
+		PrintToCerr("ReadGPLYR: Invalid parameter\n");
+	}
+	else
+	{
+		u32Rtn = u32ro_GPLYR[p_u32UnitIdx];
+	}
+
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteGPLYR(DSPU32  p_u32UnitIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	bool  bolRtn = true;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		bolRtn = false;
+		PrintToCerr("WriteGPLYR: Invalid parameter\n");
+	}
+	else
+	{
+		u32ri_GPLYR[p_u32UnitIdx] = p_u32Value;
+
+		if (p_bolIsInOut)
+		{			
+			u32ro_GPLYR[p_u32UnitIdx] = p_u32Value;
+		}
+	}
+
+	return  bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadIRA(DSPU32 p_u32IntLvl)
+{
+	if (p_u32IntLvl > MAX_INT_LVL)
+	{
+		printf("ReadIRA: invalid p_u32IntLvl\n");
+		return 0U;
+	}
+
+	return u32ro_IRA[p_u32IntLvl];
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::SetIRA(DSPU32 p_u32IntLvl, DSPU32 p_u32Addr)
+{
+	if (p_u32IntLvl > MAX_INT_LVL)
+	{
+		printf("SetIRA: invalid p_u32IntLvl\n");
+		return false;
+	}
+#ifdef ECS_LOG2
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/U8Log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open U8Log.txt\n");
+		return false;
+	}
+	fprintf(fp, "HW: %08x %08x %08x\n", 
+		PIPE_EX.DC4_AC.m_right.uint32r_pc, p_u32IntLvl, p_u32Addr);
+	fclose(fp);
+#endif
+	u32ri_IRA[p_u32IntLvl] = p_u32Addr;
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_IVT(DSPU32  p_u32IVTIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32IVTIdx > MAX_INT_LVL )
+	{
+		PrintToCerr("rd_u32r_IVT: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32ro_IVT[p_u32IVTIdx];
+	}
+
+	return u32Rtn;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_IVT(DSPU32 p_u32IVTIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	bool bolRtn = true;
+	DSPU32 u32Mask = 0xFFFFFFFF;
+
+	if ( p_u32IVTIdx > MAX_INT_LVL )
+	{
+		bolRtn = false;
+		PrintToCerr("wr_u32r_IVT: invalid parameter!");
+	}
+	else
+	{		
+		p_u32Value = p_u32Value & u32Mask;
+		u32ri_IVT[p_u32IVTIdx] = p_u32Value;
+		if (p_bolIsInOut)
+		{
+			u32ro_IVT[p_u32IVTIdx] = p_u32Value;
+		}
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_IRA(DSPU32  p_u32IVTIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32IVTIdx > MAX_INT_LVL )
+	{
+		PrintToCerr("rd_u32r_IRA: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32ro_IRA[p_u32IVTIdx];
+	}
+
+	return u32Rtn;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_IRA(DSPU32 p_u32IVTIdx, DSPU32 p_u32Value, bool p_bolIsInOut)
+{
+	bool bolRtn = true;
+	DSPU32 u32Mask = 0xFFFFFFFF;
+#ifdef ECS_LOG2
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/U8Log.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open U8Log.txt\n");
+		return false;
+	}
+	fprintf(fp, "SW: %08x %08x %08x\n", 
+		PIPE_EX.DC4_AC.m_right.uint32r_pc, p_u32IVTIdx, p_u32Value);
+	fclose(fp);
+#endif
+	if ( p_u32IVTIdx > MAX_INT_LVL )
+	{
+		bolRtn = false;
+		PrintToCerr("wr_u32r_IVT: invalid parameter!");
+	}
+	else
+	{		
+		p_u32Value = p_u32Value & u32Mask;
+		u32ri_IRA[p_u32IVTIdx] = p_u32Value;
+		if (p_bolIsInOut)
+		{
+			u32ro_IRA[p_u32IVTIdx] = p_u32Value;
+		}
+	}
+
+	return bolRtn;
+}
+#ifdef CHG_PAGE_IDX
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadGPR_SLK(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32SLKIdx)
+{
+	return ReadGPR_Page(p_u32UnitIdx, p_u32RegIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.u32SrcPageIdx);
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteGPR_SLK(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32Value, DSPU32 p_u32SLKIdx)
+{
+	return WriteGPR_Page(p_u32UnitIdx, p_u32RegIdx, p_u32Value, m_arrResSLK[p_u32SLKIdx].slot_res_used.u32DestPageIdx);
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadGPR_Page(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32PageIdx)
+{
+	DSPU32 u32Result, u32MemAddr;
+
+	ISS_ASSERT(p_u32UnitIdx < NUM_OF_UNITS && p_u32RegIdx < REG_NUM_OF_UNIT && p_u32PageIdx < 2);
+
+	#ifdef GPR_FWD
+	if(m_arrFWDValid[p_u32PageIdx][p_u32UnitIdx][p_u32RegIdx])
+	{
+		return m_arrFWDValue[p_u32PageIdx][p_u32UnitIdx][p_u32RegIdx];
+	}
+	#else
+	if(GIsBitSet(u32ro_CGCR, 14))
+	{
+		if(m_arrFWDValid[p_u32PageIdx][p_u32UnitIdx][p_u32RegIdx])
+		{
+			return m_arrFWDValue[p_u32PageIdx][p_u32UnitIdx][p_u32RegIdx];
+		}
+	}
+	#endif
+	u32Result = u32ro_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)];
+	u32MemAddr = 0x00E00800 + p_u32UnitIdx * 128 + p_u32PageIdx * 64 + p_u32RegIdx;
+	PAddrToGAddr(u32MemAddr, (DSPU32)u32r_CoreID, u32MemAddr);
+//	TriggerWP(u32MemAddr, false);
+
+	return u32Result;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteGPR_Page(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32Value, DSPU32 p_u32PageIdx)
+{
+	DSPU32 u32Result, u32MemAddr;
+
+	ISS_ASSERT(p_u32UnitIdx < NUM_OF_UNITS && p_u32RegIdx < REG_NUM_OF_UNIT && p_u32PageIdx < 2);
+//	#ifdef GPR_FWD
+	m_arrFWDValid[p_u32PageIdx][p_u32UnitIdx][p_u32RegIdx] = true;
+	m_arrFWDValue[p_u32PageIdx][p_u32UnitIdx][p_u32RegIdx] = p_u32Value;
+//	#endif	
+
+	u32ri_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)] = p_u32Value;
+	u32MemAddr = 0x00E00800 + p_u32UnitIdx * 128 + p_u32PageIdx * 64 + p_u32RegIdx;
+	PAddrToGAddr(u32MemAddr, (DSPU32)u32r_CoreID, u32MemAddr);
+	
+	TriggerWP(u32MemAddr, true);
+
+	m_bolWrEn = true;
+	return true;
+}
+
+#else
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_R_new(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32PageIdx)
+{
+	DSPU32 u32MemAddr;
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_R_new: invalid parameter!");
+	}
+	else if ( p_u32RegIdx >= REG_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_R_new: invalid parameter!");
+	}
+	else if ( p_u32PageIdx >= 2 )
+	{
+		PrintToCerr("rd_u32r_R_new: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32ro_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)];
+		u32MemAddr = 0x00E00800 + p_u32UnitIdx * 128 + p_u32PageIdx * 64 + p_u32RegIdx;
+//		TriggerWP(u32MemAddr, false);
+	}
+
+	return  u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_R_new(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32Value, DSPU32 p_u32PageIdx)
+{
+	bool bolRtn = false;
+	DSPU32 u32MemAddr = 0;
+	
+	//printf("wr_u32r_R_new: page index is %d\n", p_u32PageIdx);
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_R_new: invalid parameter!");
+	}
+	else if ( p_u32RegIdx >= REG_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_R_new: invalid parameter!");
+	}
+	else if ( p_u32PageIdx >= 2 )
+	{
+		PrintToCerr("wr_u32r_R_new: invalid parameter!");
+	}
+	else
+	{			
+		u32ri_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)] = p_u32Value;
+		u32MemAddr = 0x00E00800 + p_u32UnitIdx * 128 + p_u32PageIdx * 64 + p_u32RegIdx;
+		TriggerWP(u32MemAddr, true);
+
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+#endif
+//-----------------------------------------------------------------------------------
+bool sc_iss::WriteGPR_JTAG(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32Value, DSPU32 p_u32PageIdx)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("WriteGPR_JTAG: invalid parameter!");
+	}
+	else if ( p_u32RegIdx >= REG_NUM_OF_UNIT )
+	{
+		PrintToCerr("WriteGPR_JTAG: invalid parameter!");
+	}
+	else if ( p_u32PageIdx >= 2 )
+	{
+		PrintToCerr("WriteGPR_JTAG: invalid parameter!");
+	}
+	else
+	{			
+		u32ri_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)] = p_u32Value;
+		u32ro_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadGPR_JTAG(DSPU32 p_u32UnitIdx, DSPU32 p_u32RegIdx, DSPU32 p_u32PageIdx)
+{
+	bool bolRtn = false;
+	ISS_ASSERT(p_u32UnitIdx < NUM_OF_UNITS && p_u32RegIdx < REG_NUM_OF_UNIT && p_u32PageIdx < 2);
+
+	return u32ro_R[p_u32UnitIdx * 64 + p_u32RegIdx + (256 * p_u32PageIdx)];
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_UVW_JTAG(DSPU32 p_u32UVWTp, DSPU32 p_u32RegIdx)
+{
+	DSPU32  u32Rtn = 0xFFFFFFFF;
+	DSPU32 u32MemAddr;
+	bool bolFound = false;
+
+	ISS_ASSERT(p_u32UVWTp < NUM_OF_ADDR_UNITS && p_u32RegIdx < REG_NUM_OF_ADDRUNIT);
+	
+	switch (p_u32UVWTp)
+	{
+		case 0:
+			u32Rtn = u32ro_U[p_u32RegIdx];
+			bolFound = true;
+			break;
+		case 1:
+			u32Rtn = u32ro_V[p_u32RegIdx];
+			bolFound = true;
+			break;
+		case 2:
+			u32Rtn = u32ro_W[p_u32RegIdx];
+			bolFound = true;
+			break;
+		default:
+			PrintToCerr("rd_u32r_UVW_JTAG: invalid parameter!");
+	}
+
+	return u32Rtn;
+
+}
+//-----------------------------------------------------------------------------------
+DSPU32  sc_iss::rd_u32r_UVW(DSPU32 p_u32UVWTp, DSPU32  p_u32RegIdx)
+{
+	DSPU32 u32MemAddr, u32Result;
+	ISS_ASSERT(p_u32UVWTp < NUM_OF_ADDR_UNITS && p_u32RegIdx < REG_NUM_OF_ADDRUNIT);
+
+	if(PIPE_EX.DC2_DC3.m_right.arrBPValid[p_u32UVWTp][p_u32RegIdx])
+	{
+		u32Result = PIPE_EX.DC2_DC3.m_right.arrBPValue[p_u32UVWTp][p_u32RegIdx];
+	}
+	else if(PIPE_EX.DC3_DC4.m_right.arrBPValid[p_u32UVWTp][p_u32RegIdx])
+	{
+		u32Result = PIPE_EX.DC3_DC4.m_right.arrBPValue[p_u32UVWTp][p_u32RegIdx];
+	}
+	else if(PIPE_EX.DC4_AC.m_right.arrBPValid[p_u32UVWTp][p_u32RegIdx])
+	{
+		u32Result = PIPE_EX.DC4_AC.m_right.arrBPValue[p_u32UVWTp][p_u32RegIdx];
+	}
+	else
+	{
+		switch(p_u32UVWTp)
+		{
+			case 0:
+				u32Result = u32ro_U[p_u32RegIdx];
+				break;
+			case 1:
+				u32Result = u32ro_V[p_u32RegIdx];
+				break;
+			case 2:
+				u32Result = u32ro_W[p_u32RegIdx];
+				break;			
+		}
+		u32MemAddr = 0x00E00B00 + 16 * p_u32UVWTp + p_u32RegIdx;
+		PAddrToGAddr(u32MemAddr, u32r_CoreID, u32MemAddr);
+//		TriggerWP(u32MemAddr, false);	
+	}
+
+	return u32Result;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_UVW(DSPU32 p_u32UVWTp, DSPU32 p_u32RegIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+	DSPU32 u32MemAddr;
+#ifdef ECS_LOG
+	if (p_u32UVWTp == 0 && p_u32RegIdx == 8) {
+		FILE *fp = NULL;
+
+		sprintf(g_arrFileName, "%s/U8Log.txt", g_arrIOPath);
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open U8Log.txt\n");
+			return false;
+		}
+		fprintf(fp, "U8: %08x %08x %08x %08x %08x %08x %016llx %016llx\n", 
+			p_u32Value,
+			PIPE_EX.DC2_DC3.m_right.uint32r_pc,
+			PIPE_EX.DC3_DC4.m_right.uint32r_pc,
+			PIPE_EX.DC4_AC.m_right.uint32r_pc,
+			PIPE_EX.AC_EX.m_right.uint32r_pc,
+			PIPE_EX.EX_WB.m_right.uint32r_pc,
+			u64ro_ILAT, (DSPU64)u64r_PMASK);
+		fclose(fp);
+	}
+#endif
+	if ( p_u32RegIdx > 15 )
+	{
+		PrintToCerr("wr_u32r_UVW: invalid parameter!");
+	}
+	else
+	{
+		switch (p_u32UVWTp)
+		{
+			case 0:
+				u32ri_U[p_u32RegIdx] = p_u32Value;
+				bolRtn = true;
+				if(m_bolABIChkEn)
+				{
+					if( (p_u32RegIdx == 8) && (m_u32ABIMask & STACK_POINTER_CHK1) && GIsBitSet(u32ro_CGCR, 0))
+					{
+						DSPU32 u32BaseAddr = u32ro_U[8] - 31;
+						u32BaseAddr = (u32BaseAddr < m_u32ABITop) ? m_u32ABITop : u32BaseAddr;
+
+						// STACK_POINTER_CHK1 conflict with CALL_STACK_CHK
+						DSPU32 u32TempMask = m_u32ABIMask;
+						m_u32ABIMask &= (~CALL_STACK_CHK);	
+
+						for(int i = u32BaseAddr ; i <= u32ro_U[8]; i++)
+						{
+							WriteCoreDataMem(i, 0x5a5a5a5a);
+						}
+						m_u32ABIMask = u32TempMask;
+					}
+					if((m_u32ABIMask & STACK_POINTER_CHK2) && GIsBitSet(u32ro_CGCR, 0)) {
+						bool found = false;
+						if(p_u32RegIdx == 8) {
+							if((p_u32Value < m_u32ABITop) || (p_u32Value > u32ro_U[9]))
+								found = true;
+						}
+						if(p_u32RegIdx == 9) {
+							if((p_u32Value > m_u32ABIBase) || (p_u32Value < u32ro_U[8]))
+								found = true;
+						}
+						if(found) {
+							FILE *fp = NULL;
+
+//							sprintf(g_arrFileName, "%s/ABI_CHECK.txt", g_arrIOPath);
+							if (!m_bolABIChkFromECS)
+								sprintf(g_arrFileName, "./ABI_CHECK.txt");
+							else
+								sprintf(g_arrFileName, "%s/ABI_CHECK.txt", g_arrABIPath);
+							if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+							{
+								PrintToCerr("Error occured when open ABI_CHECK.txt\n");
+								return false;
+							}
+							fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+							fprintf(fp, "ABI_CHECK failed: U8/U9 is not at proper position\n");
+							fprintf(fp, "STACK_BASE = %#x, STACK_TOP = %#x\n", m_u32ABIBase, m_u32ABITop);
+							fprintf(fp, "U8 = %#x, U9 = %#x\n", u32ro_U[8], u32ro_U[9]);
+							fclose(fp);
+						}
+					}									
+				}
+				break;
+			case 1:
+				u32ri_V[p_u32RegIdx] = p_u32Value;
+				bolRtn = true;
+				break;
+			case 2:
+				u32ri_W[p_u32RegIdx] = p_u32Value;
+				bolRtn = true;
+				break;
+			default:
+				PrintToCerr("wr_u32r_UVW: invalid parameter!");
+		}
+#ifdef LOG_PXP
+		m_u64ARegWMask = GSetBit64(m_u64ARegWMask, (p_u32UVWTp * REG_NUM_OF_ADDRUNIT + p_u32RegIdx));
+#endif
+	}
+
+	if (bolRtn == true)
+	{
+		u32MemAddr = 0x00E00B00 + 16 * p_u32UVWTp + p_u32RegIdx;
+		PAddrToGAddr(u32MemAddr, u32r_CoreID, u32MemAddr);
+		TriggerWP(u32MemAddr, true);
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_UVW_JTAG(DSPU32 p_u32UVWTp, DSPU32 p_u32RegIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32RegIdx > 15 )
+	{
+		PrintToCerr("wr_u32r_UVW_JTAG: invalid parameter!");
+	}
+	else
+	{
+		switch (p_u32UVWTp)
+		{
+			case 0:
+				u32ri_U[p_u32RegIdx] = p_u32Value;
+				u32ro_U[p_u32RegIdx] = p_u32Value;
+				bolRtn = true;
+				break;
+			case 1:
+				u32ri_V[p_u32RegIdx] = p_u32Value;
+				u32ro_V[p_u32RegIdx] = p_u32Value;
+				bolRtn = true;
+				break;
+			case 2:
+				u32ri_W[p_u32RegIdx] = p_u32Value;
+				u32ro_W[p_u32RegIdx] = p_u32Value;
+				bolRtn = true;
+				break;
+			default:
+				PrintToCerr("wr_u32r_UVW_JTAG: invalid parameter!");
+		}
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::WrCGCR(DSPU32 p_u32Value, bool p_bolWrInOut)
+{
+	DSPU32 u32BitMask = 0x00007003;
+
+	// 指令写的情况下: CGCR[12]只能写1，写0无效
+	if(GIsBitSet(u32ro_CGCR, 12) && !p_bolWrInOut)
+	{
+		p_u32Value |= 0x1000U;
+	}
+	u32ri_CGCR = p_u32Value & u32BitMask;
+	if (p_bolWrInOut)
+	{
+		u32ro_CGCR = u32ri_CGCR;
+	}
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SetChipID(DSPU32 p_u32ChipID)
+{
+
+	// to do
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::WrIMASK(DSPU32 p_u32Value, bool p_bolWrInOut, bool p_LowHalf)
+{
+	DSPU64 u64BitMask;
+	DSPU64 u64Value;
+
+//	u64BitMask = GenDSPU64(0x2A7FFF4F, 0xFFE33F28);
+	u64BitMask = 0x3fffffffffffffffULL;
+	if (p_LowHalf)
+	{
+		u64Value = p_u32Value;
+		u64Value = u64Value & u64BitMask;
+		u64ri_IMASK = u64Value | (u64ri_IMASK & GenDSPU64(0xFFFFFFFF, 0));
+		if (p_bolWrInOut)
+		{
+			u64ro_IMASK = u64Value | (u64ro_IMASK & GenDSPU64(0xFFFFFFFF, 0));
+		}
+	}
+	else
+	{
+		u64Value = p_u32Value;
+		u64Value = (u64Value << 32) & u64BitMask;
+		u64ri_IMASK = u64Value | (u64ri_IMASK & GenDSPU64(0, 0xFFFFFFFF));
+		if (p_bolWrInOut)
+		{
+			u64ro_IMASK = u64Value | (u64ro_IMASK & GenDSPU64(0, 0xFFFFFFFF));
+		}
+	}
+
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::WrCJMP(DSPU32 p_u32Value, bool p_bolWrInOut)
+{
+	DSPU32 u32BitMask = 0xFFFFFFFFU;
+	DSPU32 u32Value;
+
+	u32Value = p_u32Value & u32BitMask;
+	u32ri_CJMP = u32Value;
+	if (p_bolWrInOut)
+	{
+		u32ro_CJMP = u32Value;
+	}
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::WrFPC(DSPU32 p_u32Value)
+{
+	DSPU32 u32BitMask = 0x0001FFFF;
+
+	u32r_FPC = p_u32Value & u32BitMask;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_SHF_Tab(DSPU32 p_u32UnitIdx, DSPU32 p_u32SHFIdx, DSPU32 n, DSPU32 d)
+{
+	//n--表示1个8bitRAM中的4个bank，n取0，1，2，3
+	//d--表示写地址，在0-255取值
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_SHF_Tab: invalid parameter!");
+	}
+	else if ( p_u32SHFIdx >= SHF_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_SHF_Tab: invalid parameter!");
+	}
+	else if ( n >= 4 )
+	{
+		PrintToCerr("rd_SHF_Tab: invalid parameter!");
+	}
+	else if ( d >= 256 )
+	{
+		PrintToCerr("rd_SHF_Tab: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32_SHF_TAB[p_u32UnitIdx][p_u32SHFIdx].arrElem[n][d];
+	}
+
+	return  u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_SHF_Tab(DSPU32 p_u32UnitIdx, DSPU32 p_u32SHFIdx, DSPU32 n, DSPU32 d, DSPU32 p_Mode, DSPU32 p_u32Value)
+{
+	//n--表示1个8bitRAM中的4个bank，n取0，1，2，3
+	//d--表示写地址，在0-255取值
+	//p_Mode--表示写控制，是一个4位数据。
+				// 4个8bitRAM排序为3、2、1、0，当p_Mode=8(1000)时表示将p_u32Value的[31:24]位写到第3个RAM的d地址中
+				// 当p_Mode=4(0100)时表示将p_u32Value的[23:16]位写到第2个RAM的d地址中
+				// 当p_Mode=2(0010)时表示将p_u32Value的[15:8]位写到第1个RAM的d地址中
+				// 当p_Mode=1(0001)时表示将p_u32Value的[7:0]位写到第0个RAM的d地址中
+	bool bolRtn = false;
+	DSPU32 tabvalue = 0;
+	DSPU32 writevalue = 0;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_SHF_Tab: invalid parameter!");
+	}
+	else if ( p_u32SHFIdx >= SHF_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_SHF_Tab: invalid parameter!");
+	}
+	else if ( n >= 4 )
+	{
+		PrintToCerr("wr_SHF_Tab: invalid parameter!");
+	}
+	else if ( d >= 256 )
+	{
+		PrintToCerr("wr_SHF_Tab: invalid parameter!");
+	}
+	else
+	{
+		tabvalue = u32_SHF_TAB[p_u32UnitIdx][p_u32SHFIdx].arrElem[n][d];
+		writevalue = p_u32Value;
+		for(int i=0;i<4;i++)
+		{
+			if(p_Mode & (1<<i))
+			{
+				if(i==0)  //写第0个RAM
+				{
+					tabvalue = (tabvalue & 0xffffff00) | (writevalue & 0xff);
+				}
+				else if(i==1) //写第1个RAM
+				{
+					tabvalue = (tabvalue & 0xffff00ff) | (writevalue & 0xff00);
+				}
+				else if(i==2) //写第2个RAM
+				{
+					tabvalue = (tabvalue & 0xff00ffff) | (writevalue & 0xff0000);
+				}
+				else //写第3个RAM
+				{
+					tabvalue = (tabvalue & 0x00ffffff) | (writevalue & 0xff000000);
+				}
+			}
+		}
+		u32_SHF_TAB[p_u32UnitIdx][p_u32SHFIdx].arrElem[n][d] = tabvalue;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+

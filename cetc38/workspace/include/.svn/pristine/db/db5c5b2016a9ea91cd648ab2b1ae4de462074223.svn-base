@@ -1,0 +1,2422 @@
+#include "reg_file.h"
+
+//--------------------------------------------------------------function members define
+
+extern ostream & operator << (ostream& os, const reg_name rn){
+
+	switch(rn){
+		case NO_NAME				: os << "NO_NAME";					break;
+		case GLB_STATUS				: os << "GLB_STATUS";				break;
+	
+		case HCH_START				: os <<"HCH_START";					break;				
+		case HCH_STATUS				: os <<"HCH_STATUS";				break;				
+		case HCH_CTL				: os <<"HCH_CTL";					break;
+		case HCH_DST_START_ADDRH    : os <<"HCH_DST_START_ADDRH";		break;		// ofst_addr =  32 + 0x0c //add 2015.1.12
+		case HCH_SRC_START_ADDR		: os <<"HCH_SRC_START_ADDR"	;		break;		
+		case HCH_SRC_LEN_X			: os <<"HCH_SRC_LEN_X";				break;			
+		case HCH_SRC_ADDR_STEP		: os <<"HCH_SRC_ADDR_STEP";			break;		
+		case HCH_SRC_LEN_Y			: os <<"HCH_SRC_LEN_Y";				break;			
+		case HCH_SRC_CURR_ADDR		: os <<"HCH_SRC_CURR_ADDR";			break;		
+		case HCH_SRC_LEN_REM_X		: os <<"HCH_SRC_LEN_REM_X";			break;		
+		case HCH_SRC_LEN_REM_Y		: os <<"HCH_SRC_LEN_REM_Y";			break;		
+		case HCH_DST_START_ADDRL		: os <<"HCH_DST_START_ADDRL";		break;	//mod .015.1.12	
+		case HCH_DST_LEN_X			: os <<"HCH_DST_LEN_X";				break;			
+		case HCH_DST_ADDR_STEP		: os <<"HCH_DST_ADDR_STEP";			break;		
+		case HCH_DST_LEN_Y			: os <<"HCH_DST_LEN_Y";				break;			
+		case HCH_DST_CURR_ADDR		: os <<"HCH_DST_CURR_ADDR";			break;		
+		case HCH_DST_LEN_REM_X		: os <<"HCH_DST_LEN_REM_X";			break;		
+		case HCH_DST_LEN_REM_Y		: os <<"HCH_DST_LEN_REM_Y";			break;		
+
+
+		case XWCHi_START			: os <<"XWCHi_START";				break;			
+		case XWCHi_STATUS			: os <<"XWCHi_STATUS";				break;			
+		case XWCHi_CTL				: os <<"XWCHi_CTL";					break;
+		case XWCHi_DST_START_ADDRH	: os <<"XWCHi_DST_START_ADDRH";		break;	// ofst_addr =  (1+i)*64 + 0x0c //add 2015.1.12
+		case XWCHi_SRC_START_ADDR	: os <<"XWCHi_SRC_START_ADDR";		break;	
+		case XWCHi_SRC_LEN_X		: os <<"XWCHi_SRC_LEN_X";			break;		
+		case XWCHi_SRC_ADDR_STEP	: os <<"XWCHi_SRC_ADDR_STEP";		break;	
+		case XWCHi_SRC_LEN_Y		: os <<"XWCHi_SRC_LEN_Y";			break;		
+		case XWCHi_SRC_CURR_ADDR	: os <<"XWCHi_SRC_CURR_ADDR";		break;	
+		case XWCHi_SRC_LEN_REM_X	: os <<"XWCHi_SRC_LEN_REM_X";		break;	
+		case XWCHi_SRC_LEN_REM_Y	: os <<"XWCHi_SRC_LEN_REM_Y";		break;	
+		case XWCHi_DST_START_ADDRL	: os <<"XWCHi_DST_START_ADDRL";		break;	//mod 2015.1.12
+		case XWCHi_DST_LEN_X		: os <<"XWCHi_DST_LEN_X";			break;		
+		case XWCHi_DST_ADDR_STEP	: os <<"XWCHi_DST_ADDR_STEP";		break;	
+		case XWCHi_DST_LEN_Y		: os <<"XWCHi_DST_LEN_Y";			break;		
+		case XWCHi_DST_CURR_ADDR	: os <<"XWCHi_DST_CURR_ADDR";		break;	
+		case XWCHi_DST_LEN_REM_X	: os <<"XWCHi_DST_LEN_REM_X";		break;	
+		case XWCHi_DST_LEN_REM_Y	: os <<"XWCHi_DST_LEN_REM_Y";		break;	
+		case XRCHi_START			: os <<"XRCHi_START";				break;			
+		case XRCHi_STATUS			: os <<"XRCHi_STATUS";				break;			
+		case XRCHi_CTL				: os <<"XRCHi_CTL";					break;	
+		case XRCHi_DST_START_ADDRH	: os <<"XRCHi_DST_START_ADDRH";			// ofst_addr =  (1+i)*64 + 0x2c //add 2015.1.12
+		case XRCHi_SRC_START_ADDR	: os <<"XRCHi_SRC_START_ADDR";		break;	
+		case XRCHi_LEN_X			: os <<"XRCHi_LEN_X";				break;			
+		case XRCHi_SRC_ADDR_STEP	: os <<"XRCHi_SRC_ADDR_STEP";		break;	
+		case XRCHi_SRC_LEN_Y		: os <<"XRCHi_SRC_LEN_Y";			break;		
+		case XRCHi_SRC_ADDR_CURR	: os <<"XRCHi_SRC_ADDR_CURR";		break;	
+		case XRCHi_SRC_LEN_REM_X	: os <<"XRCHi_SRC_LEN_REM_X";		break;	
+		case XRCHi_SRC_LEN_REM_Y	: os <<"XRCHi_SRC_LEN_REM_Y";		break;	
+		case XRCHi_DST_START_ADDRL	: os <<"XRCHi_DST_START_ADDRL";		break;	//mod 2015.1.12
+		case XRCHi_DST_LEN_X		: os <<"XRCHi_DST_LEN_X";			break;		
+		case XRCHi_DST_ADDR_STEP	: os <<"XRCHi_DST_ADDR_STEP";		break;	
+		case XRCHi_DST_LEN_Y		: os <<"XRCHi_DST_LEN_Y";			break;		
+		case XRCHi_DST_CURR_ADDR	: os <<"XRCHi_DST_CURR_ADDR";		break;	
+		case XRCHi_DST_LEN_REM_X	: os <<"XRCHi_DST_LEN_REM_X";		break;	
+		case XRCHi_DST_LEN_REM_Y	: os <<"XRCHi_DST_LEN_REM_Y";		break;	
+
+		case INSN_REQ_INFO			: os <<	"INSN_REQ_INFO";			break;
+		case INSN_ACK_INFO			: os <<	"INSN_ACK_INFO";			break;
+
+     //zqw+ 2019.1.11 SRIOÏà¹Ø¼Ä´æÆ÷
+		//Ð´DMA²Ù
+		case RAB_WDMA_N_CTRL        : os <<"RAB_WDMA_N_CTRL";		    break;	     	// Ð´DMA¿ØÖÆ¼Ä´æÆ÷  0x20800
+		case RAB_WDMA_N_ADDR        : os <<"RAB_WDMA_N_ADDR";		    break;	        // Ð´DMAÃèÊö·ûµØÖ·¼Ä´æÆ÷ 0x20804
+		case RAB_WDMA_N_STAT        : os <<"RAB_WDMA_N_STAT";	     	break;	        // Ð´DMA×´Ì¬¼Ä´æÆ÷ 0x20808
+		case RAB_WDMA_N_ADDR_EXT    : os <<"RAB_WDMA_N_ADDR_EXT";	    break;	        // Ð´DMA¸ßÎ»µØÖ·¼Ä´æÆ÷ 0x2080C
+		//¶ÁDMA²Ù×÷
+		case RAB_RDMA_N_CTRL        : os <<"RAB_RDMA_N_CTRL";	    	break;			// ¶ÁDMA¿ØÖÆ¼Ä´æÆ÷  0x20880
+		case RAB_RDMA_N_ADDR        : os <<"RAB_RDMA_N_ADDR";	 	    break;	        // ¶ÁDMAÃèÊö·ûµØÖ·¼Ä´æÆ÷ 0x20884
+		case RAB_RDMA_N_STAT        : os <<"RAB_RDMA_N_STAT";		    break;	        // ¶ÁDMA×´Ì¬¼Ä´æÆ÷ 0x20888
+		case RAB_RDMA_N_ADDR_EXT    : os <<"RAB_RDMA_N_ADDR_EXT";	    break;	        // ¶ÁDMA¸ßÎ»µØÖ·¼Ä´æÆ÷ 0x2088C
+		//DMAÃèÊö·û
+		case RAB_DMA_IADDR_DESC_SEL       : os <<"RAB_DMA_IADDR_DESC_SEL";		    break;		    // DMAÃèÊö·ûÑ¡Ôñ¼Ä´æÆ÷  0x20900
+		case RAB_DMA_IADDR_DESC_CTRL      : os <<"RAB_DMA_IADDR_DESC_CTRL";		    break;		    // DMAÃèÊö·û¼Ä´æÆ÷-ÃèÊö·û¿ØÖÆ¼Ä´æÆ÷  0x20904
+		case RAB_DMA_IADDR_DESC_SRC_ADDR  : os <<"RAB_DMA_IADDR_DESC_SRC_ADDR";		break;	        // DMAÃèÊö·û¼Ä´æÆ÷-Ô´µØÖ·¼Ä´æÆ÷      0x20908
+		case RAB_DMA_IADDR_DESC_DEST_ADDR : os <<"RAB_DMA_IADDR_DESC_DEST_ADDR";	break;	        // DMAÃèÊö·û¼Ä´æÆ÷-Ä¿µÄµØÖ·¼Ä´æÆ÷    0x2090C
+		case RAB_DMA_IADDR_DESC_NEXT_ADDR : os <<"RAB_DMA_IADDR_DESC_NEXT_ADDR";	break;	        // DMAÃèÊö·û¼Ä´æÆ÷-ÏÂÒ»Ö¸ÕëµØÖ·¼Ä´æÆ÷  0x209010
+			
+	    case Base_Device_ID_CSR           : os <<"Base_Device_ID_CSR";    break;           //Ö÷Éè±¸ID¼Ä´æÆ÷£¬ÓÃÓÚ´æ·ÅSource ID
+		case RAB_APB_CSR                  : os <<"RAB_APB_CSR";           break;           //RAB_APB_CSR Register£¬APB¿ØÖÆ×´Ì¬¼Ä´æÆ÷  0x20030  ÓÃÓÚ´æ·ÅÒ³ºÅ
+	}
+	return os;
+}
+
+
+extern ostream & operator << (ostream& os, const CH_NAME rn){
+	switch(rn){
+		case HCH					: os <<"AHB_CH";					break;
+		case XCH0					: os <<"XCH0";						break;
+		case XCH2					: os <<"XCH2";						break;
+		case XCH3					: os <<"XCH3";						break;
+
+	}
+
+		return os;
+}
+
+
+
+
+extern ostream & operator << (ostream& os, const task_list_type tlt){
+	
+	switch(tlt){
+		case NO_TYPE				: os << "NO_TYPE";					break;
+		case DMA_REQ				: os << "DMA_REQ";					break;
+		case DMA_ACK				: os << "DMA_ACK";					break;
+		case INSN_REQ				: os << "INSN_REQ";					break;
+		case INSN_ACK				: os << "INSN_ACK";					break;
+	}
+	return os;
+}
+
+
+
+
+
+/*
+constructor function
+*/
+reg_file::reg_file(sc_module_name mn, unsigned int CORE_ID)
+:core_id(CORE_ID){
+//,clk("clk"){
+
+	//UpdateInstanceIns.LinkToReg(this);
+
+
+	GLB_STATUS_reg .name = GLB_STATUS;	GLB_STATUS_reg	.offset_addr = 0x1;	GLB_STATUS_reg	.m_in = 0x100f3; GLB_STATUS_reg	.m_out = 0x100f3;//0x305ff ;//ofst_addr = 1
+
+	HCH_START_R				.name =	HCH_START;				HCH_START_R				.offset_addr = 0x00;	HCH_START_R				.m_out =0x0;	HCH_START_R				.m_in =0x0;			// ofst_addr =  32 + 0x00
+	HCH_STATUS_R			.name =	HCH_STATUS;				HCH_STATUS_R			.offset_addr = 0x01;	HCH_STATUS_R			.m_out =0x1;	HCH_STATUS_R			.m_in =0x1;			// ofst_addr =  32 + 0x01
+	HCH_CTL_R				.name =	HCH_CTL;				HCH_CTL_R				.offset_addr = 0x02;	HCH_CTL_R				.m_out =0x0;	HCH_CTL_R				.m_in =0x0;			// ofst_addr =  32 + 0x02
+	HCH_DST_START_ADDRH_R	.name =	HCH_DST_START_ADDRH;	HCH_DST_START_ADDRH_R	.offset_addr = 0x0c;	HCH_DST_START_ADDRH_R	.m_out =0x0;	HCH_DST_START_ADDRH_R	.m_in =0x0;			// ofst_addr =  32 + 0x0c //add 2015.1.12				
+																																					
+	HCH_SRC_START_ADDR_R	.name =	HCH_SRC_START_ADDR;		HCH_SRC_START_ADDR_R	.offset_addr = 0x10;	HCH_SRC_START_ADDR_R	.m_out =0x0;	HCH_SRC_START_ADDR_R	.m_in =0x0;			// ofst_addr =  32 + 0x10
+	HCH_SRC_LEN_X_R			.name =	HCH_SRC_LEN_X;			HCH_SRC_LEN_X_R			.offset_addr = 0x11;	HCH_SRC_LEN_X_R			.m_out =0x0;	HCH_SRC_LEN_X_R			.m_in =0x0;			// ofst_addr =  32 + 0x11
+	HCH_SRC_ADDR_STEP_R		.name =	HCH_SRC_ADDR_STEP;		HCH_SRC_ADDR_STEP_R		.offset_addr = 0x12;	HCH_SRC_ADDR_STEP_R		.m_out =0x0;	HCH_SRC_ADDR_STEP_R		.m_in =0x0;			// ofst_addr =  32 + 0x12
+	HCH_SRC_LEN_Y_R			.name =	HCH_SRC_LEN_Y;			HCH_SRC_LEN_Y_R			.offset_addr = 0x13;	HCH_SRC_LEN_Y_R			.m_out =0x0;	HCH_SRC_LEN_Y_R			.m_in =0x0;			// ofst_addr =  32 + 0x13
+	HCH_SRC_CURR_ADDR_R		.name =	HCH_SRC_CURR_ADDR;		HCH_SRC_CURR_ADDR_R		.offset_addr = 0x14;	HCH_SRC_CURR_ADDR_R		.m_out =0x0;	HCH_SRC_CURR_ADDR_R		.m_in =0x0;			// ofst_addr =  32 + 0x14
+	HCH_SRC_LEN_REM_X_R		.name =	HCH_SRC_LEN_REM_X;		HCH_SRC_LEN_REM_X_R		.offset_addr = 0x15;	HCH_SRC_LEN_REM_X_R		.m_out =0x0;	HCH_SRC_LEN_REM_X_R		.m_in =0x0;			// ofst_addr =  32 + 0x15
+	HCH_SRC_LEN_REM_Y_R		.name =	HCH_SRC_LEN_REM_Y;		HCH_SRC_LEN_REM_Y_R		.offset_addr = 0x16;	HCH_SRC_LEN_REM_Y_R		.m_out =0x0;	HCH_SRC_LEN_REM_Y_R		.m_in =0x0;			// ofst_addr =  32 + 0x16
+	HCH_DST_START_ADDRL_R	.name =	HCH_DST_START_ADDRL;	HCH_DST_START_ADDRL_R	.offset_addr = 0x18;	HCH_DST_START_ADDRL_R	.m_out =0x0;	HCH_DST_START_ADDRL_R	.m_in =0x0;			// ofst_addr =  32 + 0x18 //mod 2015.1.12
+	HCH_DST_LEN_X_R			.name =	HCH_DST_LEN_X;			HCH_DST_LEN_X_R			.offset_addr = 0x19;	HCH_DST_LEN_X_R			.m_out =0x0;	HCH_DST_LEN_X_R			.m_in =0x0;			// ofst_addr =  32 + 0x19
+	HCH_DST_ADDR_STEP_R		.name =	HCH_DST_ADDR_STEP;		HCH_DST_ADDR_STEP_R		.offset_addr = 0x1a;	HCH_DST_ADDR_STEP_R		.m_out =0x0;	HCH_DST_ADDR_STEP_R		.m_in =0x0;			// ofst_addr =  32 + 0x1a
+	HCH_DST_LEN_Y_R			.name =	HCH_DST_LEN_Y;			HCH_DST_LEN_Y_R			.offset_addr = 0x1b;	HCH_DST_LEN_Y_R			.m_out =0x0;	HCH_DST_LEN_Y_R			.m_in =0x0;			// ofst_addr =  32 + 0x1b
+	HCH_DST_CURR_ADDR_R		.name =	HCH_DST_CURR_ADDR;		HCH_DST_CURR_ADDR_R		.offset_addr = 0x1c;	HCH_DST_CURR_ADDR_R		.m_out =0x0;	HCH_DST_CURR_ADDR_R		.m_in =0x0;			// ofst_addr =  32 + 0x1c
+	HCH_DST_LEN_REM_X_R		.name =	HCH_DST_LEN_REM_X;		HCH_DST_LEN_REM_X_R		.offset_addr = 0x1d;	HCH_DST_LEN_REM_X_R		.m_out =0x0;	HCH_DST_LEN_REM_X_R		.m_in =0x0;			// ofst_addr =  32 + 0x1d
+	HCH_DST_LEN_REM_Y_R		.name =	HCH_DST_LEN_REM_Y;		HCH_DST_LEN_REM_Y_R		.offset_addr = 0x1e;	HCH_DST_LEN_REM_Y_R		.m_out =0x0;	HCH_DST_LEN_REM_Y_R		.m_in =0x0;			// ofst_addr =  32 + 0x1e
+
+
+
+ for(int i = 0; i != CHANNEL_NUM; i++ ){
+	XWCHi_START_R[i]				.name = XWCHi_START;			XWCHi_START_R[i]				.offset_addr =  0x00;		XWCHi_START_R[i]				.m_out = 0x0;	XWCHi_START_R[i]				.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x00
+	XWCHi_STATUS_R[i]				.name = XWCHi_STATUS;			XWCHi_STATUS_R[i]				.offset_addr =  0x01;		XWCHi_STATUS_R[i]				.m_out = 0x1;	XWCHi_STATUS_R[i]				.m_in = 0x1;// ofst_addr =	(1+i)*64 + 0x01
+	XWCHi_CTL_R[i]					.name =	XWCHi_CTL;				XWCHi_CTL_R[i]					.offset_addr =  0x02;		XWCHi_CTL_R[i]					.m_out = 0x0;	XWCHi_CTL_R[i]					.m_in = 0x0;// ofst_addr =	(1+i)*64 + 0x02
+	XWCHi_DST_START_ADDRH_R[i]		.name =	XWCHi_DST_START_ADDRH;	XWCHi_DST_START_ADDRH_R[i]		.offset_addr =  0x0c;		XWCHi_DST_START_ADDRH_R[i]		.m_out = 0x0;	XWCHi_DST_START_ADDRH_R[i]		.m_in = 0x0;// ofst_addr =	(1+i)*64 + 0x0c  //add 2015.1.12	
+	XWCHi_SRC_START_ADDR_R[i]		.name = XWCHi_SRC_START_ADDR;	XWCHi_SRC_START_ADDR_R[i]		.offset_addr =  0x10;		XWCHi_SRC_START_ADDR_R[i]		.m_out = 0x0;	XWCHi_SRC_START_ADDR_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x10
+	XWCHi_SRC_LEN_X_R[i]			.name = XWCHi_SRC_LEN_X;		XWCHi_SRC_LEN_X_R[i]			.offset_addr =  0x11;		XWCHi_SRC_LEN_X_R[i]			.m_out = 0x0;	XWCHi_SRC_LEN_X_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x11
+	XWCHi_SRC_ADDR_STEP_R[i]		.name = XWCHi_SRC_ADDR_STEP;	XWCHi_SRC_ADDR_STEP_R[i]		.offset_addr =  0x12;		XWCHi_SRC_ADDR_STEP_R[i]		.m_out = 0x0;	XWCHi_SRC_ADDR_STEP_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x12
+	XWCHi_SRC_LEN_Y_R[i]			.name = XWCHi_SRC_LEN_Y;		XWCHi_SRC_LEN_Y_R[i]			.offset_addr =  0x13;		XWCHi_SRC_LEN_Y_R[i]			.m_out = 0x0;	XWCHi_SRC_LEN_Y_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x13
+	XWCHi_SRC_CURR_ADDR_R[i]		.name = XWCHi_SRC_CURR_ADDR;	XWCHi_SRC_CURR_ADDR_R[i]		.offset_addr =  0x14;		XWCHi_SRC_CURR_ADDR_R[i]		.m_out = 0x0;	XWCHi_SRC_CURR_ADDR_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x14
+	XWCHi_SRC_LEN_REM_X_R[i]		.name = XWCHi_SRC_LEN_REM_X;	XWCHi_SRC_LEN_REM_X_R[i]		.offset_addr =  0x15;		XWCHi_SRC_LEN_REM_X_R[i]		.m_out = 0x0;	XWCHi_SRC_LEN_REM_X_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x15
+	XWCHi_SRC_LEN_REM_Y_R[i]		.name = XWCHi_SRC_LEN_REM_Y;	XWCHi_SRC_LEN_REM_Y_R[i]		.offset_addr =  0x16;		XWCHi_SRC_LEN_REM_Y_R[i]		.m_out = 0x0;	XWCHi_SRC_LEN_REM_Y_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x16
+	XWCHi_DST_START_ADDRL_R[i]		.name = XWCHi_DST_START_ADDRL;	XWCHi_DST_START_ADDRL_R[i]		.offset_addr =  0x18;		XWCHi_DST_START_ADDRL_R[i]		.m_out = 0x0;	XWCHi_DST_START_ADDRL_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x18 //mod 2015.1.12
+	XWCHi_DST_LEN_X_R[i]			.name = XWCHi_DST_LEN_X;		XWCHi_DST_LEN_X_R[i]			.offset_addr =  0x19;		XWCHi_DST_LEN_X_R[i]			.m_out = 0x0;	XWCHi_DST_LEN_X_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x19
+	XWCHi_DST_ADDR_STEP_R[i]		.name = XWCHi_DST_ADDR_STEP;	XWCHi_DST_ADDR_STEP_R[i]		.offset_addr =  0x1a;		XWCHi_DST_ADDR_STEP_R[i]		.m_out = 0x0;	XWCHi_DST_ADDR_STEP_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x1a
+	XWCHi_DST_LEN_Y_R[i]			.name = XWCHi_DST_LEN_Y;		XWCHi_DST_LEN_Y_R[i]			.offset_addr =  0x1b;		XWCHi_DST_LEN_Y_R[i]			.m_out = 0x0;	XWCHi_DST_LEN_Y_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x1b
+	XWCHi_DST_CURR_ADDR_R[i]		.name = XWCHi_DST_CURR_ADDR;	XWCHi_DST_CURR_ADDR_R[i]		.offset_addr =  0x1c;		XWCHi_DST_CURR_ADDR_R[i]		.m_out = 0x0;	XWCHi_DST_CURR_ADDR_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x1c
+	XWCHi_DST_LEN_REM_X_R[i]		.name = XWCHi_DST_LEN_REM_X;	XWCHi_DST_LEN_REM_X_R[i]		.offset_addr =  0x1d;		XWCHi_DST_LEN_REM_X_R[i]		.m_out = 0x0;	XWCHi_DST_LEN_REM_X_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x1d
+	XWCHi_DST_LEN_REM_Y_R[i]		.name =	XWCHi_DST_LEN_REM_Y;	XWCHi_DST_LEN_REM_Y_R[i]		.offset_addr =  0x1e;		XWCHi_DST_LEN_REM_Y_R[i]		.m_out = 0x0;	XWCHi_DST_LEN_REM_Y_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x1e
+																																												
+	XRCHi_START_R[i]				.name = XRCHi_START;			XRCHi_START_R[i]				.offset_addr =  0x20;		XRCHi_START_R[i]				.m_out = 0x0;	XRCHi_START_R[i]				.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x20
+	XRCHi_STATUS_R[i]				.name = XRCHi_STATUS;			XRCHi_STATUS_R[i]				.offset_addr =  0x21;		XRCHi_STATUS_R[i]				.m_out = 0x1;	XRCHi_STATUS_R[i]				.m_in = 0x1;// ofst_addr =  (1+i)*64 + 0x21
+	XRCHi_CTL_R[i]					.name = XRCHi_CTL;				XRCHi_CTL_R[i]					.offset_addr =  0x22;		XRCHi_CTL_R[i]					.m_out = 0x0;	XRCHi_CTL_R[i]					.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x22
+	XRCHi_DST_START_ADDRH_R[i]		.name = XRCHi_DST_START_ADDRH;	XRCHi_DST_START_ADDRH_R[i]		.offset_addr =  0x2c;		XRCHi_DST_START_ADDRH_R[i]		.m_out = 0x0;	XRCHi_DST_START_ADDRH_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x2c //add 2015.1.12	
+	XRCHi_SRC_START_ADDR_R[i]		.name = XRCHi_SRC_START_ADDR;	XRCHi_SRC_START_ADDR_R[i]		.offset_addr =  0x30;		XRCHi_SRC_START_ADDR_R[i]		.m_out = 0x0;	XRCHi_SRC_START_ADDR_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x30
+	XRCHi_SRC_LEN_X_R[i]			.name = XRCHi_LEN_X;			XRCHi_SRC_LEN_X_R[i]			.offset_addr =  0x31;		XRCHi_SRC_LEN_X_R[i]			.m_out = 0x0;	XRCHi_SRC_LEN_X_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x31
+	XRCHi_SRC_ADDR_STEP_R[i]		.name = XRCHi_SRC_ADDR_STEP;	XRCHi_SRC_ADDR_STEP_R[i]		.offset_addr =  0x32;		XRCHi_SRC_ADDR_STEP_R[i]		.m_out = 0x0;	XRCHi_SRC_ADDR_STEP_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x32
+	XRCHi_SRC_LEN_Y_R[i]			.name = XRCHi_SRC_LEN_Y;		XRCHi_SRC_LEN_Y_R[i]			.offset_addr =  0x33;		XRCHi_SRC_LEN_Y_R[i]			.m_out = 0x0;	XRCHi_SRC_LEN_Y_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x33
+	XRCHi_SRC_ADDR_CURR_R[i]		.name = XRCHi_SRC_ADDR_CURR;	XRCHi_SRC_ADDR_CURR_R[i]		.offset_addr =  0x34;		XRCHi_SRC_ADDR_CURR_R[i]		.m_out = 0x0;	XRCHi_SRC_ADDR_CURR_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x34
+	XRCHi_SRC_LEN_REM_X_R[i]		.name = XRCHi_SRC_LEN_REM_X;	XRCHi_SRC_LEN_REM_X_R[i]		.offset_addr =  0x35;		XRCHi_SRC_LEN_REM_X_R[i]		.m_out = 0x0;	XRCHi_SRC_LEN_REM_X_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x35
+	XRCHi_SRC_LEN_REM_Y_R[i]		.name = XRCHi_SRC_LEN_REM_Y;	XRCHi_SRC_LEN_REM_Y_R[i]		.offset_addr =  0x36;		XRCHi_SRC_LEN_REM_Y_R[i]		.m_out = 0x0;	XRCHi_SRC_LEN_REM_Y_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x36
+	XRCHi_DST_START_ADDRL_R[i]		.name = XRCHi_DST_START_ADDRL;	XRCHi_DST_START_ADDRL_R[i]		.offset_addr =  0x38;		XRCHi_DST_START_ADDRL_R[i]		.m_out = 0x0;	XRCHi_DST_START_ADDRL_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x38 //mod 2015.1.12
+	XRCHi_DST_LEN_X_R[i]			.name = XRCHi_DST_LEN_X;		XRCHi_DST_LEN_X_R[i]			.offset_addr =  0x39;		XRCHi_DST_LEN_X_R[i]			.m_out = 0x0;	XRCHi_DST_LEN_X_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x39
+	XRCHi_DST_ADDR_STEP_R[i]		.name = XRCHi_DST_ADDR_STEP;	XRCHi_DST_ADDR_STEP_R[i]		.offset_addr =  0x3a;		XRCHi_DST_ADDR_STEP_R[i]		.m_out = 0x0;	XRCHi_DST_ADDR_STEP_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x3a
+	XRCHi_DST_LEN_Y_R[i]			.name = XRCHi_DST_LEN_Y;		XRCHi_DST_LEN_Y_R[i]			.offset_addr =  0x3b;		XRCHi_DST_LEN_Y_R[i]			.m_out = 0x0;	XRCHi_DST_LEN_Y_R[i]			.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x3b
+	XRCHi_DST_CURR_ADDR_R[i]		.name = XRCHi_DST_CURR_ADDR;	XRCHi_DST_CURR_ADDR_R[i]		.offset_addr =  0x3c;		XRCHi_DST_CURR_ADDR_R[i]		.m_out = 0x0;	XRCHi_DST_CURR_ADDR_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x3c
+	XRCHi_DST_LEN_REM_X_R[i]		.name = XRCHi_DST_LEN_REM_X;	XRCHi_DST_LEN_REM_X_R[i]		.offset_addr =  0x3d;		XRCHi_DST_LEN_REM_X_R[i]		.m_out = 0x0;	XRCHi_DST_LEN_REM_X_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x3d
+	XRCHi_DST_LEN_REM_Y_R[i]		.name = XRCHi_DST_LEN_REM_Y;	XRCHi_DST_LEN_REM_Y_R[i]		.offset_addr =  0x3e;		XRCHi_DST_LEN_REM_Y_R[i]		.m_out = 0x0;	XRCHi_DST_LEN_REM_Y_R[i]		.m_in = 0x0;// ofst_addr =  (1+i)*64 + 0x3e
+																																												
+	DMA_WR_MISSION_START[i].write(0);
+	DMA_RD_MISSION_START[i].write(0);
+ 
+ }
+
+ //zqw+ 2019.1.11 SRIOÏà¹Ø¼Ä´æÆ÷
+ for(int i = 0; i != SRIO_NUM; i++ ){
+	
+	 //Ð´DMA²Ù×÷
+	 RAB_WDMA_N_CTRL_R[i]        .name = RAB_WDMA_N_CTRL;	    RAB_WDMA_N_CTRL_R[i]		.offset_addr =  0x200;		RAB_WDMA_N_CTRL_R[i]		.m_out = 0x0;	RAB_WDMA_N_CTRL_R[i]		.m_in = 0x0;			
+	 RAB_WDMA_N_ADDR_R[i]        .name =RAB_WDMA_N_ADDR;	    RAB_WDMA_N_ADDR_R[i]		.offset_addr =  0x201;		RAB_WDMA_N_ADDR_R[i]		.m_out = 0x0;	RAB_WDMA_N_ADDR_R[i]		.m_in = 0x0;		   
+	 RAB_WDMA_N_STAT_R[i]        .name =RAB_WDMA_N_STAT;	    RAB_WDMA_N_STAT_R[i]		.offset_addr =  0x202;		RAB_WDMA_N_STAT_R[i]		.m_out = 0x0;	RAB_WDMA_N_STAT_R[i]		.m_in = 0x0;		 
+	 RAB_WDMA_N_ADDR_EXT_R[i]    .name =RAB_WDMA_N_ADDR_EXT;	RAB_WDMA_N_ADDR_EXT_R[i]	.offset_addr =  0x203;		RAB_WDMA_N_ADDR_EXT_R[i]	.m_out = 0x0;	RAB_WDMA_N_ADDR_EXT_R[i]	.m_in = 0x0;		  	 
+	 //¶ÁDMA²Ù×÷
+	 RAB_RDMA_N_CTRL_R[i]        .name =RAB_RDMA_N_CTRL;	    RAB_RDMA_N_CTRL_R[i]		.offset_addr =  0x220;		RAB_RDMA_N_CTRL_R[i]		.m_out = 0x0;	RAB_RDMA_N_CTRL_R[i]		.m_in = 0x0;		 
+	 RAB_RDMA_N_ADDR_R[i]        .name =RAB_RDMA_N_ADDR;	    RAB_RDMA_N_ADDR_R[i]		.offset_addr =  0x221;		RAB_RDMA_N_ADDR_R[i]		.m_out = 0x0;	RAB_RDMA_N_ADDR_R[i]		.m_in = 0x0;		 
+	 RAB_RDMA_N_STAT_R[i]        .name =RAB_RDMA_N_STAT;	    RAB_RDMA_N_STAT_R[i]		.offset_addr =  0x222;		RAB_RDMA_N_STAT_R[i]		.m_out = 0x0;	RAB_RDMA_N_STAT_R[i]		.m_in = 0x0;		 
+	 RAB_RDMA_N_ADDR_EXT_R[i]    .name =RAB_RDMA_N_ADDR_EXT;    RAB_RDMA_N_ADDR_EXT_R[i]	.offset_addr =  0x223;		RAB_RDMA_N_ADDR_EXT_R[i]	.m_out = 0x0;	RAB_RDMA_N_ADDR_EXT_R[i]	.m_in = 0x0;		 
+	 //DMAÃèÊö·û  
+	 RAB_DMA_IADDR_DESC_SEL_R[i]             .name =RAB_DMA_IADDR_DESC_SEL;	            RAB_DMA_IADDR_DESC_SEL_R[i]		        .offset_addr =  0x240;		RAB_DMA_IADDR_DESC_SEL_R[i]		    .m_out = 0x0;	RAB_DMA_IADDR_DESC_SEL_R[i]		    .m_in = 0x0;		 
+	 RAB_DMA_IADDR_DESC_CTRL_R[i]            .name =RAB_DMA_IADDR_DESC_CTRL;	        RAB_DMA_IADDR_DESC_CTRL_R[i]		    .offset_addr =  0x241;		RAB_DMA_IADDR_DESC_CTRL_R[i]		.m_out = 0x0;	RAB_DMA_IADDR_DESC_CTRL_R[i]		.m_in = 0x0;		 
+	 RAB_DMA_IADDR_DESC_SRC_ADDR_R[i]        .name =RAB_DMA_IADDR_DESC_SRC_ADDR;	    RAB_DMA_IADDR_DESC_SRC_ADDR_R[i]		.offset_addr =  0x242;		RAB_DMA_IADDR_DESC_SRC_ADDR_R[i]    .m_out = 0x0;	RAB_DMA_IADDR_DESC_SRC_ADDR_R[i]	.m_in = 0x0;		 
+	 RAB_DMA_IADDR_DESC_DEST_ADDR_R[i]       .name =RAB_DMA_IADDR_DESC_DEST_ADDR;	    RAB_DMA_IADDR_DESC_DEST_ADDR_R[i]		.offset_addr =  0x243;		RAB_DMA_IADDR_DESC_DEST_ADDR_R[i]	.m_out = 0x0;	RAB_DMA_IADDR_DESC_DEST_ADDR_R[i]	.m_in = 0x0;		 
+	 RAB_DMA_IADDR_DESC_NEXT_ADDR_R[i]       .name =RAB_DMA_IADDR_DESC_NEXT_ADDR;	    RAB_DMA_IADDR_DESC_NEXT_ADDR_R[i]		.offset_addr =  0x244;		RAB_DMA_IADDR_DESC_NEXT_ADDR_R[i]	.m_out = 0x0;	RAB_DMA_IADDR_DESC_NEXT_ADDR_R[i]	.m_in = 0x0;		 
+	
+	 //zqw+ 2019.2.25 Ö÷Éè±¸ID¼Ä´æÆ÷¡¢Ò³ºÅ
+	 Base_Device_ID_CSR_R[i]                 .name =Base_Device_ID_CSR;	                Base_Device_ID_CSR_R[i]                 .offset_addr =  0x218;	    Base_Device_ID_CSR_R[i]             .m_out = 0x0;   Base_Device_ID_CSR_R[i]              .m_in = 0x0;
+	 RAB_APB_CSR_R[i]                        .name =RAB_APB_CSR;	                    RAB_APB_CSR_R[i]                        .offset_addr =  0xc;	    RAB_APB_CSR_R[i]                    .m_out = 0x0;   RAB_APB_CSR_R[i]                     .m_in = 0x0;
+ }
+
+
+	for(int i = 0; i != CHANNEL_NUM; i++){
+		for(int j = 0; j != TASK_TYPE_NUM; j++){
+							  TASK_LIST[i][j].channel_id = i;
+			switch(j){
+			case DMA_REQ	: TASK_LIST[i][j].type = DMA_REQ;			break;
+			case DMA_ACK	: TASK_LIST[i][j].type = DMA_ACK;			break;
+			case INSN_REQ	: TASK_LIST[i][j].type = INSN_REQ;			break;
+			case INSN_ACK	: TASK_LIST[i][j].type = INSN_ACK;			break;
+			default:break;
+			}
+		}
+	}
+}
+
+
+
+
+void reg_file::dma_wr_mission_start(unsigned int ch_id){
+	DMA_WR_MISSION_START[ch_id].write(1);
+}
+
+void reg_file::dma_rd_mission_start(unsigned int ch_id){
+			DMA_RD_MISSION_START[ch_id].write(1);
+}
+
+void reg_file::dma_wr_mission_reset(unsigned int ch_id){
+			DMA_WR_MISSION_START[ch_id].write(0);
+}
+void reg_file::dma_rd_mission_reset(unsigned int ch_id){
+			DMA_RD_MISSION_START[ch_id].write(0);
+}
+
+
+
+
+/*
+read regs by reg_name and ch_id,
+serve master and slave port
+*/
+
+/*
+unsigned int reg_file::read_reg(reg_name rn, CH_NAME ch_id){
+	
+	unsigned int CH_ID =  ch_id; //because enum CH_NAME = {HCH = 0,	//XCH0 =1,		XCH1,		XCH2 ,XCH3};
+
+	switch(rn){
+//---------------------------------------------------global reg start
+		case GLB_STATUS:{
+			return GLB_STATUS_reg.read();
+			break;
+						}
+//----------------------------------------------------AHB ctrl regs
+		case HCH_START:{
+			return HCH_START_R.read();
+			break;
+						}
+		case HCH_STATUS:{
+			return HCH_STATUS_R.read();
+			break;
+			  }
+		case HCH_CTL:{
+			return HCH_CTL_R.read();
+			break;
+			  }
+		case HCH_SRC_START_ADDR:{
+			return HCH_SRC_START_ADDR_R.read();
+			break;
+			  }
+		case HCH_SRC_LEN_X:{
+			return HCH_SRC_LEN_X_R.read();
+			break;
+			  }
+		case HCH_SRC_ADDR_STEP:{
+			return HCH_SRC_ADDR_STEP_R.read();
+			break;
+			  }
+		case HCH_SRC_LEN_Y:{
+			return HCH_SRC_LEN_Y_R.read();
+			break;
+			  }
+		case HCH_SRC_CURR_ADDR:{
+			return HCH_SRC_CURR_ADDR_R.read();
+			break;
+			  }
+		case HCH_SRC_LEN_REM_X:{
+			return HCH_SRC_LEN_REM_X_R.read();
+			break;
+			  }
+		case HCH_SRC_LEN_REM_Y:{
+			return HCH_SRC_LEN_REM_Y_R.read();
+			break;
+			  }
+		case HCH_DST_START_ADDR:{
+			return HCH_DST_START_ADDR_R.read();
+			break;
+			  }
+		case HCH_DST_LEN_X:{
+			return HCH_DST_LEN_X_R.read();
+			break;
+			  }
+		case HCH_DST_ADDR_STEP:{
+			return HCH_DST_ADDR_STEP_R.read();
+			break;
+			  }
+		case HCH_DST_LEN_Y:{
+			return HCH_DST_LEN_Y_R.read();
+			break;
+			  }
+		case HCH_DST_CURR_ADDR:{
+			return HCH_DST_CURR_ADDR_R.read();
+			break;
+			  }
+		case HCH_DST_LEN_REM_X:{
+			return HCH_DST_LEN_REM_X_R.read();
+			break;
+			  }
+		case HCH_DST_LEN_REM_Y:{
+			return HCH_DST_LEN_REM_Y_R.read();
+			break;
+			  }
+//----------------------------------------------------XCH ctrl regs
+		case XWCHi_START:{
+			return XWCHi_START_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_STATUS:{
+			return XWCHi_STATUS_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_CTL:{
+			return XWCHi_CTL_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_START_ADDR:{
+			return XWCHi_SRC_START_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_LEN_X:{
+			return XWCHi_SRC_LEN_X_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_ADDR_STEP:{
+			return XWCHi_SRC_ADDR_STEP_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_LEN_Y:{
+			return XWCHi_SRC_LEN_Y_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_CURR_ADDR:{
+			return XWCHi_SRC_CURR_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_LEN_REM_X:{
+			return XWCHi_SRC_LEN_REM_X_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_SRC_LEN_REM_Y:{
+			return XWCHi_SRC_LEN_REM_Y_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_START_ADDR:{
+			return XWCHi_DST_START_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_LEN_X:{
+			return XWCHi_DST_LEN_X_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_ADDR_STEP:{
+			return XWCHi_DST_ADDR_STEP_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_LEN_Y:{
+			return XWCHi_DST_LEN_Y_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_CURR_ADDR:{
+			return XWCHi_DST_CURR_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_LEN_REM_X:{
+			return XWCHi_DST_LEN_REM_X_R[CH_ID].read();
+			break;
+			  }
+		case XWCHi_DST_LEN_REM_Y:{
+			return XWCHi_DST_LEN_REM_Y_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_START:{
+			return XRCHi_START_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_STATUS:{
+			return XRCHi_STATUS_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_CTL:{
+			return XRCHi_CTL_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_SRC_START_ADDR:{
+			return XRCHi_SRC_START_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_LEN_X:{
+			return XRCHi_LEN_X_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_SRC_ADDR_STEP:{
+			return XRCHi_SRC_ADDR_STEP_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_SRC_LEN_Y:{
+			return XRCHi_SRC_LEN_Y_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_SRC_ADDR_CURR:{
+			return XRCHi_SRC_ADDR_CURR_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_SRC_LEN_REM_X:{
+			return XRCHi_SRC_LEN_REM_X_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_SRC_LEN_REM_Y:{
+			return XRCHi_SRC_LEN_REM_Y_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_START_ADDR:{
+			return XRCHi_DST_START_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_LEN_X:{
+			return XRCHi_DST_LEN_X_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_ADDR_STEP:{
+			return XRCHi_DST_ADDR_STEP_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_LEN_Y:{
+			return XRCHi_DST_LEN_Y_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_CURR_ADDR:{
+			return XRCHi_DST_CURR_ADDR_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_LEN_REM_X:{
+			return XRCHi_DST_LEN_REM_X_R[CH_ID].read();
+			break;
+			  }
+		case XRCHi_DST_LEN_REM_Y:{
+			return XRCHi_DST_LEN_REM_Y_R[CH_ID].read();
+			break;
+								 }		
+			default:{
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur, reg_name arg get in read_reg() is not define!!")
+			return -1;
+			break;
+				}
+	}
+}
+
+
+
+*/
+
+
+/*
+read regs by reg_addr, serve core rw_regs
+*/
+bool reg_file::read_reg(unsigned int addr, unsigned int & result,bool JtagFlag){
+
+	unsigned int ofset;
+	unsigned int CH_ID;
+
+
+//-------------------------------------------------global reg start
+	if(addr >= Global_Start_Addr_reg && addr<= Global_End_Addr_reg){
+		switch(addr - Global_Start_Addr_reg){
+case 0x1: 
+	result = GLB_STATUS_reg.read() & GLB_STATUS_MASK; 
+	return true; 
+	break;
+default:
+ERROR_REPORT_REG(" error occur, global reg addr not find!!")
+	return false;
+	break;				
+		}
+	}
+//-------------------------------------------------global reg end and ch_reg start
+
+	if(addr >= HMCH0_Start_Addr_reg && addr <= HMCH0_End_Addr_reg){
+
+		ofset = addr - HMCH0_Start_Addr_reg;
+
+		switch(ofset){
+
+			case 0x00:{
+				result = HCH_START_R.read() & XX_START_MASK;
+				return true;
+				break;	
+					  }
+			case 0x01:{
+				result = HCH_STATUS_R.read() & XX_STATUS_MASK;
+				return true;
+				break;	
+					  }
+			case 0x02:{
+				result = HCH_CTL_R.read() & H_CTL_MASK;
+				return true;
+				break;	
+					  }
+			case 0x0c:{
+				result = HCH_DST_START_ADDRH_R.read() & XX_DST_START_ADDRH_MASK;
+				return true;
+				break;	
+					  }
+
+			case 0x10:{
+				result = HCH_SRC_START_ADDR_R.read() & XX_SRC_START_ADDR_MASK;
+				return true;
+				break;	
+					  }
+			case 0x11:{
+				result = HCH_SRC_LEN_X_R.read() & XX_SRC_LEN_X_MASK;
+				return true;
+				break;	
+					  }
+			case 0x12:{
+				result = HCH_SRC_ADDR_STEP_R.read() & XX_SRC_ADDR_STEP_MASK;
+				return true;
+				break;	
+					  }
+			case 0x13:{
+				result = HCH_SRC_LEN_Y_R.read() & XX_SRC_LEN_Y_MASK;
+				return true;
+				break;	
+					  }
+			case 0x14:{
+				result = HCH_SRC_CURR_ADDR_R.read() & XX_SRC_CURR_ADDR_MASK;
+				return true;
+				break;	
+					  }
+			case 0x15:{
+				result = HCH_SRC_LEN_REM_X_R.read() & XX_SRC_LEN_REM_X_MASK;
+				return true;
+				break;	
+					  }
+			case 0x16:{
+				result = HCH_SRC_LEN_REM_Y_R.read() & XX_SRC_LEN_REM_Y_MASK; 
+				return true;
+				break;	
+					  }
+			case 0x18:{
+				result = HCH_DST_START_ADDRL_R.read() & XX_DST_START_ADDRL_MASK;
+				return true;
+				break;	
+					  }
+			case 0x19:{
+				result = HCH_DST_LEN_X_R.read() & XX_DST_LEN_X_MASK;
+				return true;
+				break;	
+					  }
+			case 0x1a:{
+				result = HCH_DST_ADDR_STEP_R.read() & XX_DST_ADDR_STEP_MASK;
+				return true;
+				break;	
+					  }
+			case 0x1b:{
+				result = HCH_DST_LEN_Y_R.read() & XX_DST_LEN_Y_MASK;
+				return true;
+				break;	
+					  }
+			case 0x1c:{
+				result = HCH_DST_CURR_ADDR_R.read() & XX_DST_CURR_ADDR_MASK;
+				return true;
+				break;	
+					  }
+			case 0x1d:{
+				result = HCH_DST_LEN_REM_X_R.read() & XX_DST_LEN_REM_X_MASK;
+				return true;
+				break;	
+					  }
+			case 0x1e:{
+				result = HCH_DST_LEN_REM_Y_R.read() & XX_DST_LEN_REM_Y_MASK;
+				return true;
+				break;	
+					  }
+			default:
+ERROR_REPORT_REG(" error occur, AHB ctrl reg addr not find!!")
+				return false;
+				break;
+		}
+	}
+
+	if(addr >= XMCH0_Start_Addr_reg && addr <= XMCH3_End_Addr_reg){
+		if(addr >= XMCH0_Start_Addr_reg && addr <= XMCH0_End_Addr_reg){
+			CH_ID = 0;
+		}else if(addr >= XMCH2_Start_Addr_reg && addr <= XMCH2_End_Addr_reg){
+			CH_ID = 2;
+		}
+		else if (addr >= XMCH3_Start_Addr_reg && addr <= XMCH3_End_Addr_reg){
+			CH_ID = 3;
+		}		
+		
+		switch (CH_ID){
+			case 0: ofset = addr -  XMCH0_Start_Addr_reg ;break;
+			case 2: ofset = addr -  XMCH2_Start_Addr_reg ;break;
+			case 3: ofset = addr -  XMCH3_Start_Addr_reg ;break;				
+			default: 
+			return false;
+ERROR_REPORT_REG(" error occur, XCH CH_ID not find!!")				
+				break;
+		}
+
+		switch(ofset){
+
+			case 0x00:{
+				result = XWCHi_START_R[CH_ID].read() & XX_START_MASK;
+				return true;
+				break;
+					  }
+			case 0x01:{
+				result = XWCHi_STATUS_R[CH_ID]	.read() & XX_STATUS_MASK;
+				return true;
+				break;
+				  }
+			case 0x02:{
+				if(CH_ID == 0){
+				result = XWCHi_CTL_R[CH_ID]	.read() & X_0_CTL_MASK;
+				}else{
+				result = XWCHi_CTL_R[CH_ID]	.read() & X_23_CTL_MASK;
+				}
+				//result = XWCHi_CTL_R[CH_ID]	.read() & XX_CTL_MASK;
+				return true;
+				break;
+				  }
+			case 0x0c:{
+				result = XWCHi_DST_START_ADDRH_R[CH_ID]	.read() & XX_DST_START_ADDRH_MASK;
+				return true;
+				break;
+					  }
+			case 0x10:{
+				result = XWCHi_SRC_START_ADDR_R[CH_ID].read() & XX_SRC_START_ADDR_MASK;
+				return true;
+				break;
+				  }
+			case 0x11:{
+				result = XWCHi_SRC_LEN_X_R[CH_ID].read() & XX_SRC_LEN_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x12:{
+				result = XWCHi_SRC_ADDR_STEP_R[CH_ID]	.read() & XX_SRC_ADDR_STEP_MASK;
+				return true;
+				break;
+				  }
+			case 0x13:{
+				result = XWCHi_SRC_LEN_Y_R[CH_ID].read() & XX_SRC_LEN_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x14:{
+				result = XWCHi_SRC_CURR_ADDR_R[CH_ID].read() & XX_SRC_CURR_ADDR_MASK;
+				return true;
+				break;
+				  }
+			case 0x15:{
+				result = XWCHi_SRC_LEN_REM_X_R[CH_ID].read() & XX_SRC_LEN_REM_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x16:{
+				result = XWCHi_SRC_LEN_REM_Y_R[CH_ID].read() & XX_SRC_LEN_REM_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x18:{
+				result = XWCHi_DST_START_ADDRL_R[CH_ID].read() & XX_DST_START_ADDRL_MASK;
+				return true;
+				break;
+				  }
+			case 0x19:{
+				result = XWCHi_DST_LEN_X_R[CH_ID].read() & XX_DST_LEN_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x1a:{
+				result = XWCHi_DST_ADDR_STEP_R[CH_ID].read() & XX_DST_ADDR_STEP_MASK;
+				return true;
+				break;
+				  }
+			case 0x1b:{
+				result = XWCHi_DST_LEN_Y_R[CH_ID].read() & XX_DST_LEN_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x1c:{
+				result = XWCHi_DST_CURR_ADDR_R[CH_ID].read() & XX_DST_CURR_ADDR_MASK;
+				return true;
+				break;
+				  }
+			case 0x1d:{
+				result = XWCHi_DST_LEN_REM_X_R[CH_ID].read() & XX_DST_LEN_REM_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x1e:{
+				result = XWCHi_DST_LEN_REM_Y_R[CH_ID].read() & XX_DST_LEN_REM_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x20:{
+				result = XRCHi_START_R[CH_ID].read() & XX_START_MASK;
+				return true;
+				break;
+				  }
+			case 0x21:{
+				result = XRCHi_STATUS_R[CH_ID].read() & XX_STATUS_MASK;
+				return true;
+				break;
+				  }
+			case 0x22:{
+				if(CH_ID == 0){
+					result = XRCHi_CTL_R[CH_ID]	.read() & X_0_CTL_MASK;
+				}else{
+					result = XRCHi_CTL_R[CH_ID]	.read() & X_23_CTL_MASK;
+				}
+				//result = XRCHi_CTL_R[CH_ID].read() & XX_CTL_MASK;
+				return true;
+				break;
+				  }
+			case 0x2c:{
+				result = XRCHi_DST_START_ADDRH_R[CH_ID].read() & XX_DST_START_ADDRH_MASK;
+				return true;
+				break;
+					  }
+			case 0x30:{
+				result = XRCHi_SRC_START_ADDR_R[CH_ID].read() & XX_SRC_START_ADDR_MASK;
+				return true;
+				break;
+				  }
+			case 0x31:{
+				result = XRCHi_SRC_LEN_X_R[CH_ID].read() & XX_SRC_LEN_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x32:{
+				result = XRCHi_SRC_ADDR_STEP_R[CH_ID].read() & XX_SRC_ADDR_STEP_MASK;
+				return true;
+				break;
+				  }
+			case 0x33:{
+				result = XRCHi_SRC_LEN_Y_R[CH_ID].read() & XX_SRC_LEN_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x34:{
+				result = XRCHi_SRC_ADDR_CURR_R[CH_ID].read() & XX_SRC_CURR_ADDR_MASK;
+				return true;
+				break;
+				  }
+			case 0x35:{
+				result = XRCHi_SRC_LEN_REM_X_R[CH_ID].read() & XX_SRC_LEN_REM_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x36:{
+				result = XRCHi_SRC_LEN_REM_Y_R[CH_ID].read() & XX_SRC_LEN_REM_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x38:{
+				result = XRCHi_DST_START_ADDRL_R[CH_ID].read() & XX_DST_START_ADDRL_MASK;
+				return true;
+				break;
+				  }
+			case 0x39:{
+				result = XRCHi_DST_LEN_X_R[CH_ID].read() & XX_DST_LEN_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x3a:{
+				result = XRCHi_DST_ADDR_STEP_R[CH_ID].read() & XX_DST_ADDR_STEP_MASK;
+				return true;
+				break;
+				  }
+			case 0x3b:{
+				result = XRCHi_DST_LEN_Y_R[CH_ID].read() & XX_DST_LEN_Y_MASK;
+				return true;
+				break;
+				  }
+			case 0x3c:{
+				result = XRCHi_DST_CURR_ADDR_R[CH_ID]	.read() & XX_DST_CURR_ADDR_MASK;
+				return true;
+				break;
+				  }
+			case 0x3d:{
+				result = XRCHi_DST_LEN_REM_X_R[CH_ID].read() & XX_DST_LEN_REM_X_MASK;
+				return true;
+				break;
+				  }
+			case 0x3e:{
+				result = XRCHi_DST_LEN_REM_Y_R[CH_ID].read() & XX_DST_LEN_REM_Y_MASK;
+				return true;
+				break;
+				  }
+			default:
+ERROR_REPORT_REG(" error occur, XCH ctrl reg addr not find!!")
+					return false;
+					break;
+			}
+		}
+
+// zqw+ 2019.1.3  SRIOÏà¹Ø¼Ä´æÆ÷
+		if(addr >= SRIO0_Start_Addr_reg && addr <= SRIO1_End_Addr_reg){
+			if(addr >= SRIO0_Start_Addr_reg && addr <= SRIO0_End_Addr_reg){
+				CH_ID = 0;
+			}else if(addr >= SRIO1_Start_Addr_reg && addr <= SRIO1_End_Addr_reg){
+				CH_ID = 1;
+			}		
+
+			switch (CH_ID){
+			case 0: ofset = addr -  SRIO0_Start_Addr_reg ;break;
+			case 1: ofset = addr -  SRIO1_Start_Addr_reg ;break;			
+			default: 
+				return false;
+				ERROR_REPORT_REG(" error occur, SRIO CH_ID not find!!")				
+					break;
+			}
+
+			//zqw+ 2019.3.11 judge page_number
+
+			if (ofset ==  0xc) {
+				page_number = ( RAB_APB_CSR_R[CH_ID].read() & XX_RAB_APB_CSR_MASK & 0x1fff0000 )>>16;
+				result = RAB_APB_CSR_R[CH_ID].read() & XX_RAB_APB_CSR_MASK;
+				return true;
+			}
+
+			switch(page_number){
+			case 0x0:{
+				switch(ofset){
+				case 0x218:{
+					result = Base_Device_ID_CSR_R[CH_ID].read() & XX_Base_Device_ID_CSR_MASK;
+					return true;
+					break;
+						   }
+
+				default:
+					ERROR_REPORT_REG(" error occur, SRIO ctrl reg addr not find!!")
+						return false;
+					break;
+				}
+					 }
+			case 0x41:{
+				switch(ofset){
+
+				case 0x200:{
+					result = RAB_WDMA_N_CTRL_R[CH_ID].read() & XX_RAB_WDMA_N_CTRL_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x201:{
+					result = RAB_WDMA_N_ADDR_R[CH_ID].read() & XX_RAB_WDMA_N_ADDR_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x202:{
+					result = RAB_WDMA_N_STAT_R[CH_ID].read() & XX_RAB_WDMA_N_STAT_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x203:{
+					result = RAB_WDMA_N_ADDR_EXT_R[CH_ID].read() & XX_RAB_WDMA_N_ADDR_EXT_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x220:{
+					result = RAB_RDMA_N_CTRL_R[CH_ID].read() & XX_RAB_RDMA_N_CTRL_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x221:{
+					result = RAB_RDMA_N_ADDR_R[CH_ID].read() & XX_RAB_RDMA_N_ADDR_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x222:{
+					result = RAB_RDMA_N_STAT_R[CH_ID].read() & XX_RAB_RDMA_N_STAT_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x223:{
+					result = RAB_RDMA_N_ADDR_EXT_R[CH_ID].read() & XX_RAB_RDMA_N_ADDR_EXT_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x240:{
+					result = RAB_DMA_IADDR_DESC_SEL_R[CH_ID].read() & XX_RAB_DMA_IADDR_DESC_SEL_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x241:{
+					result = RAB_DMA_IADDR_DESC_CTRL_R[CH_ID].read() & XX_RAB_DMA_IADDR_DESC_CTRL_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x242:{
+					result = RAB_DMA_IADDR_DESC_SRC_ADDR_R[CH_ID].read() & XX_RAB_DMA_IADDR_DESC_SRC_ADDR_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x243:{
+					result = RAB_DMA_IADDR_DESC_DEST_ADDR_R[CH_ID].read() & XX_RAB_DMA_IADDR_DESC_DEST_ADDR_MASK;
+					return true;
+					break;
+						   }
+
+				case 0x244:{
+					result = RAB_DMA_IADDR_DESC_NEXT_ADDR_R[CH_ID].read() & XX_RAB_DMA_IADDR_DESC_NEXT_ADDR_MASK;
+					return true;
+					break;
+						   }
+	    /*	    case 0xc:{   //zqw+ 2019.2.25  Ò³ºÅ
+					result = RAB_APB_CSR_R[CH_ID].read() & XX_RAB_APB_CSR_MASK;
+					return true;
+					break;
+						 }
+         */
+
+				default:
+					ERROR_REPORT_REG(" error occur, SRIO ctrl reg addr not find!!")
+						return false;
+					break;
+				}
+					  }
+			default:
+				ERROR_REPORT_REG(" error occur, SRIO ctrl reg addr not find!!")
+					return false;
+				break;
+			}		
+		}
+		return false;
+}
+
+
+
+/*
+write regs by reg_name and ch_id,
+serve master and slave port,
+when write the start regs, trigger corresponding function
+*/
+/*
+bool reg_file::write_reg(reg_name rn,unsigned int val,unsigned int ch_id){
+
+			
+	unsigned int CH_ID = ch_id; //because enum CH_NAME = {HCH = 0,	XCH0 =1, //XCH1, XCH2, XCH3};
+
+	switch(rn){
+		//---------------------------------------------------global reg start
+		case GLB_STATUS:{
+			GLB_STATUS_reg.write(val);
+			return true;
+			break;
+						}
+//----------------------------------------------------AHB ctrl regs
+		case HCH_START:{
+			if((!(HCH_START_R.read() & 0x1)) && (val & 0x1)){//change START_DCHRi[ch_id]'s 0 bit from 0 to 1, means start a dma req mission
+				HCH_START_R.write(val);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, START_DMA_REQ, false);
+			}else if((HCH_START_R.read() & 0x1) && (val & 0x1)){
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur in write_reg() by reg_name, because the ahb_start[0] is already 1")
+				return false;
+			}else if((HCH_START_R.read() & 0x1) && !val){ //change START_DCHRi[ch_id]'s 0 bit from 1 to 0, means a dma req mission over, self set to zero
+				HCH_START_R.write(val);
+				return true;
+			}else if((!(HCH_START_R.read() & 0x2)) && (val & 0x2)){//change START_DCHRi[ch_id]'s 1 bit from 0 to 1, means cancel a dma req mission
+				HCH_START_R.write(val);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, CANCEL_DMA_REQ, false);
+			}else if((HCH_START_R.read() & 0x2) && !val){//change START_DCHRi[ch_id]'s 1 bit from 1 to 0, means cancel a dma req mission over, self set to zero
+				HCH_START_R.write(val);
+				return true;
+			}
+			break;
+					   }
+
+		case HCH_STATUS:{
+			HCH_STATUS_R.write(val);
+			return true;
+			break;
+						}
+		case HCH_CTL:{
+			HCH_CTL_R.write(val);
+			return true;
+			break;
+					 }
+		case HCH_SRC_START_ADDR:{
+			HCH_SRC_START_ADDR_R.write(val);
+			return true;
+			break;
+								}
+		case HCH_SRC_LEN_X:{
+			HCH_SRC_LEN_X_R.write(val);
+			return true;
+			break;
+						   }
+		case HCH_SRC_ADDR_STEP:{
+			HCH_SRC_ADDR_STEP_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_SRC_LEN_Y:{
+			HCH_SRC_LEN_Y_R.write(val);
+			return true;
+			break;
+						   }
+		case HCH_SRC_CURR_ADDR:{
+			HCH_SRC_CURR_ADDR_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_SRC_LEN_REM_X:{
+			HCH_SRC_LEN_REM_X_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_SRC_LEN_REM_Y:{
+			HCH_SRC_LEN_REM_Y_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_DST_START_ADDR:{
+			HCH_DST_START_ADDR_R.write(val);
+			return true;;
+			break;
+								}
+		case HCH_DST_LEN_X:{
+			HCH_DST_LEN_X_R.write(val);
+			return true;
+			break;
+						   }
+		case HCH_DST_ADDR_STEP:{
+			HCH_DST_ADDR_STEP_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_DST_LEN_Y:{
+			HCH_DST_LEN_Y_R.write(val);
+			return true;
+			break;
+						   }
+		case HCH_DST_CURR_ADDR:{
+			HCH_DST_CURR_ADDR_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_DST_LEN_REM_X:{
+			HCH_DST_LEN_REM_X_R.write(val);
+			return true;
+			break;
+							   }
+		case HCH_DST_LEN_REM_Y:{
+			HCH_DST_LEN_REM_Y_R.write(val);
+			return true;;
+			break;
+							   }
+//----------------------------------------------------XCH ctrl regs
+		case XWCHi_START:{
+			if((!(XWCHi_START_R[CH_ID].read() & 0x1)) && (val & 0x1)){//change START_DCHRi[ch_id]'s 0 bit from 0 to 1, means start a dma req mission
+				XWCHi_START_R[CH_ID].write(val);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, START_DMA_REQ, false);
+			}else if((XWCHi_START_R[CH_ID].read() & 0x1) && (val & 0x1)){
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur in write_reg() by reg_name, because the xch_start[0] is already 1")
+				return false;
+			}else if((XWCHi_START_R[CH_ID].read() & 0x1) && !val){ //change START_DCHRi[ch_id]'s 0 bit from 1 to 0, means a dma req mission over, self set to zero
+				XWCHi_START_R[CH_ID].write(val);
+				return true;
+			}else if((!(XWCHi_START_R[CH_ID].read() & 0x2)) && (val & 0x2)){//change START_DCHRi[ch_id]'s 1 bit from 0 to 1, means cancel a dma req mission
+				XWCHi_START_R[CH_ID].write(val);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, CANCEL_DMA_REQ, false);
+			}else if((XWCHi_START_R[CH_ID].read() & 0x2) && !val){//change START_DCHRi[ch_id]'s 1 bit from 1 to 0, means cancel a dma req mission over, self set to zero
+				XWCHi_START_R[CH_ID].write(val);
+				return true;
+			}
+			break;
+						 }
+		case XWCHi_STATUS:{
+			XWCHi_STATUS_R[CH_ID].write(val);
+			return true;
+			break;
+						  }
+		case XWCHi_CTL:{
+			XWCHi_CTL_R[CH_ID].write(val);
+			return true;
+			break;
+					   }
+		case XWCHi_SRC_START_ADDR:{
+			XWCHi_SRC_START_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								  }
+		case XWCHi_SRC_LEN_X:{
+			XWCHi_SRC_LEN_X_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XWCHi_SRC_ADDR_STEP:{
+			XWCHi_SRC_ADDR_STEP_R[CH_ID].write(val);
+			return true;;
+			break;
+								 }
+		case XWCHi_SRC_LEN_Y:{
+			XWCHi_SRC_LEN_Y_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XWCHi_SRC_CURR_ADDR:{
+			XWCHi_SRC_CURR_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XWCHi_SRC_LEN_REM_X:{
+			XWCHi_SRC_LEN_REM_X_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XWCHi_SRC_LEN_REM_Y:{
+			XWCHi_SRC_LEN_REM_Y_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XWCHi_DST_START_ADDR:{
+			XWCHi_DST_START_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								  }
+		case XWCHi_DST_LEN_X:{
+			XWCHi_DST_LEN_X_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XWCHi_DST_ADDR_STEP:{
+			XWCHi_DST_ADDR_STEP_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XWCHi_DST_LEN_Y:{
+			XWCHi_DST_LEN_Y_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XWCHi_DST_CURR_ADDR:{
+			XWCHi_DST_CURR_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XWCHi_DST_LEN_REM_X:{
+			XWCHi_DST_LEN_REM_X_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XWCHi_DST_LEN_REM_Y:{
+			XWCHi_DST_LEN_REM_Y_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_START:{
+			if((!(XRCHi_START_R[CH_ID].read() & 0x1)) && (val & 0x1)){//change START_DCHRi[ch_id]'s 0 bit from 0 to 1, means start a dma req mission
+				XRCHi_START_R[CH_ID].write(val);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, START_DMA_REQ, false);
+			}else if((XRCHi_START_R[CH_ID].read() & 0x1) && (val & 0x1)){
+				ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur in write_reg() by reg_name, because the xch_start[0] is already 1")
+				return false;
+			}else if((XRCHi_START_R[CH_ID].read() & 0x1) && !val){ //change START_DCHRi[ch_id]'s 0 bit from 1 to 0, means a dma req mission over, self set to zero
+				XRCHi_START_R[CH_ID].write(val);
+				return true;
+			}else if((!(XRCHi_START_R[CH_ID].read() & 0x2)) && (val & 0x2)){//change START_DCHRi[ch_id]'s 1 bit from 0 to 1, means cancel a dma req mission
+				XRCHi_START_R[CH_ID].write(val);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, CANCEL_DMA_REQ, false);
+			}else if((XRCHi_START_R[CH_ID].read() & 0x2) && !val){//change START_DCHRi[ch_id]'s 1 bit from 1 to 0, means cancel a dma req mission over, self set to zero
+				XRCHi_START_R[CH_ID].write(val);
+				return true;
+			}
+			break;
+						 }
+		case XRCHi_STATUS:{
+			XRCHi_STATUS_R[CH_ID].write(val);
+			return true;
+			break;
+						  }
+		case XRCHi_CTL:{
+			XRCHi_CTL_R[CH_ID].write(val);
+			return true;
+			break;
+					   }
+		case XRCHi_SRC_START_ADDR:{
+			XRCHi_SRC_START_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								  }
+		case XRCHi_LEN_X:{
+			XRCHi_LEN_X_R[CH_ID].write(val);
+			return true;
+			break;
+						 }
+		case XRCHi_SRC_ADDR_STEP:{
+			XRCHi_SRC_ADDR_STEP_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_SRC_LEN_Y:{
+			XRCHi_SRC_LEN_Y_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XRCHi_SRC_ADDR_CURR:{
+			XRCHi_SRC_ADDR_CURR_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_SRC_LEN_REM_X:{
+			XRCHi_SRC_LEN_REM_X_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_SRC_LEN_REM_Y:{
+			XRCHi_SRC_LEN_REM_Y_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_DST_START_ADDR:{
+			XRCHi_DST_START_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								  }
+		case XRCHi_DST_LEN_X:{
+			XRCHi_DST_LEN_X_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XRCHi_DST_ADDR_STEP:{
+			XRCHi_DST_ADDR_STEP_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_DST_LEN_Y:{
+			XRCHi_DST_LEN_Y_R[CH_ID].write(val);
+			return true;
+			break;
+							 }
+		case XRCHi_DST_CURR_ADDR:{
+			XRCHi_DST_CURR_ADDR_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_DST_LEN_REM_X:{
+			XRCHi_DST_LEN_REM_X_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case XRCHi_DST_LEN_REM_Y:{
+			XRCHi_DST_LEN_REM_Y_R[CH_ID].write(val);
+			return true;
+			break;
+								 }
+		case DMA_WR_MISSION_START_sig:{
+			DMA_WR_MISSION_START[CH_ID].write(val);
+			return true;
+								  }
+
+		case DMA_RD_MISSION_START_sig:{
+			DMA_RD_MISSION_START[CH_ID].write(val);
+			return true;
+									  }
+
+		default:{
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur, reg_name arg get in wr_reg() is not define!!")
+				return false;
+			break;
+				}
+	}
+}*/
+
+
+
+/*
+write regs by addr,
+serve core rw_regs,
+when write the start regs, trigger corresponding function
+*/
+bool reg_file::write_reg(unsigned int addr,unsigned int val,bool JtagFlag){
+	unsigned int result;
+	unsigned int ofset;
+	unsigned int CH_ID;
+	
+
+//-------------------------------------------------global reg start
+	if(addr >= Global_Start_Addr_reg && addr<= Global_End_Addr_reg){
+ERROR_REPORT_REG(" error occur, global reg addr not for wr!!")
+	return false;
+}
+//-------------------------------------------------global reg end and ch_reg start
+
+	if(addr >= HMCH0_Start_Addr_reg && addr <= HMCH0_End_Addr_reg){
+
+		ofset = addr - HMCH0_Start_Addr_reg;
+
+		switch(ofset){
+
+			case 0x00:{
+				if((!(HCH_START_R.read() & 0x1)) && (val & 0x1)){//change START_DCHRi[ch_id]'s 0 bit from 0 to 1, means start a dma req mission
+					if(JtagFlag){
+					 HCH_START_R.SetVal(val & XX_START_MASK);
+					}else{
+					 HCH_START_R.write(val & XX_START_MASK);
+					}
+					return true;
+					//mission_start_cancel_watch_reg(ch_id, START_DMA_REQ, false);
+				}else if((HCH_START_R.read() & 0x1) && (val & 0x1)){
+ERROR_REPORT_REG("error occur in write_reg() by reg_name, because the ahb_start[0] is already 1")
+						return false;
+				}else if((HCH_START_R.read() & 0x1) && !val){ //change START_DCHRi[ch_id]'s 0 bit from 1 to 0, means a dma req mission over, self set to zero
+					if(JtagFlag){
+						HCH_START_R.SetVal(val & XX_START_MASK);
+					}else{
+						HCH_START_R.write(val & XX_START_MASK);
+					}
+					return true;
+				}else if((!(HCH_START_R.read() & 0x2)) && (val & 0x2)){//change START_DCHRi[ch_id]'s 1 bit from 0 to 1, means cancel a dma req mission
+					if(JtagFlag){
+						HCH_START_R.SetVal(val & XX_START_MASK);
+					}else{
+						HCH_START_R.write(val & XX_START_MASK);
+					}
+					return true;
+					//mission_start_cancel_watch_reg(ch_id, CANCEL_DMA_REQ, false);
+				}else if((HCH_START_R.read() & 0x2) && !val){//change START_DCHRi[ch_id]'s 1 bit from 1 to 0, means cancel a dma req mission over, self set to zero
+					if(JtagFlag){
+						HCH_START_R.SetVal(val & XX_START_MASK);
+					}else{
+						HCH_START_R.write(val & XX_START_MASK);
+					}
+					return true;
+				}
+				break;
+					  }
+			case 0x01:{
+				HCH_STATUS_R.write(val & XX_STATUS_MASK  );
+//ERROR_REPORT_REG(" error occur, HCH_STATUS_R reg addr not for wr!!")
+				return false;
+				break;
+							}
+			case 0x02:{
+				if(JtagFlag){
+					HCH_CTL_R.SetVal(val & H_CTL_MASK);
+				}else{
+					HCH_CTL_R.write(val & H_CTL_MASK);
+				}
+				return true;
+				break;
+						 }
+			case 0x0c:{
+				if(JtagFlag){
+					HCH_DST_START_ADDRH_R.SetVal(val & XX_DST_START_ADDRH_MASK);
+				}else{
+					HCH_DST_START_ADDRH_R.write(val & XX_DST_START_ADDRH_MASK);
+				}
+				return true;
+				break;
+						 }
+
+			case 0x10:{
+				if(JtagFlag){
+					HCH_SRC_START_ADDR_R.SetVal(val & XX_SRC_START_ADDR_MASK);
+				}else{
+					HCH_SRC_START_ADDR_R.write(val & XX_SRC_START_ADDR_MASK);
+				}
+				return true;
+				break;
+									}
+			case 0x11:{
+				if(JtagFlag){
+					HCH_SRC_LEN_X_R.SetVal(val & XX_SRC_LEN_X_MASK);
+				}else{
+					HCH_SRC_LEN_X_R.write(val & XX_SRC_LEN_X_MASK);
+				}
+				return true;
+				break;
+							   }
+			case 0x12:{
+				if(JtagFlag){
+					HCH_SRC_ADDR_STEP_R.SetVal(val & XX_SRC_ADDR_STEP_MASK);
+				}else{
+					HCH_SRC_ADDR_STEP_R.write(val & XX_SRC_ADDR_STEP_MASK);
+				}
+				return true;
+				break;
+								   }
+			case 0x13:{
+				if(JtagFlag){
+					HCH_SRC_LEN_Y_R.SetVal(val & XX_SRC_LEN_Y_MASK);
+				}else{
+					HCH_SRC_LEN_Y_R.write(val & XX_SRC_LEN_Y_MASK);
+				}
+				return true;
+				break;
+							   }
+			case 0x14:{
+				HCH_SRC_CURR_ADDR_R.write(val & XX_SRC_CURR_ADDR_MASK);
+//ERROR_REPORT_REG(" error occur, HCH_SRC_CURR_ADDR_R reg addr not for wr!!")
+				return false;
+				break;
+								   }
+			case 0x15:{
+				HCH_SRC_LEN_REM_X_R.write(val & XX_SRC_LEN_REM_X_MASK);
+//ERROR_REPORT_REG(" error occur, HCH_SRC_LEN_REM_X_R reg addr not for wr!!")
+				return false;
+				break;
+								   }
+			case 0x16:{
+				HCH_SRC_LEN_REM_Y_R.write(val & XX_SRC_LEN_REM_Y_MASK);
+//ERROR_REPORT_REG(" error occur, HCH_SRC_LEN_REM_Y_R reg addr not for wr!!")
+				return false;
+				break;
+								   }
+			case 0x18:{
+				if(JtagFlag){
+					HCH_DST_START_ADDRL_R.SetVal(val & XX_DST_START_ADDRL_MASK);
+				}else{
+					HCH_DST_START_ADDRL_R.write(val & XX_DST_START_ADDRL_MASK);
+				}
+				return true;;
+				break;
+									}
+			case 0x19:{
+				if(JtagFlag){
+					HCH_DST_LEN_X_R.SetVal(val & XX_DST_LEN_X_MASK);
+				}else{
+					HCH_DST_LEN_X_R.write(val & XX_DST_LEN_X_MASK);
+				}
+				return true;
+				break;
+							   }
+			case 0x1a:{
+				if(JtagFlag){
+					HCH_DST_ADDR_STEP_R.SetVal(val & XX_DST_ADDR_STEP_MASK);
+				}else{
+					HCH_DST_ADDR_STEP_R.write(val & XX_DST_ADDR_STEP_MASK);
+				}
+				return true;
+				break;
+								   }
+			case 0x1b:{
+				if(JtagFlag){
+					HCH_DST_LEN_Y_R.SetVal(val & XX_DST_LEN_Y_MASK);
+				}else{
+					HCH_DST_LEN_Y_R.write(val & XX_DST_LEN_Y_MASK);
+				}
+				return true;
+				break;
+							   }
+			case 0x1c:{
+				HCH_DST_CURR_ADDR_R.write(val & XX_DST_CURR_ADDR_MASK);
+//ERROR_REPORT_REG(" error occur, HCH_DST_CURR_ADDR_R reg addr not for wr!!")
+				return false;
+				break;
+								   }
+			case 0x1d:{
+				HCH_DST_LEN_REM_X_R.write(val & XX_DST_LEN_REM_X_MASK);
+//ERROR_REPORT_REG(" error occur, HCH_DST_LEN_REM_X_R reg addr not for wr!!")
+				return false;
+				break;
+								   }
+			case 0x1e:{
+				HCH_DST_LEN_REM_Y_R.write(val & XX_DST_LEN_REM_Y_MASK);
+//ERROR_REPORT_REG(" error occur, HCH_DST_LEN_REM_Y_R reg addr not for wr!!")
+				return false;
+				break;
+								   }
+			default:
+ERROR_REPORT_REG(" error occur, AHB ctrl reg addr not find!!")				
+				return false;
+				break;
+	}
+}
+//----------------------------------------------for XMCH regs 
+	  if(addr >= XMCH0_Start_Addr_reg && addr <= XMCH3_End_Addr_reg){
+			  if(addr >= XMCH0_Start_Addr_reg && addr <= XMCH0_End_Addr_reg){
+				  CH_ID = 0;
+			  }else if(addr >= XMCH2_Start_Addr_reg && addr <= XMCH2_End_Addr_reg){
+				  CH_ID = 2;
+			  }
+			  else if (addr >= XMCH3_Start_Addr_reg && addr <= XMCH3_End_Addr_reg){
+				  CH_ID = 3;
+			  }		
+
+		switch (CH_ID){
+			case 0: ofset = addr -  XMCH0_Start_Addr_reg ;break;
+			case 2: ofset = addr -  XMCH2_Start_Addr_reg ;break;
+			case 3: ofset = addr -  XMCH3_Start_Addr_reg ;break;				
+			default:  
+ERROR_REPORT_REG(" error occur, XCH CH_ID not find!!")				
+					break;
+						  }
+
+		switch(ofset){
+
+			//----------------------------------------------------XCH ctrl regs
+		case 0x00:{
+			if((!(XWCHi_START_R[CH_ID].read() & 0x1)) && (val & XX_START_MASK) ==3){
+			//condition 0
+			//START_reg[0] is 0, can be written, but write 3 to it not accept
+					return false;
+			}
+		  else if((!(XWCHi_START_R[CH_ID].read() & 0x1)) && (val & 0x1)){//change START_DCHRi[ch_id]'s 0 bit from 0 to 1, means start a dma req mission
+			//condition 1
+			//START_reg[0] is 0, can be written, and 3 is impossible, certainlly 1
+				dma_wr_mission_start(CH_ID);
+				if(JtagFlag){
+					XWCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XWCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, START_DMA_REQ, false);
+		  }else if((XWCHi_START_R[CH_ID].read() & 0x1) && (val & 0x1)){
+ERROR_REPORT_REG("error occur in write_reg() by reg_name, because the xch_start[0] is already 1")
+				  return false;
+		  }else if((!(XWCHi_START_R[CH_ID].read() & 0x2)) && (val & 0x2)){//change START_DCHRi[ch_id]'s 1 bit from 0 to 1, means cancel a dma req mission
+				 if(JtagFlag){
+					 XWCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				 }else{
+					 XWCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				 }
+				 return true;
+			  //mission_start_cancel_watch_reg(ch_id, CANCEL_DMA_REQ, false);
+		  }else if((XWCHi_START_R[CH_ID].read() & 0x1) && !val){ //change START_DCHRi[ch_id]'s 0 bit from 1 to 0, means a dma req mission over, self set to zero
+				dma_wr_mission_reset(CH_ID);
+				if(JtagFlag){
+					XWCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XWCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				return true;
+		  }else if((XWCHi_START_R[CH_ID].read() & 0x2) && !val){//change START_DCHRi[ch_id]'s 1 bit from 1 to 0, means cancel a dma req mission over, self set to zero
+				if(JtagFlag){
+					XWCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XWCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				return true;
+		  }
+			break;
+						 }
+		case 0x01:{
+			XWCHi_STATUS_R[CH_ID].write(val & XX_STATUS_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_STATUS_R reg addr not for wr!!")
+			return false;
+			break;
+						  }
+		case 0x02:{
+			if(CH_ID == 0){
+				if(JtagFlag){
+					XWCHi_CTL_R[CH_ID].SetVal(val & X_0_CTL_MASK);
+				}else{
+					XWCHi_CTL_R[CH_ID].write(val & X_0_CTL_MASK);
+				}
+			}else{
+				if(JtagFlag){
+					XWCHi_CTL_R[CH_ID].SetVal(val & X_23_CTL_MASK);
+				}else{
+					XWCHi_CTL_R[CH_ID].write(val & X_23_CTL_MASK);
+				}
+			}
+			//XWCHi_CTL_R[CH_ID].write(val & XX_CTL_MASK);
+			return true;
+			break;
+					   }
+		case 0x0c:{
+				if(JtagFlag){
+					XWCHi_DST_START_ADDRH_R[CH_ID].SetVal(val & XX_DST_START_ADDRH_MASK);
+				}else{
+					XWCHi_DST_START_ADDRH_R[CH_ID].write(val & XX_DST_START_ADDRH_MASK);
+				}
+			return true;
+			break;
+				  }
+		case 0x10:{
+			if(JtagFlag){
+				XWCHi_SRC_START_ADDR_R[CH_ID].SetVal(val & XX_SRC_START_ADDR_MASK);
+			}else{
+				XWCHi_SRC_START_ADDR_R[CH_ID].write(val & XX_SRC_START_ADDR_MASK);
+			}
+			return true;
+			break;
+								  }
+		case 0x11:{
+			if(JtagFlag){
+				XWCHi_SRC_LEN_X_R[CH_ID].SetVal(val & XX_SRC_LEN_X_MASK);
+			}else{
+				XWCHi_SRC_LEN_X_R[CH_ID].write(val & XX_SRC_LEN_X_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x12:{
+			if(JtagFlag){
+				XWCHi_SRC_ADDR_STEP_R[CH_ID].SetVal(val & XX_SRC_ADDR_STEP_MASK);
+			}else{
+				XWCHi_SRC_ADDR_STEP_R[CH_ID].write(val & XX_SRC_ADDR_STEP_MASK);
+			}
+			return true;;
+			break;
+								 }
+		case 0x13:{
+			if(JtagFlag){
+				XWCHi_SRC_LEN_Y_R[CH_ID].SetVal(val & XX_SRC_LEN_Y_MASK);
+			}else{
+				XWCHi_SRC_LEN_Y_R[CH_ID].write(val & XX_SRC_LEN_Y_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x14:{
+			XWCHi_SRC_CURR_ADDR_R[CH_ID].write(val & XX_SRC_CURR_ADDR_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_SRC_CURR_ADDR_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x15:{
+			XWCHi_SRC_LEN_REM_X_R[CH_ID].write(val & XX_SRC_LEN_REM_X_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_SRC_LEN_REM_X_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x16:{
+			XWCHi_SRC_LEN_REM_Y_R[CH_ID].write(val & XX_SRC_LEN_REM_Y_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_SRC_LEN_REM_Y_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x18:{
+			if(JtagFlag){
+				XWCHi_DST_START_ADDRL_R[CH_ID].SetVal(val & XX_DST_START_ADDRL_MASK);
+			}else{
+				XWCHi_DST_START_ADDRL_R[CH_ID].write(val & XX_DST_START_ADDRL_MASK);
+			}
+			return true;
+			break;
+								  }
+		case 0x19:{
+			if(JtagFlag){
+				XWCHi_DST_LEN_X_R[CH_ID].SetVal(val & XX_DST_LEN_X_MASK);
+			}else{
+				XWCHi_DST_LEN_X_R[CH_ID].write(val & XX_DST_LEN_X_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x1a:{
+			if(JtagFlag){
+				XWCHi_DST_ADDR_STEP_R[CH_ID].SetVal(val & XX_DST_ADDR_STEP_MASK);
+			}else{
+				XWCHi_DST_ADDR_STEP_R[CH_ID].write(val & XX_DST_ADDR_STEP_MASK);
+			}
+			return true;
+			break;
+								 }
+		case 0x1b:{
+			if(JtagFlag){
+				XWCHi_DST_LEN_Y_R[CH_ID].SetVal(val & XX_DST_LEN_Y_MASK);
+			}else{
+				XWCHi_DST_LEN_Y_R[CH_ID].write(val & XX_DST_LEN_Y_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x1c:{
+			XWCHi_DST_CURR_ADDR_R[CH_ID].write(val & XX_DST_CURR_ADDR_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_DST_CURR_ADDR_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x1d:{
+			XWCHi_DST_LEN_REM_X_R[CH_ID].write(val & XX_DST_LEN_REM_X_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_DST_LEN_REM_X_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x1e:{
+			XWCHi_DST_LEN_REM_Y_R[CH_ID].write(val & XX_DST_LEN_REM_Y_MASK);
+//ERROR_REPORT_REG(" error occur, XWCHi_DST_LEN_REM_Y_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x20:{
+			if((!(XRCHi_START_R[CH_ID].read() & 0x1)) && (val & XX_START_MASK) ==3){
+				//condition 0
+				//START_reg[0] is 0, can be written, but write 3 to it not accept
+				return false;
+			}			
+			else if((!(XRCHi_START_R[CH_ID].read() & 0x1)) && (val & 0x1)){//change START_DCHRi[ch_id]'s 0 bit from 0 to 1, means start a dma req mission
+				//condition 1
+				//START_reg[0] is 0, can be written, and 3 is impossible, certainlly 1
+				if(JtagFlag){
+					XRCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XRCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				dma_rd_mission_start(CH_ID);
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, START_DMA_REQ, false);
+			}else if((XRCHi_START_R[CH_ID].read() & 0x1) && (val & 0x1)){
+ERROR_REPORT_REG("error occur in write_reg() by reg_name, because the xch_start[0] is already 1")
+					return false;
+			}else if((!(XRCHi_START_R[CH_ID].read() & 0x2)) && (val & 0x2)){//change START_DCHRi[ch_id]'s 1 bit from 0 to 1, means cancel a dma req mission
+				if(JtagFlag){
+					XRCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XRCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				return true;
+				//mission_start_cancel_watch_reg(ch_id, CANCEL_DMA_REQ, false);
+			}else if((XRCHi_START_R[CH_ID].read() & 0x1) && !val){ //change START_DCHRi[ch_id]'s 0 bit from 1 to 0, means a dma req mission over, self set to zero
+				dma_rd_mission_reset(CH_ID);
+				if(JtagFlag){
+					XRCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XRCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				return true;
+			}else if((XRCHi_START_R[CH_ID].read() & 0x2) && !val){//change START_DCHRi[ch_id]'s 1 bit from 1 to 0, means cancel a dma req mission over, self set to zero
+				if(JtagFlag){
+					XRCHi_START_R[CH_ID].SetVal(val & XX_START_MASK);
+				}else{
+					XRCHi_START_R[CH_ID].write(val & XX_START_MASK);
+				}
+				return true;
+			}
+			break;
+						 }
+		case 0x21:{
+			XRCHi_STATUS_R[CH_ID].write(val & XX_STATUS_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_STATUS_R reg addr not for wr!!")
+			return false;
+			break;
+						  }
+		case 0x22:{
+			if(CH_ID == 0){
+				if(JtagFlag){
+					XRCHi_CTL_R[CH_ID].SetVal(val & X_0_CTL_MASK);
+				}else{
+					XRCHi_CTL_R[CH_ID].write(val & X_0_CTL_MASK);
+				}
+			}else{
+				if(JtagFlag){
+					XRCHi_CTL_R[CH_ID].SetVal(val & X_23_CTL_MASK);
+				}else{
+					XRCHi_CTL_R[CH_ID].write(val & X_23_CTL_MASK);
+				}
+			}
+			//XRCHi_CTL_R[CH_ID].write(val & XX_CTL_MASK);
+			return true;
+			break;
+					   }
+		case 0x2c:{
+			if(JtagFlag){
+				XRCHi_DST_START_ADDRH_R[CH_ID].SetVal(val & XX_DST_START_ADDRH_MASK);
+			}else{
+				XRCHi_DST_START_ADDRH_R[CH_ID].write(val & XX_DST_START_ADDRH_MASK);
+			}
+			return true;
+			break;
+				  }
+		case 0x30:{
+			if(JtagFlag){
+				XRCHi_SRC_START_ADDR_R[CH_ID].SetVal(val & XX_SRC_START_ADDR_MASK);
+			}else{
+				XRCHi_SRC_START_ADDR_R[CH_ID].write(val & XX_SRC_START_ADDR_MASK);
+			}
+			return true;
+			break;
+								  }
+		case 0x31:{
+			if(JtagFlag){
+				XRCHi_SRC_LEN_X_R[CH_ID].SetVal(val & XX_SRC_LEN_X_MASK);
+			}else{
+				XRCHi_SRC_LEN_X_R[CH_ID].write(val & XX_SRC_LEN_X_MASK);
+			}
+			return true;
+			break;
+						 }
+		case 0x32:{
+			if(JtagFlag){
+				XRCHi_SRC_ADDR_STEP_R[CH_ID].SetVal(val & XX_SRC_ADDR_STEP_MASK);
+			}else{
+				XRCHi_SRC_ADDR_STEP_R[CH_ID].write(val & XX_SRC_ADDR_STEP_MASK);
+			}
+			return true;
+			break;
+								 }
+		case 0x33:{
+			if(JtagFlag){
+				XRCHi_SRC_LEN_Y_R[CH_ID].SetVal(val & XX_SRC_LEN_Y_MASK);
+			}else{
+				XRCHi_SRC_LEN_Y_R[CH_ID].write(val & XX_SRC_LEN_Y_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x34:{
+			XRCHi_SRC_ADDR_CURR_R[CH_ID].write(val & XX_SRC_CURR_ADDR_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_SRC_ADDR_CURR_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x35:{
+			XRCHi_SRC_LEN_REM_X_R[CH_ID].write(val & XX_SRC_LEN_REM_X_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_SRC_LEN_REM_X_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x36:{
+			XRCHi_SRC_LEN_REM_Y_R[CH_ID].write(val & XX_SRC_LEN_REM_Y_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_SRC_LEN_REM_Y_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x38:{
+			if(JtagFlag){
+				XRCHi_DST_START_ADDRL_R[CH_ID].SetVal(val & XX_DST_START_ADDRL_MASK);
+			}else{
+				XRCHi_DST_START_ADDRL_R[CH_ID].write(val & XX_DST_START_ADDRL_MASK);
+			}
+			return true;
+			break;
+								  }
+		case 0x39:{
+			if(JtagFlag){
+				XRCHi_DST_LEN_X_R[CH_ID].SetVal(val & XX_DST_LEN_X_MASK);
+			}else{
+				XRCHi_DST_LEN_X_R[CH_ID].write(val & XX_DST_LEN_X_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x3a:{
+			if(JtagFlag){
+				XRCHi_DST_ADDR_STEP_R[CH_ID].SetVal(val & XX_DST_ADDR_STEP_MASK);
+			}else{
+				XRCHi_DST_ADDR_STEP_R[CH_ID].write(val & XX_DST_ADDR_STEP_MASK);
+			}
+			return true;
+			break;
+								 }
+		case 0x3b:{
+			if(JtagFlag){
+				XRCHi_DST_LEN_Y_R[CH_ID].SetVal(val & XX_DST_LEN_Y_MASK);
+			}else{
+				XRCHi_DST_LEN_Y_R[CH_ID].write(val & XX_DST_LEN_Y_MASK);
+			}
+			return true;
+			break;
+							 }
+		case 0x3c:{
+			XRCHi_DST_CURR_ADDR_R[CH_ID].write(val & XX_DST_CURR_ADDR_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_DST_CURR_ADDR_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x3d:{
+			XRCHi_DST_LEN_REM_X_R[CH_ID].write(val & XX_DST_LEN_REM_X_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_DST_LEN_REM_X_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+		case 0x3e:{
+			XRCHi_DST_LEN_REM_Y_R[CH_ID].write(val & XX_DST_LEN_REM_Y_MASK);
+//ERROR_REPORT_REG(" error occur, XRCHi_DST_LEN_REM_Y_R reg addr not for wr!!")
+			return false;
+			break;
+								 }
+
+		default:{
+ERROR_REPORT_REG("error occur, reg_name arg get in wr_reg() is not define!!")
+				return false;
+			break;
+				}
+		}
+	}
+
+	// zqw+ 2019.1.3  SRIOÏà¹Ø¼Ä´æÆ÷
+	if(addr >= SRIO0_Start_Addr_reg && addr <= SRIO1_End_Addr_reg){
+		if(addr >= SRIO0_Start_Addr_reg && addr <= SRIO0_End_Addr_reg){
+			CH_ID = 0;
+		}else if(addr >= SRIO1_Start_Addr_reg && addr <= SRIO1_End_Addr_reg){
+			CH_ID = 1;
+		}		
+
+		switch (CH_ID){
+		case 0: ofset = addr -  SRIO0_Start_Addr_reg ;break;
+		case 1: ofset = addr -  SRIO1_Start_Addr_reg ;break;			
+		default: 
+			return false;
+			ERROR_REPORT_REG(" error occur, SRIO CH_ID not find!!")				
+				break;
+		}
+
+		//zqw+ 2019.3.11 judge page_number
+		if (ofset ==  0xc) {
+			page_number = ( val & 0x1fff0000 )>>16;
+			if(JtagFlag){
+				RAB_APB_CSR_R[CH_ID].SetVal(val & XX_RAB_APB_CSR_MASK);
+			}else{
+				RAB_APB_CSR_R[CH_ID].write(val & XX_RAB_APB_CSR_MASK);
+			}
+			return true;
+		}
+
+		switch(page_number){
+		case 0x0:{
+			switch(ofset){
+			case 0x218:{  //zqw+ 2019.2.25 Ö÷Éè±¸ID¼Ä´æÆ÷
+				if(JtagFlag){
+					Base_Device_ID_CSR_R[CH_ID].SetVal(val & XX_Base_Device_ID_CSR_MASK);
+				}else{
+					Base_Device_ID_CSR_R[CH_ID].write(val & XX_Base_Device_ID_CSR_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			default:
+				ERROR_REPORT_REG(" error occur, SRIO ctrl reg addr not find!!")
+					return false;
+				break;
+			}
+				 }
+		case 0x41:{
+			switch(ofset){
+			case 0x200:{
+				if(JtagFlag){
+					RAB_WDMA_N_CTRL_R[CH_ID].SetVal(val & XX_RAB_WDMA_N_CTRL_MASK);
+				}else{
+					RAB_WDMA_N_CTRL_R[CH_ID].write(val & XX_RAB_WDMA_N_CTRL_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x201:{
+				if(JtagFlag){
+					RAB_WDMA_N_ADDR_R[CH_ID].SetVal(val & XX_RAB_WDMA_N_ADDR_MASK);
+				}else{
+					RAB_WDMA_N_ADDR_R[CH_ID].write(val & XX_RAB_WDMA_N_ADDR_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x202:{
+				if(JtagFlag){
+					RAB_WDMA_N_STAT_R[CH_ID].SetVal(val & XX_RAB_WDMA_N_STAT_MASK);
+				}else{
+					RAB_WDMA_N_STAT_R[CH_ID].write(val & XX_RAB_WDMA_N_STAT_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x203:{
+				if(JtagFlag){
+					RAB_WDMA_N_ADDR_EXT_R[CH_ID].SetVal(val & XX_RAB_WDMA_N_ADDR_EXT_MASK);
+				}else{
+					RAB_WDMA_N_ADDR_EXT_R[CH_ID].write(val & XX_RAB_WDMA_N_ADDR_EXT_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x220:{
+				if(JtagFlag){
+					RAB_RDMA_N_CTRL_R[CH_ID].SetVal(val & XX_RAB_RDMA_N_CTRL_MASK);
+				}else{
+					RAB_RDMA_N_CTRL_R[CH_ID].write(val & XX_RAB_RDMA_N_CTRL_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x221:{
+				if(JtagFlag){
+					RAB_RDMA_N_ADDR_R[CH_ID].SetVal(val & XX_RAB_RDMA_N_ADDR_MASK);
+				}else{
+					RAB_RDMA_N_ADDR_R[CH_ID].write(val & XX_RAB_RDMA_N_ADDR_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x222:{
+				if(JtagFlag){
+					RAB_RDMA_N_STAT_R[CH_ID].SetVal(val & XX_RAB_RDMA_N_STAT_MASK);
+				}else{
+					RAB_RDMA_N_STAT_R[CH_ID].write(val & XX_RAB_RDMA_N_STAT_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x223:{
+				if(JtagFlag){
+					RAB_RDMA_N_ADDR_EXT_R[CH_ID].SetVal(val & XX_RAB_RDMA_N_ADDR_EXT_MASK);
+				}else{
+					RAB_RDMA_N_ADDR_EXT_R[CH_ID].write(val & XX_RAB_RDMA_N_ADDR_EXT_MASK);
+				}
+				return true;
+				break;
+					   }		
+
+			case 0x240:{
+				if(JtagFlag){
+					RAB_DMA_IADDR_DESC_SEL_R[CH_ID].SetVal(val & XX_RAB_DMA_IADDR_DESC_SEL_MASK);
+				}else{
+					RAB_DMA_IADDR_DESC_SEL_R[CH_ID].write(val & XX_RAB_DMA_IADDR_DESC_SEL_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x241:{
+				if(JtagFlag){
+					RAB_DMA_IADDR_DESC_CTRL_R[CH_ID].SetVal(val & XX_RAB_DMA_IADDR_DESC_CTRL_MASK);
+				}else{
+					RAB_DMA_IADDR_DESC_CTRL_R[CH_ID].write(val & XX_RAB_DMA_IADDR_DESC_CTRL_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x242:{
+				if(JtagFlag){
+					RAB_DMA_IADDR_DESC_SRC_ADDR_R[CH_ID].SetVal(val & XX_RAB_DMA_IADDR_DESC_SRC_ADDR_MASK);
+				}else{
+					RAB_DMA_IADDR_DESC_SRC_ADDR_R[CH_ID].write(val & XX_RAB_DMA_IADDR_DESC_SRC_ADDR_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x243:{
+				if(JtagFlag){
+					RAB_DMA_IADDR_DESC_DEST_ADDR_R[CH_ID].SetVal(val & XX_RAB_DMA_IADDR_DESC_DEST_ADDR_MASK);
+				}else{
+					RAB_DMA_IADDR_DESC_DEST_ADDR_R[CH_ID].write(val & XX_RAB_DMA_IADDR_DESC_DEST_ADDR_MASK);
+				}
+				return true;
+				break;
+					   }
+
+			case 0x244:{
+				if(JtagFlag){
+					RAB_DMA_IADDR_DESC_NEXT_ADDR_R[CH_ID].SetVal(val & XX_RAB_DMA_IADDR_DESC_NEXT_ADDR_MASK);
+				}else{
+					RAB_DMA_IADDR_DESC_NEXT_ADDR_R[CH_ID].write(val & XX_RAB_DMA_IADDR_DESC_NEXT_ADDR_MASK);
+				}
+				return true;
+				break;
+					   }
+	/*		case 0xc:{  //zqw+2019.2.25 Ò³ºÅ
+				if(JtagFlag){
+					RAB_APB_CSR_R[CH_ID].SetVal(val & XX_RAB_APB_CSR_MASK);
+				}else{
+					RAB_APB_CSR_R[CH_ID].write(val & XX_RAB_APB_CSR_MASK);
+				}
+				return true;
+				break;
+					 }
+	*/
+
+			default:
+				ERROR_REPORT_REG(" error occur, SRIO ctrl reg addr not find!!")
+					return false;
+				break;
+			}
+				  }
+		 default:
+			 ERROR_REPORT_REG(" error occur, SRIO ctrl reg addr not find!!")
+				  return false;
+			 break;
+		}
+
+	}
+	return false;
+
+}
+
+
+
+
+/*
+read regs by reg_name and ch_id,
+serve master and slave port
+
+MSG_INSN_RW_MEM  reg_file::read_insn_reg(reg_name rn, unsigned int ch_id){
+			
+	switch(rn){
+		
+		case INSN_REQ_INFO : return INSN_REQ_INFOi[ch_id].read();	
+		
+		case INSN_ACK_INFO : return INSN_ACK_INFOi[ch_id].read();
+		
+		default:
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur, insn_reg_name can not be found when read_insn_reg() by reg_name!!")			
+			break;
+	} 
+}
+
+
+
+
+
+void reg_file::write_insn_reg(reg_name rn, MSG_INSN_RW_MEM& val,unsigned int ch_id){
+	
+	switch(rn){
+		case INSN_REQ_INFO : {
+
+				INSN_REQ_INFOi[ch_id].write(val);
+				//mission_start_cancel_watch_reg(ch_id, START_INSN_REQ, true);
+				break;
+							 }
+		
+		case INSN_ACK_INFO : {
+
+				INSN_ACK_INFOi[ch_id].write(val);
+				//mission_start_cancel_watch_reg(ch_id, START_INSN_ACK, false);
+				break;
+							 }
+		default:
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur, insn_reg_name can not be found when write_insn_reg() by reg_name!!")
+		break;
+	} 
+}
+*/
+
+
+
+
+
+/*
+before add new mission, check the TASK_LIST, be sure it's empty,
+*/
+bool reg_file::mission_add(unsigned int ch_id, task_list_type mission_type, bool wait_data_back){
+	if(ch_id<= CHANNEL_NUM-1 && mission_type <= TASK_TYPE_NUM -1){
+		if(!TASK_LIST[ch_id][mission_type].empty_old && !TASK_LIST[ch_id][mission_type].empty_new){
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" error occur, the given task entry is not empty, can not add!!! ")
+				return false;
+		}else{
+			ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" add success!!! ")
+				TASK_LIST[ch_id][mission_type].mission_add(wait_data_back);
+			return true;
+		}
+	}else{
+ERROR_REPORT_REG("error occure, the given task id or CH_id does not exist!!!")
+			return false;
+	}
+
+}
+
+
+/*
+before clear mission, check the TASK_LIST, be sure it's not empty,
+
+bool reg_file::mission_end(unsigned int ch_id, task_list_type mission_type){
+	if(TASK_LIST[ch_id][mission_type].empty_old){
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" error occur, the given task entry is empty, nothing can be end!!! ")
+		return false;
+	}else{
+		  TASK_LIST[ch_id][mission_type].mission_end();
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" get the end order!!!")
+		 
+			clear_regs_after_resp_ok(mission_type, ch_id);//when get mission end order, clear the corresponding regs all
+
+	  return true;
+		}
+}
+*/
+
+
+
+bool reg_file::mission_start(unsigned int ch_id, task_list_type mission_type){
+	if(ch_id<= CHANNEL_NUM-1 && mission_type <= TASK_TYPE_NUM -1){
+		if(TASK_LIST[ch_id][mission_type].empty_old){
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" error occure, the given task entry is empty, nothing can be started!!!")
+				return false;
+		}	   
+		TASK_LIST[ch_id][mission_type].mission_start();
+		return true;
+	}else{
+ERROR_REPORT_REG("error occure, the given task id or CH_id does not exist!!!")
+		return false;
+	}
+
+	
+}
+
+
+
+
+bool reg_file::mission_stall(unsigned int ch_id, task_list_type mission_type)
+{
+	if(ch_id<= CHANNEL_NUM-1 && mission_type <= TASK_TYPE_NUM -1){
+		if(	(mission_type == DMA_REQ &&  TASK_LIST[ch_id][mission_type].wait_ack_old == false) || mission_type == DMA_ACK){//only DMA write req and DMA ack can be stalled
+			TASK_LIST[ch_id][mission_type].mission_stall();
+			return true;
+		}else{
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" error occur, mission stall can not be done, type not match!!")
+				return false;
+		}
+	}else{
+ERROR_REPORT_REG("error occure, the given task id or CH_id does not exist!!!")
+			return false;
+	}
+
+
+}
+
+bool reg_file::mission_restore(unsigned int ch_id, task_list_type mission_type)
+{
+	if(ch_id<= CHANNEL_NUM-1 && mission_type <= TASK_TYPE_NUM -1){
+		if(	(mission_type == DMA_REQ &&  TASK_LIST[ch_id][mission_type].wait_ack_old == false) || mission_type == DMA_ACK){//only DMA write req and DMA ack can be restore
+			TASK_LIST[ch_id][mission_type].mission_restore();
+			return true;
+		}else{
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" error occur, mission restore can not be done, type not match!!")
+				return false;
+		}
+	}else{
+ERROR_REPORT_REG("error occure, the given task id or CH_id does not exist!!!")
+			return false;
+	}
+}
+
+
+
+bool reg_file::mission_cancel(unsigned int ch_id, task_list_type mission_type){
+	if(ch_id<= CHANNEL_NUM-1 && mission_type <= TASK_TYPE_NUM -1){
+		if(!TASK_LIST[ch_id][mission_type].empty_old){
+			TASK_LIST[ch_id][mission_type].mission_cancel();
+			return true;
+		}else{
+ERROR_REPORT_REG(" CH_"<<ch_id<<" mission "<<mission_type<<" get cancel order, but the given Master's "<<mission_type<<" task entry is empty, nothing to cancel!! may be Slave cancel object's dma write req!!")
+				return false;
+		}
+	}else{
+ERROR_REPORT_REG("error occure, the given task id or CH_id does not exist!!!")
+			return false;
+	}
+
+
+}
+
+check_mission_return reg_file::mission_check(unsigned int ch_id, task_list_type mission_type){
+	if(ch_id<= CHANNEL_NUM-1 && mission_type <= TASK_TYPE_NUM -1){
+return TASK_LIST[ch_id][mission_type].mission_check();
+	}else{
+ERROR_REPORT_REG("error occure, the given task id or CH_id does not exist!!!")
+			return MISSION_CHECK_ERROR;
+	}
+
+}
+
+
+
+
+/*flag = 0: DMA_REQ mission will be added to task list;
+		 1: DMA_REQ mission will be canceled;
+		 2: DMA_ACK mission will be added to task list;
+		 3: DMA_ACK mission will be canceled;
+
+void reg_file::mission_start_cancel_watch_reg(unsigned int ch_id, reg_behavior_type behavior, bool wait_data_back){
+	switch(behavior){
+		case START_DMA_REQ :{
+			mission_add(ch_id, DMA_REQ,( (CTL_DCHRi[ch_id].read() & 0x3) == DMA_READ_MISSION ? true: false));
+			break;	
+				}
+		case CANCEL_DMA_REQ :{
+			mission_cancel(ch_id,DMA_REQ);
+			break;	
+				}
+		case START_DMA_ACK :{
+			mission_add(ch_id, DMA_ACK, false);
+			break;	
+				}
+		case CANCEL_DMA_ACK :{
+			mission_cancel(ch_id, DMA_ACK);
+			break;	
+				}
+		case START_INSN_REQ :{
+			mission_add(ch_id, INSN_REQ, wait_data_back);
+			break;	
+							 }
+		case START_INSN_ACK :{
+			mission_add(ch_id, INSN_ACK, false);
+			break;	
+							 }
+		default:
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur, the flag get when mission_start_cancel_watch_reg() is not defined!!")
+
+break;
+			}
+}
+*/
+
+//return TASK_LIST[ch_id][mission_type].wait_ack_old
+bool reg_file::wait_data_back_check(unsigned int ch_id, task_list_type mission_type){
+
+	return TASK_LIST[ch_id][mission_type].wait_data_back_check();
+}				
+
+
+/*
+//be called by void get_resp_ok_process(); for set the regs of different task type to initialization value 
+void reg_file::clear_regs_after_resp_ok(task_list_type MISSION_TYPE, unsigned int ch_id){
+	switch(MISSION_TYPE){
+		case DMA_REQ: {
+			write_reg(START_DCHR, 0x0, ch_id);			// ofst_addr = ( 1 + i ) * 32 + 0x00	ch0+ch1+chz+cha
+			write_reg(STATUS_DCHR, 0x5, ch_id);			// ofst_addr = ( 1 + i ) * 32 + 0x01
+			write_reg(CTL_DCHR, 0x0, ch_id);			// ofst_addr = ( 1 + i ) * 32 + 0x02
+			write_reg(SRC_START_ADDR_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x03     	 
+			write_reg(SRC_LEN_X_DCHR, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x04	    		 	
+			write_reg(SRC_ADDR_STEP_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x05
+			write_reg(SRC_LEN_Y_DCHR, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x06
+			write_reg(SRC_CURR_ADDR_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x07
+			write_reg(SRC_LEN_REM_X_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x08
+			write_reg(SRC_LEN_REM_Y_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x09     
+			write_reg(DST_START_ADDR_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x0b  	
+			write_reg(DST_LEN_X_DCHR, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x0c     
+			write_reg(DST_ADDR_STEP_DCHR, 0x0, ch_id);	// ofst_addr = ( 1 + i ) * 32 + 0x0d		
+			write_reg(DST_LEN_Y_DCHR, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x0e	
+			break;
+					  }
+		case DMA_ACK: {
+			write_reg(START_DCHA, 0x0, ch_id);				// ofst_addr = ( 1 + i ) * 32 + 0x10	ch0+ch1+chz+cha
+			write_reg(STATUS_DCHA, 0x5, ch_id);				// ofst_addr = ( 1 + i ) * 32 + 0x11
+			write_reg(CTL_DCHA, 0x0, ch_id);				// ofst_addr = ( 1 + i ) * 32 + 0x12
+			write_reg(DST_START_ADDR_DCHA, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x13     	 
+			write_reg(DST_LEN_X_DCHA, 0x0, ch_id);			// ofst_addr = ( 1 + i ) * 32 + 0x14	    		 	
+			write_reg(DST_ADDR_STEP_DCHA, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x15
+			write_reg(DST_LEN_Y_DCHA, 0x0, ch_id);			// ofst_addr = ( 1 + i ) * 32 + 0x16
+			write_reg(DST_CURR_ADDR_DCHA, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x17
+			write_reg(DST_LEN_REM_X_DCHA, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x18
+			write_reg(DST_LEN_REM_Y_DCHA, 0x0, ch_id);		// ofst_addr = ( 1 + i ) * 32 + 0x19     
+			break;
+					  }
+		case INSN_REQ: {
+			INSN_REQ_INFOi[ch_id].clear();
+			break;
+					   }
+		case INSN_ACK: {
+			INSN_ACK_INFOi[ch_id].clear();
+			break;
+					   }
+		default:{
+ERROR_REPORT_REG(" CH_"<<ch_id<<"	error occur, in function clear_vals_after_resp_ok(), get the wrong MISSION_TYPE arg!!!")
+break;
+				}
+	}
+}	
+
+*/
+

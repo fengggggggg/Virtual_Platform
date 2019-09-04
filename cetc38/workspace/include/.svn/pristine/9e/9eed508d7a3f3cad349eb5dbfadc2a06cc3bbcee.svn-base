@@ -1,0 +1,1817 @@
+/*
+ * iss.cpp
+ *
+ *  Created on: Jan 31, 2012
+ *      Author: root
+ */
+//------------------------------------------------
+#include "sc_iss.h"
+
+void sc_iss::InitJtagRegister()
+{
+	bDSPEnable=false;
+	bRunFirstCycle=false;
+	bDSPRunning=false;
+	bStepCycle=false;
+	bStepInst=false;
+
+	CycleCnt=0;
+	InstCnt=0;
+	CyclePassed=0;
+	InstPassed=0;
+	StopReason=0;
+	cycleStopRsn=0;
+	lastPC=GetPC();
+	iFirstCycleWaitForHardware=WAIT_FOR_HARDWARE_CYCLE;
+	StepInstCycles=0;
+
+	ioserver=NULL;
+}
+
+//------------------------------------------------
+void sc_iss::DoCycle()
+{
+	m_intCycles++;
+
+#ifdef SC_ISS_RUN_ALONE
+	ISSStepCycle();
+	m_iss_sync_sc.request_update();
+#else 
+	if(bDSPEnable)
+	{
+        //cout<<"get"<<endl;
+#ifndef BWSIM_SUPPORT_IO
+		//JTAGLog(0,"core %d, PC: 0x%x\n",GetID(),GetPC());
+        //printf("core %d, PC: 0x%x\n",GetID(),GetPC());
+        //cout<<GetID()<<"\t"<<hex<<GetPC()<<endl;
+#endif
+		if(!bRunFirstCycle)
+		{
+			if (iFirstCycleWaitForHardware)
+			{
+				iFirstCycleWaitForHardware--;
+				m_pICACHE->share_sram_docycle(false);
+				return;
+			}
+			////若有断点触发，停止核，并设置停止原因。
+			if(IsBPHit())
+			{
+				JTAGLog(0,"BP hit at core %d, pc 0x%x\n",GetID(),GetPC());
+				cycleStopRsn|=(1<<BP_HIT);
+			}
+			//若有观察点触发，则停止核，不再运行内核，并设置停止原因。
+			unsigned int wpreg=0;
+			if(wpreg = GetWPTriggerReg())
+			{
+				//在此添加判断是否有IO事件发生及调用IO处理程序，2014-7-15
+				//因为只插入了一个观察点，所以只要有观察点触发，必定是IO事件。
+#ifdef BWSIM_SUPPORT_IO
+				if(wpreg&1)
+				{
+					if(ioserver)
+					{
+						JTAGLog(0,"ready to do IO work at PC %x.\n",GetPC());
+						ioserver->preread();
+						ioserver->exec();
+					}
+				}
+				else
+				{
+					cycleStopRsn|=(1<<WP_TRIGGER);
+				}
+#else
+				JTAGLog(0,"WP hit at core %d, pc 0x%x\n",GetID(),GetPC());
+				cycleStopRsn|=(1<<WP_TRIGGER);
+#endif
+			}
+
+			if(bStepInst)
+			{
+				StepInstCycles++;
+				if(isStepInsn())
+				{
+					InstPassed++;
+				}
+
+				if(InstPassed>=InstCnt)
+				{
+					cycleStopRsn|=(1<<STEP_INST_END);
+				}
+
+				if (StepInstCycles>STEP_INST_MAX_CYCLE)
+				{
+					cycleStopRsn|=(1<<STEP_INST_END);
+				}
+			}
+
+			if(cycleStopRsn)
+			{
+				JTAGLog(0,"I am going to set bDSPEnable to false in kernel, core %d, PC 0x%x, StopReason %x\n",
+					GetID(),GetPC(),cycleStopRsn);
+
+				//m_pICACHE->share_sram_docycle(bDSPEnable);
+
+				{
+					/*FILE * fp = fopen("tlm.txt","at");
+					fprintf(fp,"exit from dsp_en at 0x%x\n",m_u32CyclesL);
+					fclose(fp);*/
+					boost::mutex::scoped_lock lk(jtagMutex);
+					bDSPEnable=false;
+					bRunFirstCycle=false;
+					bDSPRunning=false;
+					bStepCycle=false;
+					CycleCnt=0;
+					CyclePassed=0;
+					bStepInst=false;
+					InstCnt=0;
+					InstPassed=0;
+					StepInstCycles=0;
+					if(isFatalExcp())
+					{
+						cycleStopRsn|=(1<<CORE_EXCEPTION);
+						DSPU32 expCode=getExcode();
+						expCode=(expCode&0x3f)<<6;
+						cycleStopRsn|=expCode;
+
+					}
+					StopReason=cycleStopRsn;
+				}
+
+				{
+					boost::mutex::scoped_lock lk(ntfyMutex);
+					ntfyMsg nt;
+					nt.coreIdx=GetID();
+					nt.pc=GetPC();
+					nt.wp=GetWPTriggerReg();
+					nt.stopRsn=StopReason;
+					ntfyMsgQ.push(nt);
+				}
+				m_pICACHE->share_sram_docycle(bDSPEnable);
+				return;
+			}
+		}
+		else
+		{
+			bRunFirstCycle=false;
+			iFirstCycleWaitForHardware=WAIT_FOR_HARDWARE_CYCLE;
+		}
+
+		cycleStopRsn=0;
+		if(bStepCycle)
+		{
+			CyclePassed++;
+
+			if(CyclePassed>=CycleCnt)
+			{
+				cycleStopRsn|=(1<<STEP_CYCLE_END);
+			}
+		}
+
+		if(!isFatalExcp())
+		{
+			lastPC=GetPC();
+			ISSStepCycle();
+			m_iss_sync_sc.request_update();
+		}
+	}else{
+
+	m_pICACHE->share_sram_docycle(bDSPEnable);
+	}
+
+
+#endif
+	
+}
+
+
+//------------------------------------------------
+bool sc_iss::SetIOPath(const char *p_pPath)
+{
+	if ( strlen(p_pPath) > 100 )
+	{
+		PrintToCerr("SetIOPath: the path is too long\n");
+		return false;
+	}
+	
+	strcpy(g_arrIOPath, p_pPath);
+	m_bolUseCustomPath = true;
+
+	#ifdef  BWSIM_LOG_INFO
+	//printf("SetIOPath: current IO path is %s\n", g_arrIOPath);
+	#endif
+
+#ifdef LIBTESTCODE
+	m_CodeCovForLibTest = true;
+	m_pc.clear();
+	m_cond_pc.clear();
+#endif
+
+	return true;
+}
+//------------------------------------------------
+void sc_iss::SetLogMode(DSPU32  p_u32Mode)
+{
+	m_u32LogMode = p_u32Mode;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SetTestMode(DSPU32  p_u32Mode)
+{
+	m_u32TestMode = p_u32Mode;
+}
+//------------------------------------------------
+void sc_iss::RstDspDataMem()
+{
+	DSPU32 u32SizeInByte;
+
+	u32SizeInByte = INNER_DATA_BLK_SIZE * 4;
+	for (int i = 0; i < 6; i++)
+	{
+		memset(u32_data_mem[i], 0, u32SizeInByte);
+	}
+}
+//------------------------------------------------
+// add 2007-12-20
+// BWIDE should call this function to init memory of DSP before load and reload.
+//
+void sc_iss::RstDspMem()
+{
+	DSPU32 u32SizeInByte;
+
+	u32SizeInByte = INNER_DATA_BLK_SIZE * 4;
+	for (int i = 0; i < 6; i++)
+	{
+		memset(u32_data_mem[i], 0, u32SizeInByte);
+	}
+}
+//------------------------------------------------
+// for mem test use (liuyu)
+void sc_iss::InitDspMem()
+{
+	for(int i = 0; i < BLK_NUM_PERCORE; i++)
+	{
+		for(int j = 0; j < INNER_DATA_BLK_SIZE; j++)
+#ifdef BWSIM_PUB_MODE
+			//u32_data_mem[i][j] = 0;
+			u32_data_mem[i][j] = (i+1)*0x200000 + j;
+#else
+			u32_data_mem[i][j] = 0;
+//			u32_data_mem[i][j] = (i+1)*0x200000 + j;
+#endif
+	}
+}
+//------------------------------------------------
+bool sc_iss::LogDSPMem()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/dspmem.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+    {
+		PrintToCerr("Error occured when open dspmem.txt\n");
+    	return false;
+    }
+
+	fprintf(fp, "//------------------------------------------------------------------------------------\n");
+	for (int i = 0; i < 6; i++)
+	{
+		for (int j = 0; j < INNER_DATA_BLK_SIZE; j++)
+		{
+			fprintf(fp, "%08x ", u32_data_mem[i][j]);
+			if ((j + 1) % 16 == 0)
+			{
+				fprintf(fp, "\n");
+			}
+		}
+		fprintf(fp, "//------------------------------------------------------------------------------------\n");
+	}	
+
+    fclose(fp);
+	return true;
+}
+//------------------------------------------------
+bool sc_iss::IsTestEnded()
+{
+	return bolr_TestEnd;
+}
+//------------------------------------------------
+bool sc_iss::IsBPHit()
+{
+	return ISSIsBPHit();
+}
+//------------------------------------------------
+bool sc_iss::InsertBreakpoint(DSPU32 p_u32Addr, DSPU32 p_u32NegCnt)
+{
+	return ISSInsertBreakpoint(p_u32Addr, p_u32NegCnt);
+}
+//------------------------------------------------
+void sc_iss::ClearBreakpoint()
+{
+	ISSClearBreakpoint();
+}
+//------------------------------------------------
+DSPU32 sc_iss::GetWPTriggerReg()
+{
+	return ISSGetWPTriggerReg();
+}
+//------------------------------------------------
+bool sc_iss::InsertWatchpoint(DSPU32 p_u32StartAddr, DSPU32 p_u32EndAddr, DSPU32 p_u32NegCnt, DSPU8 p_u8Type)
+{
+	return ISSInsertWatchpoint(p_u32StartAddr, p_u32EndAddr, p_u32NegCnt, p_u8Type);
+}
+//------------------------------------------------
+void sc_iss::ClearWatchpoint()
+{
+	ISSClearWatchpoint();
+}
+//------------------------------------------------
+void sc_iss::Reset()
+{
+		int i;
+		DSPU32 u32BootAddr;
+
+		ResetIABP1();
+		ResetIABP0();
+		Reset_PIPE_EX();
+
+		u64r_INTReg0.SetValue( GenDSPU64(0xFFFFFFFF, 0xFFFFFFFF) );
+		u64r_INTReg1.SetValue( GenDSPU64(0xFFFFFFFF, 0xFFFFFFFF) );
+		m_u32AppINT = 0;
+		m_u32CyclesL = 0;
+		m_u32CyclesH = 0;
+		m_u32NestLvl_FE1 = 0;
+		m_bolSimEnd = false;		
+		m_bolFatalExcp = false;
+		m_bolMemLogged = false;
+		
+		m_bolMemExcp_AC = false;
+		m_bolAbandon_AC = false;
+		m_bolShutINT = false;
+		m_bolRTrap4Valid = true;
+		m_bolUseWrMemLog = false;
+		m_bolDmaRdWrConflictSticky = false;
+
+		m_bolLogOnStrap = false;
+		m_bolLimitRtrap10 = false;
+		m_bolLogRegsDetail = true;
+		m_bolOnlyOutINT = false;
+		m_u32GateCycles = 340000;
+		m_bolJTAGStopped = false;
+		m_bolFileLoaded = false;
+		
+		m_bolUsingCache = false;
+		
+		m_bolStateDiffer = false;
+#ifdef ECS_RES_STAT
+		m_bolStatEn = false;
+#endif
+#ifdef LIBTEST
+		m_bolTestForLib = false;
+#endif
+		RstModelPass();
+
+		for (i = 0; i < 9; i++)
+		{
+			m_arrJTAGPipePC[i] = 0x20000;
+		}
+
+		ResetRegs();          // reset registers
+		ResetSignals();      // reset signals
+		ResetBPB();           // reset Branch Predict Buffer
+
+		// init program cache
+		//InitProgCache();  // comment this line if want to bypass prog cache
+
+		// init resource link list
+		InitResSLK();
+		// init link list for memory access in pipeline
+		InitMPSLK();
+		
+		// init JIT cache
+		InitJITCache();
+		// init watchpoint array
+		InitWPs();
+		// init breakpoint array
+		InitBPs();
+
+#ifdef ICMA_TESTING
+		reset_icma_req();
+		reset_icma_resp();
+#endif
+#ifdef DMAC_TESTING
+		reset_dmac_req();
+		reset_dmac_resp();
+		// 初始化bank冲突信息查找表
+		//init_bank_conflict_tbl();
+#endif
+		// custom INTs is inited by app or InitCustomINT().
+		// InitCustomINT();         // only for self testing
+
+		// 清空DC4级的访存请求信息
+		RstMemReqs_DC4();
+
+		// cache相关
+		if(GetBootAddr(u32BootAddr))
+		{
+			m_pICACHE->reset(u32BootAddr);             // 复位cache
+		}
+		else
+		{
+			m_pICACHE->reset(0xb000000);             // 复位cache
+		}
+		m_pICACHE->SetCacheSpace(0xE10000);
+		m_pICACHE->SetMode(icache_module_new::ICACHE_NORMAL);
+		//m_pICACHE->SetMode(icache_module_new::ICACHE_SRAM);                // set to sram mode
+		//m_pICACHE->SetBPB(u2r_BPB, 2048);   // 告知cache分支预测表的基地址		
+		m_pICACHE->SetBPB(u2ro_BPB, 2048);
+
+#ifdef DMAC_TESTING
+		// 复位DMAC
+//		reset_dmac();
+#endif
+
+#ifdef PIPE_FE_TESTING
+	for (i = 0; i < 20; i++)
+	{
+		m_arrEmittedLine[i] = 0;
+	}
+#endif
+	bolri_AtomO = false;
+	bolro_AtomO = false;
+
+	bolFirstWB = false;
+	bolFirstEX = false;
+	u32r_CBTgtAddr = 0xffffffffU;
+	bolr_CBEn = false;
+	m_u32BPMask = 0U;
+
+	bolStartDump = false;
+	bolDMemDumped = false;
+
+	m_u64WastedCycles = 0ULL;
+	m_u64MemStallCycles = 0ULL;
+	m_u64HzdStallCycles = 0ULL;
+	m_u64InstNum_WB = 0ULL;
+
+#ifdef DECODER_TESTING
+	dis_line_num=0;
+#endif
+	m_u32ABIMask = 0U;
+	m_bolABIChkEn = false;
+	m_u32ABITop = 0x600000;
+	m_u32ABIBase = 0x60ffff;
+
+	m_u32IdleTick = 0;
+	m_u32CustomINTIdx = 0;
+
+	m_bolDMemDumped = false;
+	m_bolStartDump = false;
+	m_u32DumpCntDown = 10000U;
+
+	m_u32TraceState = 0;
+	m_u32TraceCase1 = 0;
+	m_u32TraceCase3 = 0;
+
+	m_u32MPCnt = 0;
+	m_u32BRCnt = 0;
+
+	// Event 0 is bounded to all intlvl in default case
+	EvtSrc2Int_Map[0] = 0x5a5a5a5a;
+	for(int i = 1; i < MAX_EVT_NUM; i++)
+	{
+		EvtSrc2Int_Map[i] = MAX_INT_LVL + 1;
+	}
+}
+
+//----------------------------------------------------------
+void sc_iss::ISSStepCycle()
+{
+		unsigned int u32ExcpMaskLow, u32ExcpMaskHigh, u32Temp;
+
+		if ((m_u32CyclesL == 0) && (m_u32CyclesH == 0))
+		{
+			// 若为第一个cycle
+			if (!m_bolUseCustomPath)
+			{
+				// 设置日志文件I/O路径
+				SetDefaultPath();
+			}
+#ifndef BWSIM_PUB_MODE
+			// 清空日志文件
+			ClrDbgInfo();  // only for verification use
+#endif
+			InitLogForECS();
+			ClrTestResult();
+			m_u64ILATClr = m_u64ILATSet = 0ULL;
+			//LogPMForDecoder();  // only for verification use
+		}
+
+#ifdef INTERRUPT_TESTING
+		u32Temp = u32r_SeqCounter_WB;
+		if (m_bolWBDone && (u32Temp != 0) && (m_u32WBNestLvl == 0))
+		{
+			// 若前一个cycle有指令行通过WB级，且该指令行不属于中断服务程序
+			LogIRQTestGREG();
+		}
+
+		u32Temp = u32r_SeqCounter_AC;
+		if (m_bolACPostDone && (u32Temp != 0) && (m_u32ACPostNestLvl == 0))
+		{
+			// 若前一个cycle有指令行通过AC级，且该指令行不属于中断服务程序
+			LogIRQTestAREG();
+		}
+#endif
+
+		u32Temp = u32r_CyclesL;
+		if ( (m_u32TestMode == 2) && (u32Temp == (unsigned int)10000) )
+		{
+			//LogDataMem();
+		}
+
+		IncCycles();
+		ResetSignals();        // reset signals
+//		ClrBPTrigerFlag();     // 清断点触发标志
+
+		// DetectINT was moved into DSP_PEX_EXE (2008-5-8)
+		DetectFatalExcp();
+
+		//-----------------------------------------------------------------------------------
+		// Execute all activated operations in the pipeline		
+		DSP_PEX_EXE();
+	
+		ManageDataHzdBefDC4();
+#ifdef ICMA_TESTING
+		SrvICMAReq_AC();
+		GenICMAStall();
+#endif
+#ifdef DMAC_TESTING
+		SrvDMACReq_AC();
+		GenDMACStall();
+#endif
+		
+		GenPipeEXFlushBefDC4();		// 形成PEX中各级实际的flush信号
+		GenPipeEXStallBefDC4();		// 形成PEX中AC/EX及之前各级实际的stall信号
+		
+		DSP_PEX_POST_EXE_BEF_DC4();	// AC级及之前各级最后一个时钟节拍的行为		
+		ManageDataHazard();			
+		SrvMemReq_DC4();
+		
+		GenPipeEXStall();				// 形成PEX中DC4/AC及之后各级实际的stall信号
+		DSP_PEX_POST_EXE();			// DC4级及之后各级最后一个时钟节拍的行为
+		//-----------------------------------------------------------------------------------
+		// attention: m_bolStall_EMITDC1 is used in EMIT_ACTION
+		if (m_bolEXBraTaken || m_bolACBraTaken || m_bolCondBraTaken)
+		{
+			// EX flush时，只阻塞IAB入口，不阻塞更新以及发射
+			m_PEX_bolStallIABP1 = true;
+		}
+		EMIT_ACTION();
+		GenPipeEXFlush();
+		GenIABFlush();         // 生成IAB的flush信号		
+
+		//-----------------------------------------------------------------------------------
+		FreeWBSLKRes();		// free SLK resource of WB_IN if needed
+
+		//--------------cache related below--------------
+		GenIABHalt(); // 产生信号m_bolIABCanBeUpdate(cache需要)
+		if ((!m_bolIABCanBeUpdate) || m_PEX_bolStallIABP1)
+		{
+			m_pICACHE->NotifyIABHalt(true);
+		}
+		else
+		{
+			m_pICACHE->NotifyIABHalt(false);
+		}
+
+		PutFlushInfoToCache();
+		m_pICACHE->NotifyCJMPValue(u32ro_CJMP);
+		for (int i = 0; i < 4; i++)
+		{
+			m_pICACHE->NotifyLCValue(i, u32ro_LC[i]);
+		}
+
+		// 为cache的仲裁逻辑提供所需信息
+		NotifyCacheUpdatefpc();
+		m_pICACHE->NotifyRETI(m_bolEXIsIRET);
+		
+		m_pICACHE->CacheDoCycle();
+
+
+		// 形成新的FPC
+		m_pICACHE->GetFE2BraInfo (&m_bolFE2BraTaken,  &m_u32FE2TgtAddr, &m_u32FE2INTLvl, &m_bolIsFE2FrmL2);
+		
+		m_bolFPCUsed = m_pICACHE->IsFPCUsed();
+		UpdateFPC();
+		m_pICACHE->evaluate_FE0_software();
+		
+		// 生成IAB的stall信号
+		if (m_bolIABCanBeUpdate && m_pICACHE->IsCacheSlotsReady() && (!m_PEX_bolStallIABP1))
+		{
+			m_bolStallIABP0 = false;
+			m_bolStallIABP1 = false;
+		}
+		else
+		{
+			m_bolStallIABP0 = true;
+			m_bolStallIABP1 = true;
+		}
+
+		// 若stall信号为false, 则更新IAB
+		UpdateIAB();       // 若IAB允许更新，则更新IAB0, IAB1的输入侧
+		//--------------cache related up--------------
+
+		UpdateEPC();
+		m_pTIMER->DoTimer();
+		DetectTINT();
+
+		if (bolr_UseCustomINT)
+		{
+			UseCustomINT();
+		}
+		else if (bolr_UseRealINT)
+		{
+			UseRealINT();
+		}
+		else if (bolr_UseRTLINT)
+		{
+			UseRTLINT();
+		}
+
+		u64r_INTReg1 = u64r_INTReg0;
+		
+		if( (m_u64SameINTClr | m_u64SameINTSet) != 0 )
+		{
+			DSPU64 u64SameINT = u64r_SameINT;
+			u64SameINT = u64SameINT | m_u64SameINTSet;
+			u64SameINT = u64SameINT & (~m_u64SameINTClr);
+			u64r_SameINT = u64SameINT;
+		}
+
+		//-------------------------------------------------------------------------------		
+
+		DSP_Stall();      // 实际执行stall操作
+		DSP_Flush();     // 实际执行清流水线寄存器操作
+#ifdef ECS_LOG2
+		FILE *fp;
+		sprintf(g_arrFileName, "%s/PC.txt", g_arrIOPath);
+		if (m_u32CyclesL % 1000000 == 0) {
+			if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+			{
+				PrintToCerr("Error occured when open PC.txt\n");
+				return ;
+			}
+			fclose(fp);
+		}
+
+		if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+		{
+			PrintToCerr("Error occured when open PC.txt\n");
+			return ;
+		}
+		fprintf(fp, "<%d>FPC: %08x", m_u32CyclesL/1000000, m_pICACHE->RdFPC());
+		fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC1_DC2.m_right.uint32r_pc);
+		fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC2_DC3.m_right.uint32r_pc);
+		fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC3_DC4.m_right.uint32r_pc);
+		fprintf(fp, "  %08x", (DSPU32)PIPE_EX.DC4_AC.m_right.uint32r_pc);
+		fprintf(fp, "  %08x", (DSPU32)PIPE_EX.AC_EX.m_right.uint32r_pc);
+		fprintf(fp, "  %08x", (DSPU32)PIPE_EX.EX_WB.m_right.uint32r_pc);
+		fprintf(fp, " U8 = %08x", u32ro_U[8]);
+		fprintf(fp, "  %016llx", u64ro_ILAT);
+		fprintf(fp, "  %016llx", (DSPU64)u64r_PMASK);
+		fprintf(fp, "  %016llx\n", (DSPU64)u64r_SameINT);
+		fclose(fp);
+#endif
+#ifdef ECS_RES_STAT
+		if(m_bolStatEn)
+		{
+			ISSResStat();		
+		}
+#endif
+
+#ifdef LOG_STEP_TESTING
+		if(bolFirstWB)
+	{
+//		LogGenRegs();
+//		LogAddrRegs();
+/*
+		LogTimerRegs();
+		LogALUReg0();
+		LogALUReg1();
+		LogSPURegs();
+		LogSHFRegs();
+		LogMULRegs();
+		LogMemCE();
+		LogSpecRegs();
+		LogImafr();	
+		LogDMACRegs();	
+*/		//LogSHFTAB();
+	}
+	
+	if(m_bolStartDump && !m_bolDMemDumped)
+	{
+		if(m_u32DumpCntDown == 0)
+		{
+		//	LogDataMem();
+			bolr_TestEnd = true;
+			m_bolDMemDumped = true;
+		}
+		else
+		{
+			m_u32DumpCntDown--;
+		}
+	}
+#endif
+#ifdef LOG_PXP
+	LogPipePC_PXP();
+	if(m_bolWrEn)
+	{
+		LogGenRegs_PXP();
+	}
+	if(m_u64ARegWMask != 0ULL)
+	{
+		LogAddrRegs_PXP();	
+	}
+	LogALUReg_PXP();
+	LogMULRegs_PXP();
+	LogSHFRegs_PXP();
+#endif
+}
+//----------------------------------------------------------
+void sc_iss::ShiftRegs()
+{
+	PIPE_EX.shift();
+
+	ShiftGREGs();
+	ShiftCustomRegs();
+	
+	m_pICACHE->CacheShiftReg();
+	m_pTIMER->ShiftRegs();
+	m_pDMAC->ShiftRegs();
+}
+
+//----------------------------------------------------------
+// 在寄存器更新操作ShiftRegs()之后执行
+//
+void sc_iss::PostShiftRegs()
+{
+	DSPU32 u32Temp;
+
+	u32Temp = u32r_EPC;
+	
+	TriggerBP(u32Temp);
+
+	// 只要没有通用寄存器相关，那么微请求就需要传递
+	// 核外访存不会阻塞微请求传递
+	if(!m_AC_bolHazardStall_ACEX && (m_AC_bolICMAStall_ACEX || m_AC_bolDMACStall_ACEX))
+	{
+		u32Temp = PIPE_EX.DC4_AC.m_right.u32_MPSLKIdx;
+		if(u32Temp != 0)
+		{
+			PIPE_EX.AC_EX.m_right.u32_MPSLKIdx = u32Temp;
+			PIPE_EX.EX_WB.m_left.u32_MPSLKIdx  = u32Temp;
+			PIPE_EX.DC4_AC.m_right.u32_MPSLKIdx = 0;
+			PIPE_EX.AC_EX.m_left.u32_MPSLKIdx = 0;			
+		}
+	}
+	// added for memory access in pipeline
+	if ( m_u32MPReqIdx != 0 )
+	{
+		PIPE_EX.DC4_AC.m_right.u32_MPSLKIdx = m_u32MPReqIdx;
+		PIPE_EX.AC_EX.m_left.u32_MPSLKIdx = m_u32MPReqIdx;
+		/*
+		if (m_bolStall_DC4AC)
+		{
+			// 当((m_u32MPReqIdx != 0) && m_bolStall_DC4AC), 将产生携带写访存微操作的气泡行
+			// 携带中断级别信息，避免被前方低优先级分支指令清除
+			PIPE_EX.DC4_AC.m_right.u32_NestLvl = PIPE_EX.DC4_AC.m_left.u32_NestLvl;
+			PIPE_EX.AC_EX.m_left.u32_NestLvl = PIPE_EX.DC4_AC.m_left.u32_NestLvl;
+
+			if (PIPE_EX.DC4_AC.m_left.bol_ISRFirstLn)
+			{
+				// 将ISR第一行指令标志转移到微操作上向前传递
+				PIPE_EX.DC4_AC.m_right.bol_ISRFirstLn = true;
+				PIPE_EX.AC_EX.m_left.bol_ISRFirstLn = true;
+
+				// 清除原来的ISR第一行指令标志
+				PIPE_EX.DC3_DC4.m_right.bol_ISRFirstLn = false;
+				PIPE_EX.DC4_AC.m_left.bol_ISRFirstLn = false;
+			}	
+		}
+		*/
+	}
+
+#ifdef BWSIM_LOG_INFO
+	LogPipePC();
+//	LogDbgInfo();             // only for verification use
+#endif	
+#ifdef LOG_OUTPUT
+	m_pICACHE->display();
+#endif
+}
+
+
+//-------------------------------------------------------------------------
+// set core ID of ISS
+void sc_iss::SetID(DSPU16 p_u16CoreID)
+{
+	DSPU32 u32Temp;
+	DSPU32 u32RID;
+
+	u32Temp = p_u16CoreID;
+	u32r_CoreID.SetValue(u32Temp);
+
+	// CINF: [12-8]:CID [7:0] RID
+	u32RID = 1;
+	u32Temp = ((u32Temp & 0x1f) << 8) | (u32RID & 0xFF);
+	u32r_CINF.SetValue(u32Temp);
+	u32r_CINF.shift();
+}
+//-------------------------------------------------------------------------
+// get core ID of ISS
+DSPU16 sc_iss::GetID()
+{
+	DSPU16 u16CoreID;
+	DSPU32 u32Temp;
+
+	u32Temp = u32r_CINF;
+	u16CoreID = ((u32Temp >> 8) & 0x1F);
+	return u16CoreID;
+}
+//-------------------------------------------------------------------------
+// get EPC of ISS
+DSPU32 sc_iss::GetPC()
+{
+	DSPU32 u32EPC;
+
+	u32EPC = u32r_EPC;
+	return u32EPC;
+}
+//-------------------------------------------------------------------------
+//	p_u32Addr: virtual address of the processor
+//
+bool sc_iss::ReadMem(DSPU32 p_u32Addr, DSPU32 *p_pValue)
+{
+	bool bolAddrValid = false;
+	DSPU32 u32RegIdx;
+	
+	bool bolCacheHit;
+	PIPE_FE_REG_CONTENT pipe_fe_reg_content;
+		
+	m_pICACHE->jtagReadCacheSlots(&bolCacheHit, &pipe_fe_reg_content);
+	if(p_u32Addr >= LOCAL_TIMER_ADDR && p_u32Addr <= LOCAL_TIMER_ADDR + LOCAL_TIMER_OFFSET)
+	{
+		u32RegIdx = p_u32Addr - LOCAL_TIMER_ADDR;
+		return (m_pTIMER->JTagRdTimerRegs(u32RegIdx, *p_pValue));
+	}
+
+	if(p_u32Addr >= DMAC_REG_START && p_u32Addr <= DMAC_REG_END)
+	{
+		if(p_u32Addr > DMAC_REG_LAST)
+			return false;
+		u32RegIdx = ((p_u32Addr - GRP1_SPEC_REG_GADDR) | 0x400);
+		return (jtag_rd_dmac_reg(u32RegIdx, p_pValue));
+	}
+	if(p_u32Addr >= JTAG_ADDR_END && p_u32Addr < JTAG_ADDR_END)
+	{
+		*p_pValue = 0;
+	}
+
+	*p_pValue = 0xcdcdcdcd;
+
+	// cache在SRAM模式下的地址空间
+	if ( (p_u32Addr >= CACHE_RAM_LOW_ADDR) && (p_u32Addr <= CACHE_RAM_HIGH_ADDR) )
+	{
+		if ( m_pICACHE->RdCacheMem(p_u32Addr, p_pValue) )
+		{
+			bolAddrValid = true;
+		}
+		else
+		{
+			printf("ReadMem: failed to read cache memory\n");
+		}
+	}
+	//数据存储空间0x0020_0000~0x00DF_FFFF
+	//数据存储空间block0
+	else if ( (p_u32Addr >= BLK0_LOW_ADDR) && (p_u32Addr <= BLK0_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK0_LOW_ADDR;
+		*p_pValue = u32_data_mem[0][u32RegIdx];
+		bolAddrValid = true;
+	}
+	//数据存储空间block1
+	else if ( (p_u32Addr >= BLK1_LOW_ADDR) && (p_u32Addr <= BLK1_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK1_LOW_ADDR;
+		*p_pValue = u32_data_mem[1][u32RegIdx];
+		bolAddrValid = true;
+	}
+	//数据存储空间block2
+	else if ( (p_u32Addr >= BLK2_LOW_ADDR) && (p_u32Addr <= BLK2_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK2_LOW_ADDR;
+		*p_pValue = u32_data_mem[2][u32RegIdx];
+		bolAddrValid = true;
+	}
+	//数据存储空间block3
+	else if ( (p_u32Addr >= BLK3_LOW_ADDR) && (p_u32Addr <= BLK3_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK3_LOW_ADDR;
+		*p_pValue = u32_data_mem[3][u32RegIdx];
+		bolAddrValid = true;
+	}
+	//数据存储空间block4
+	else if ( (p_u32Addr >= BLK4_LOW_ADDR) && (p_u32Addr <= BLK4_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK4_LOW_ADDR;
+		*p_pValue = u32_data_mem[4][u32RegIdx];
+		bolAddrValid = true;
+	}
+	//数据存储空间block5
+	else if ( (p_u32Addr >= BLK5_LOW_ADDR) && (p_u32Addr <= BLK5_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK5_LOW_ADDR;
+		*p_pValue = u32_data_mem[5][u32RegIdx];
+		bolAddrValid = true;
+	}
+	//数据/地址通用寄存器0x0120_0800~0x0120_0BFF
+	//通用寄存器xyzt[63..0]包含AB面
+	else if ( (p_u32Addr >= GRMM_LOW_ADDR) && (p_u32Addr <= GRMM_HIGH_ADDR) )
+	{
+		DSPU32 u32Macro, u32Page, u32Index, u32Temp;
+
+		u32RegIdx = p_u32Addr - GRMM_LOW_ADDR;
+		u32Macro = u32RegIdx / 128;  // 0 ~ 3
+		u32Temp = u32RegIdx % 128;
+		u32Page = u32Temp / 64;  // 0 ~ 1
+		u32Index = u32Temp % 64;
+		*p_pValue = ReadGPR_JTAG(u32Macro, u32Index, u32Page);
+		bolAddrValid = true;
+	}
+	//u地址寄存器
+	else if ( (p_u32Addr >= UVW_GADDR) && (p_u32Addr <= UVW_GADDR + 0xF) )
+	{
+			u32RegIdx = p_u32Addr - UVW_GADDR;
+			*p_pValue = rd_u32r_UVW_JTAG(0, u32RegIdx); // todo: shouldn't trigger WP
+			bolAddrValid = true;
+	}
+	//v地址寄存器
+	else if ( (p_u32Addr >= UVW_GADDR + 0x10) && (p_u32Addr <= UVW_GADDR + 0x1F) )
+	{
+			u32RegIdx = p_u32Addr - UVW_GADDR - 0x10;
+			*p_pValue = rd_u32r_UVW_JTAG(1, u32RegIdx);
+			bolAddrValid = true;
+	}
+	//w地址寄存器
+	else if ( (p_u32Addr >= UVW_GADDR + 0x20) && (p_u32Addr <= UVW_GADDR + 0x2F) )
+	{
+			u32RegIdx = p_u32Addr - UVW_GADDR - 0x20;
+			*p_pValue = rd_u32r_UVW_JTAG(2, u32RegIdx);
+			bolAddrValid = true;
+	}
+	else if ( (p_u32Addr >= PIPEREG_GADDR) && (p_u32Addr <= PIPEREG_GADDR + 0xF) )
+	{		
+		u32RegIdx = p_u32Addr - PIPEREG_GADDR;
+		*p_pValue = pipe_fe_reg_content.u32_slot[u32RegIdx];
+			
+		bolAddrValid = true;
+	}
+	//bufA1位于IAB2/IAB3级之间的流水线寄存器
+	else if ( (p_u32Addr >= PIPEREG_GADDR + 0x30) && (p_u32Addr <= PIPEREG_GADDR + 0x3F) )
+	{
+		u32RegIdx = p_u32Addr - PIPEREG_GADDR - 0x30;
+		*p_pValue = m_arrIABP0Out[u32RegIdx];
+		bolAddrValid = true;
+	}
+	//bufA0位于IAB3/DC1级之间的流水线寄存器
+	else if ( (p_u32Addr >= PIPEREG_GADDR + 0x40) && (p_u32Addr <= PIPEREG_GADDR + 0x4F) )
+	{
+		u32RegIdx = p_u32Addr - PIPEREG_GADDR - 0x40;
+		*p_pValue = PIPE_EX.EMIT_DC1.m_right.uint32r_slot[u32RegIdx];
+		bolAddrValid = true;
+	}
+	//状态/控制寄存器0x0120_0000~0x0120_03FF
+	//CPred，该类寄存器除通过JTAG访问外还可以通过指令访问
+	else if ( (p_u32Addr >= ALUCPred_GADDR) && (p_u32Addr <= ALUCPred_GADDR + 0x3) )
+	{
+			u32RegIdx = p_u32Addr - ALUCPred_GADDR;
+			*p_pValue = u32ro_CPredReg[u32RegIdx];
+			bolAddrValid = true;
+	}
+	//SACC，该类寄存器除通过JTAG访问外还可以通过指令访问
+	else if ( (p_u32Addr >= SACC_GADDR) && (p_u32Addr <= SACC_GADDR + 0x1F) )
+	{
+			u32RegIdx = p_u32Addr - SACC_GADDR;
+			DSPU32 unitnum = u32RegIdx / 8;
+			DSPU32 shfnum = (u32RegIdx % 8) / 2;
+			if((u32RegIdx%2) == 0)
+			{
+				*p_pValue = u64ro_SHF_SACC[unitnum][shfnum].u32Low;
+			}
+			else
+			{
+				*p_pValue = u64ro_SHF_SACC[unitnum][shfnum].u32High;
+			}	
+			bolAddrValid = true;
+	}
+	//MACC，该类寄存器除通过JTAG访问外还可以通过指令访问
+	else if ( (p_u32Addr >= MACC_GADDR) && (p_u32Addr <= MACC_GADDR + 0x7F) )
+	{
+			u32RegIdx = p_u32Addr - MACC_GADDR;
+			DSPU32 unitnum = u32RegIdx / 32;
+			DSPU32 mulnum = (u32RegIdx % 32) / 4;
+			if((u32RegIdx%4) == 0)
+			{
+				*p_pValue = u128ro_MUL_MACC[unitnum][mulnum].u32LL;
+			}
+			else if((u32RegIdx%4) == 1)
+			{
+				*p_pValue = u128ro_MUL_MACC[unitnum][mulnum].u32HL;
+			}	
+			else if((u32RegIdx%4) == 2)
+			{
+				*p_pValue = u128ro_MUL_MACC[unitnum][mulnum].u32LH;
+			}
+			else
+			{
+				*p_pValue = u128ro_MUL_MACC[unitnum][mulnum].u32HH;
+			}
+			bolAddrValid = true;
+	}
+	//SHF查找表运算宏X的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX0_GADDR) && (p_u32Addr <= SHFTABX0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[0][0].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏X的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX1_GADDR) && (p_u32Addr <= SHFTABX1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[0][1].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏X的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX2_GADDR) && (p_u32Addr <= SHFTABX2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[0][2].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏X的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX3_GADDR) && (p_u32Addr <= SHFTABX3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[0][3].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏y的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY0_GADDR) && (p_u32Addr <= SHFTABY0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[1][0].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏y的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY1_GADDR) && (p_u32Addr <= SHFTABY1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[1][1].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏y的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY2_GADDR) && (p_u32Addr <= SHFTABY2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[1][2].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏y的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY3_GADDR) && (p_u32Addr <= SHFTABY3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[1][3].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏Z的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ0_GADDR) && (p_u32Addr <= SHFTABZ0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[2][0].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏Z的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ1_GADDR) && (p_u32Addr <= SHFTABZ1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[2][1].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏Z的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ2_GADDR) && (p_u32Addr <= SHFTABZ2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[2][2].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏Z的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ3_GADDR) && (p_u32Addr <= SHFTABZ3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[2][3].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏T的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT0_GADDR) && (p_u32Addr <= SHFTABT0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[3][0].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏T的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT1_GADDR) && (p_u32Addr <= SHFTABT1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[3][1].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏T的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT2_GADDR) && (p_u32Addr <= SHFTABT2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[3][2].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	//SHF查找表运算宏T的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT3_GADDR) && (p_u32Addr <= SHFTABT3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		*p_pValue = u32_SHF_TAB[3][3].arrElem[n][d];
+		bolAddrValid = true;
+	}
+	// SRAM ADDR: for liugu's module
+	else if ( (p_u32Addr >= SRAM_START_ADDR) && (p_u32Addr <= SRAM_START_ADDR + 0xffffU))
+	{
+		if ( m_pICACHE->read_inner_sram(p_u32Addr, p_pValue) )
+		{
+			bolAddrValid = true;
+		}
+		else
+		{
+			printf("ReadMem: failed to read sram memory\n");
+		}
+	}
+	
+	else{
+		
+		switch (p_u32Addr - GRP0_SPEC_REG_GADDR)
+		{
+			//IMAFR 可以通过指令访问
+			case 0x3CA: 
+				*p_pValue = u32r_IMAFR;
+				bolAddrValid = true;
+				break;
+			//以下switch中的寄存器为流水线pc寄存器，该类寄存器仅JTAG可读
+			case 0x3E0:
+				*p_pValue = m_pICACHE->jtag_read_FE1();
+				bolAddrValid = true;
+				break;
+			case 0x3E1:  // FE2/PHV0已删除
+				*p_pValue = m_pICACHE->jtag_read_FE2();
+				bolAddrValid = true;
+				break;
+			case 0x3E2:
+				*p_pValue = m_arrIABP1Out[16];
+				bolAddrValid = true;
+				break;
+			case 0x3E3:
+				*p_pValue = m_arrIABP0Out[16];
+				bolAddrValid = true;
+				break;				
+			case 0x3E4:
+				*p_pValue = PIPE_EX.EMIT_DC1.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;
+			case 0x3E5:
+				*p_pValue = PIPE_EX.DC1_DC2.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;
+			case 0x3E6:
+				*p_pValue = PIPE_EX.DC2_DC3.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;
+			case 0x3E7:
+				*p_pValue = PIPE_EX.DC3_DC4.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;
+			case 0x3E8:
+				*p_pValue = PIPE_EX.DC4_AC.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;
+			case 0x3E9:
+				*p_pValue = PIPE_EX.AC_EX.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;				
+			case 0x3EA:
+				*p_pValue = PIPE_EX.EX_WB.m_right.uint32r_pc;
+				bolAddrValid = true;
+				break;				
+			case 0x3EB:
+				*p_pValue = u32r_EPC;
+				bolAddrValid = true;
+				break;
+			case 0x3EC:
+				break;
+			case 0x3ED:
+				DSPU32 u32BubbleMask = 0;
+				
+				if(PIPE_EX.EX_WB.m_right.u32r_SlotNum == 0)		u32BubbleMask = GSetBit(u32BubbleMask, 11);
+				if(PIPE_EX.AC_EX.m_right.u32r_SlotNum == 0)		u32BubbleMask = GSetBit(u32BubbleMask, 10);
+				if(PIPE_EX.DC4_AC.m_right.u32r_SlotNum == 0)		u32BubbleMask = GSetBit(u32BubbleMask, 9);
+				if(PIPE_EX.DC3_DC4.m_right.u32r_SlotNum == 0)	u32BubbleMask = GSetBit(u32BubbleMask, 8);
+				if(PIPE_EX.DC2_DC3.m_right.u32r_SlotNum == 0)	u32BubbleMask = GSetBit(u32BubbleMask, 7);
+				if(PIPE_EX.DC1_DC2.m_right.u32r_SlotNum == 0)	u32BubbleMask = GSetBit(u32BubbleMask, 6);
+				if(PIPE_EX.EMIT_DC1.m_right.u32r_SlotNum == 0)	u32BubbleMask = GSetBit(u32BubbleMask, 5);
+				
+				DSPU32 u32LineWords0, u32LineWords1;
+				u32LineWords0 = u32LineWords1 = 0;
+				for(int i = 0; i < MAX_INUM_LINE; i++)
+				{
+					u32LineWords0 |= m_arrIABP0Out[i];
+					u32LineWords1 |= m_arrIABP1Out[i];
+				}
+				if(u32LineWords0 == 0)							u32BubbleMask = GSetBit(u32BubbleMask, 4);		
+				if(u32LineWords1 == 0)							u32BubbleMask = GSetBit(u32BubbleMask, 3);
+				if(m_pICACHE->jtag_read_FE2BUB())				u32BubbleMask = GSetBit(u32BubbleMask, 2);
+				if(m_pICACHE->jtag_read_FE1BUB())				u32BubbleMask = GSetBit(u32BubbleMask, 1);
+				
+				*p_pValue = u32BubbleMask;
+				bolAddrValid = true;
+				break;
+		} // switch (p_u32Addr)
+
+	} // else
+	//通过12位编址访问的寄存器
+	if (!bolAddrValid)
+	{
+		//状态控制寄存器
+		if ( (p_u32Addr >= GRP0_SPEC_REG_GADDR) && (p_u32Addr <= GRP0_SPEC_REG_GADDR + 0x3FF) )
+		{	
+			DSPU32 units=0;
+			if(!GetAddr12FromAddr32(p_u32Addr, &u32RegIdx, &units))
+			{
+				u32RegIdx = p_u32Addr - GRP0_SPEC_REG_GADDR;
+			}
+			JTAGRdSpecificReg(u32RegIdx, units, p_pValue);
+			bolAddrValid = true;
+		}
+		//中断/DMA 控制/状态寄存器
+		else if ( (p_u32Addr >= GRP1_SPEC_REG_GADDR) && (p_u32Addr <= GRP1_SPEC_REG_GADDR + 0x3FF) )
+		{
+			u32RegIdx = (p_u32Addr - GRP1_SPEC_REG_GADDR) | 0x400;
+			JTAGRdSpecificReg(u32RegIdx, 0, p_pValue);
+			bolAddrValid = true;
+		}
+		else if ( (p_u32Addr >= GRP2_SPEC_REG_GADDR) && (p_u32Addr <= GRP2_SPEC_REG_GADDR + 0x3FF) )
+		{
+			u32RegIdx = (p_u32Addr - GRP2_SPEC_REG_GADDR) | 0x800;
+			JTAGRdSpecificReg(u32RegIdx, 0, p_pValue);
+			bolAddrValid = true;
+		}
+	}
+
+	if (!bolAddrValid)
+	{
+		sprintf(g_arrLisaMsg, "read memory: memory address 0x%x is invalid\n", (unsigned int)p_u32Addr);
+		PrintToCerr(g_arrLisaMsg);
+	}
+
+	//return bolAddrValid; // should use this line in release version
+	return true;  // just for display in ECS
+}
+
+//-------------------------------------------------------------------------
+//		p_u32Addr: virtual address of the processor
+//
+bool sc_iss::WriteMem(DSPU32 p_u32Addr, DSPU32 p_u32Value)
+{
+	bool bolAddrValid = false;
+	DSPU32 u32RegIdx;
+	if(p_u32Addr >= LOCAL_TIMER_ADDR && p_u32Addr <= LOCAL_TIMER_ADDR + LOCAL_TIMER_OFFSET)
+	{
+		u32RegIdx = p_u32Addr - LOCAL_TIMER_ADDR;
+		return (m_pTIMER->JTagWrTimerRegs(u32RegIdx, p_u32Value));
+	}
+
+	// cache在SRAM模式下的地址空间
+	if ( (p_u32Addr >= CACHE_RAM_LOW_ADDR) && (p_u32Addr <= CACHE_RAM_HIGH_ADDR) )
+	{
+		if ( m_pICACHE->WrCacheMem(p_u32Addr, p_u32Value) )
+		{
+			bolAddrValid = true;
+		}
+		else
+		{
+			printf("WriteMem: failed to write cache memory\n");
+		}
+	}
+	//数据存储空间0x0020_0000~0x00DF_FFFF
+	//数据存储空间block0
+	else if ( (p_u32Addr >= BLK0_LOW_ADDR) && (p_u32Addr <= BLK0_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK0_LOW_ADDR;
+		u32_data_mem[0][u32RegIdx] = p_u32Value;
+		bolAddrValid = true;
+	}
+	//数据存储空间block1
+	else if ( (p_u32Addr >= BLK1_LOW_ADDR) && (p_u32Addr <= BLK1_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK1_LOW_ADDR;
+		u32_data_mem[1][u32RegIdx] = p_u32Value;
+		bolAddrValid = true;
+	}
+	//数据存储空间block2
+	else if ( (p_u32Addr >= BLK2_LOW_ADDR) && (p_u32Addr <= BLK2_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK2_LOW_ADDR;
+		u32_data_mem[2][u32RegIdx] = p_u32Value;
+		bolAddrValid = true;
+	}
+	//数据存储空间block3
+	else if ( (p_u32Addr >= BLK3_LOW_ADDR) && (p_u32Addr <= BLK3_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK3_LOW_ADDR;
+		u32_data_mem[3][u32RegIdx] = p_u32Value;
+		bolAddrValid = true;
+	}
+	//数据存储空间block4
+	else if ( (p_u32Addr >= BLK4_LOW_ADDR) && (p_u32Addr <= BLK4_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK4_LOW_ADDR;
+		u32_data_mem[4][u32RegIdx] = p_u32Value;
+		bolAddrValid = true;
+	}
+	//数据存储空间block5
+	else if ( (p_u32Addr >= BLK5_LOW_ADDR) && (p_u32Addr <= BLK5_HIGH_ADDR) )
+	{
+		u32RegIdx = p_u32Addr - BLK5_LOW_ADDR;
+		u32_data_mem[5][u32RegIdx] = p_u32Value;
+		bolAddrValid = true;
+	}
+	//数据/地址通用寄存器0x0120_0800~0x0120_0BFF
+	//通用寄存器xyzt[63..0]包含AB面
+	else if ( (p_u32Addr >= GRMM_LOW_ADDR) && (p_u32Addr <= GRMM_HIGH_ADDR) )
+	{
+		// 通用寄存器
+	
+		DSPU32 u32Macro, u32Page, u32Index, u32Temp;
+
+		u32RegIdx = p_u32Addr - GRMM_LOW_ADDR;
+		u32Macro = u32RegIdx / 128;  // 0 ~ 3
+		u32Temp = u32RegIdx % 128;
+		u32Page = u32Temp / 64;  // 0 ~ 1
+		u32Index = u32Temp % 64;
+		WriteGPR_JTAG(u32Macro, u32Index, p_u32Value, u32Page);
+		bolAddrValid = true;
+	}
+	else if ( (p_u32Addr >= UVW_GADDR) && (p_u32Addr <= UVW_GADDR + 0xF) )
+	{
+			// 地址寄存器U
+			u32RegIdx = p_u32Addr - UVW_GADDR;
+			wr_u32r_UVW_JTAG(0, u32RegIdx, p_u32Value);
+			bolAddrValid = true;
+	}
+	else if ( (p_u32Addr >= UVW_GADDR + 0x10) && (p_u32Addr <= UVW_GADDR + 0x1F) )
+	{
+			// 地址寄存器V
+			u32RegIdx = p_u32Addr - UVW_GADDR - 0x10;
+			wr_u32r_UVW_JTAG(1, u32RegIdx, p_u32Value);
+			bolAddrValid = true;
+	}
+	else if ( (p_u32Addr >= UVW_GADDR + 0x20) && (p_u32Addr <= UVW_GADDR + 0x2F) )
+	{
+			// 地址寄存器W
+			u32RegIdx = p_u32Addr - UVW_GADDR - 0x20;
+			wr_u32r_UVW_JTAG(2, u32RegIdx, p_u32Value);
+			bolAddrValid = true;
+	}
+	//状态/控制寄存器0x0120_0000~0x0120_03FF
+	//SACC，该类寄存器除通过JTAG访问外还可以通过指令访问
+	else if ( (p_u32Addr >= SACC_GADDR) && (p_u32Addr <= SACC_GADDR + 0x1F) )
+	{
+			u32RegIdx = p_u32Addr - SACC_GADDR;
+			DSPU32 unitnum = u32RegIdx / 8;
+			DSPU32 shfnum = (u32RegIdx % 8) / 2;
+			if((u32RegIdx%2) == 0)
+			{
+				u64ri_SHF_SACC[unitnum][shfnum].u32Low = p_u32Value;
+				u64ro_SHF_SACC[unitnum][shfnum].u32Low = p_u32Value;
+			}
+			else
+			{
+				u64ri_SHF_SACC[unitnum][shfnum].u32High = p_u32Value;
+				u64ro_SHF_SACC[unitnum][shfnum].u32High = p_u32Value;
+			}	
+			bolAddrValid = true;
+	}
+	//MACC，该类寄存器除通过JTAG访问外还可以通过指令访问
+	else if ( (p_u32Addr >= MACC_GADDR) && (p_u32Addr <= MACC_GADDR + 0x7F) )
+	{
+			u32RegIdx = p_u32Addr - MACC_GADDR;
+			DSPU32 unitnum = u32RegIdx / 32;
+			DSPU32 mulnum = (u32RegIdx % 32) / 4;
+			if((u32RegIdx%4) == 0)
+			{
+				u128ri_MUL_MACC[unitnum][mulnum].u32LL = p_u32Value;
+				u128ro_MUL_MACC[unitnum][mulnum].u32LL = p_u32Value;	
+			}
+			else if((u32RegIdx%4) == 1)
+			{
+				u128ri_MUL_MACC[unitnum][mulnum].u32HL= p_u32Value;
+				u128ro_MUL_MACC[unitnum][mulnum].u32HL = p_u32Value;
+			}	
+			else if((u32RegIdx%4) == 2)
+			{
+				u128ri_MUL_MACC[unitnum][mulnum].u32LH= p_u32Value;
+				u128ro_MUL_MACC[unitnum][mulnum].u32LH = p_u32Value;
+			}
+			else
+			{
+				u128ri_MUL_MACC[unitnum][mulnum].u32HH = p_u32Value;
+				u128ro_MUL_MACC[unitnum][mulnum].u32HH = p_u32Value;
+			}
+			bolAddrValid = true;
+	}
+	//SHF查找表运算宏X的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX0_GADDR) && (p_u32Addr <= SHFTABX0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[0][0].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(0,0,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+		
+	}
+	//SHF查找表运算宏X的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX1_GADDR) && (p_u32Addr <= SHFTABX1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[0][1].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(0,1,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏X的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX2_GADDR) && (p_u32Addr <= SHFTABX2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[0][2].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(0,2,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏X的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABX3_GADDR) && (p_u32Addr <= SHFTABX3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABX3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[0][3].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(0,3,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏y的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY0_GADDR) && (p_u32Addr <= SHFTABY0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[1][0].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(1,0,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏y的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY1_GADDR) && (p_u32Addr <= SHFTABY1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[1][1].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(1,1,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏y的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY2_GADDR) && (p_u32Addr <= SHFTABY2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[1][2].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(1,2,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏y的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABY3_GADDR) && (p_u32Addr <= SHFTABY3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABY3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[1][3].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(1,3,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏Z的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ0_GADDR) && (p_u32Addr <= SHFTABZ0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[2][0].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(2,0,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏Z的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ1_GADDR) && (p_u32Addr <= SHFTABZ1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[2][1].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(2,1,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏Z的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ2_GADDR) && (p_u32Addr <= SHFTABZ2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[2][2].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(2,2,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏Z的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABZ3_GADDR) && (p_u32Addr <= SHFTABZ3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABZ3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[2][3].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(2,3,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏T的0号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT0_GADDR) && (p_u32Addr <= SHFTABT0_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT0_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[3][0].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(3,0,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏T的1号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT1_GADDR) && (p_u32Addr <= SHFTABT1_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT1_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[3][1].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(3,1,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏T的2号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT2_GADDR) && (p_u32Addr <= SHFTABT2_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT2_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[3][2].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(3,2,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	//SHF查找表运算宏T的3号移位器中4块查找表Table0 ~ Table3
+	else if ( (p_u32Addr >= SHFTABT3_GADDR) && (p_u32Addr <= SHFTABT3_GADDR + 0x3FF) )
+	{
+		u32RegIdx = p_u32Addr - SHFTABT3_GADDR;
+		DSPU32 n = u32RegIdx / 256;
+		DSPU32 d = u32RegIdx % 256;
+		//u32_SHF_TAB[3][3].arrElem[n][d] = p_u32Value;
+		if(wr_SHF_Tab(3,3,n,d,0xf,p_u32Value))
+		{
+			bolAddrValid = true;
+		}
+	}
+	// SRAM ADDR: for liugu's module
+	else if ( (p_u32Addr >= SRAM_START_ADDR) && (p_u32Addr <= SRAM_START_ADDR + 0xffffU))
+	{
+		if ( m_pICACHE->write_inner_sram(p_u32Addr, p_u32Value) )
+		{
+			bolAddrValid = true;
+		}
+		else
+		{
+			printf("WriteMem: failed to write sram memory\n");
+		}
+	}
+	else         // in WriteMem()
+	{
+		switch (p_u32Addr - GRP0_SPEC_REG_GADDR)
+		{
+			//IMAFR 可以通过指令访问
+			case 0x3CA: 
+				//u32r_IMAFR = p_u32Value;
+				u32r_IMAFR.SetValue(p_u32Value & (~IMAFR_RSV_BITS));
+				bolAddrValid = true;
+				break;
+		} // switch (p_u32Addr)
+
+	} // else
+
+	if (!bolAddrValid)
+	{
+		if ( (p_u32Addr >= GRP0_SPEC_REG_GADDR) && (p_u32Addr <= GRP0_SPEC_REG_GADDR + 0x3FF) )
+		{
+			// 状态/控制寄存器
+			DSPU32 units=0;
+			if(!GetAddr12FromAddr32(p_u32Addr, &u32RegIdx, &units))
+			{
+				u32RegIdx = p_u32Addr - GRP0_SPEC_REG_GADDR;
+			}						
+			JTAGWrSpecificReg(u32RegIdx, units, p_u32Value);
+			bolAddrValid = true;
+		}
+		else if ( (p_u32Addr >= GRP1_SPEC_REG_GADDR) && (p_u32Addr <= GRP1_SPEC_REG_GADDR + 0x3FF) )
+		{
+			// 中断/DMA 控制/状态寄存器
+			u32RegIdx = (p_u32Addr - GRP1_SPEC_REG_GADDR) | 0x400;
+			JTAGWrSpecificReg(u32RegIdx, 0, p_u32Value);
+			bolAddrValid = true;
+		}
+		else if ( (p_u32Addr >= GRP2_SPEC_REG_GADDR) && (p_u32Addr <= GRP2_SPEC_REG_GADDR + 0x3FF) )
+		{
+			u32RegIdx = (p_u32Addr - GRP2_SPEC_REG_GADDR) | 0x800;
+			JTAGWrSpecificReg(u32RegIdx, 0, p_u32Value);
+			bolAddrValid = true;
+		}
+	}
+
+	if (!bolAddrValid)
+	{
+		sprintf(g_arrLisaMsg, "write memory: memory address 0x%x is invalid\n", (unsigned int)p_u32Addr);
+		PrintToCerr(g_arrLisaMsg);
+	}
+
+	return bolAddrValid;
+
+}
+//-----------------------------------------
+void sc_iss::SetICACHE(icache_module_new *p_pICACHE)
+{
+	m_pICACHE = p_pICACHE;
+}
+void sc_iss::SetDMAC(DMAC *p_DMAC)
+{
+	m_pDMAC = p_DMAC;
+}
+
+
+//-----------------------------------------
+void sc_iss::ResetCacheMem()
+{
+	m_pICACHE->ResetCacheMem();
+}
+
+void sc_iss::SetStartPC(DSPU32 u32PC)
+{
+	m_pICACHE->SetStartPC(u32PC);
+}
+/*
+void sc_iss::SetBootAddr(DSPU32 u32Addr)
+{
+	m_pICACHE->reset(u32Addr);
+}
+*/
+#ifdef LIBTESTCODE
+
+void sc_iss::PrintCodeCoverage(char *FPath)
+{
+	FILE *fp_out = NULL;
+	
+	char str[100];
+	DSPU16 CoreID = GetID();
+	if(!FPath)
+	{
+		sprintf(str,"./CodeCoverage%d.txt",CoreID);
+	}
+	else
+	{
+		sprintf(str,"%s/CodeCoverage%d.txt",FPath,CoreID);
+	}
+	
+	
+	if ((fp_out = fopen(str, "w+")) == NULL)
+	{
+		printf("Error occured when open CodeCoverage.txt\n");
+		return ;
+	}
+
+	for (map<unsigned int, int>::iterator it=m_pc.begin(),itEnd=m_pc.end();
+		it!=itEnd;it++)
+	{
+		fprintf(fp_out,"0x%08x %d\n",it->first,it->second);
+	}
+	fclose(fp_out);
+	return;
+}
+
+
+void sc_iss::PrintCondCoverage()
+{
+	FILE *fp_out = NULL;
+
+	char str[30];
+	DSPU16 CoreID = GetID();
+	sprintf(str,"./CondCoverage%d.txt",CoreID);
+
+	if ((fp_out = fopen(str, "w+")) == NULL)
+	{
+		printf("Error occured when open CondCoverage.txt\n");
+		return ;
+	}
+
+	for (map<unsigned int, SBoolCnt>::iterator it=m_cond_pc.begin(),itEnd=m_cond_pc.end();
+		it!=itEnd;it++)
+	{
+		fprintf(fp_out,"0x%08x %d %d\n",it->first,it->second.cnttrue,it->second.cntfalse);
+	}
+
+	fclose(fp_out);
+	return;
+}
+
+#endif

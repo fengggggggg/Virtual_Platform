@@ -1,0 +1,110 @@
+#include "assistant_function.h"
+
+
+/*trans a int array to a string, format it with 32bit, array[0] at right-side, for example:
+string str;
+int temp[5] = {3,4,5,7,9};
+intarray2string(temp, 5, str);
+return : 00000000000000000000000000001001 0000000000000000000000000000111 00000000000000000000000000000101 00000000000000000000000000000100 00000000000000000000000000000011
+						|								|									|								|								|			
+						9								7									5								4								3
+
+string Uintarray2string(unsigned int * ptr , int len, string & str){
+	bitset<32> word32;
+	for(int i = len - 1 ; i != -1; i--){
+		word32 = (int)ptr[i] ;
+		str += word32.to_string();
+	}
+	return str;
+}
+*/
+
+
+//transfer a unsigned int to given length, for example intToBinString(3 , 5), return 00011
+string intToBinString(unsigned int num, int len)
+{
+	string x = "";
+	for (int k = 0; k < len; k++)
+	{
+		if ( (num % 2) == 0)
+		{
+			x = "0" + x;
+		}
+		else
+		{
+			x = "1" + x;
+		}
+		num /= 2;
+	}
+	return x;
+}
+
+
+//trans a num to mask for example : uint2mask(5) = 0x0000011111 or 31
+unsigned int uint2mask(const unsigned int uint){
+	if(uint == 0){
+		return 0;
+	}else{
+		unsigned int result = 1;
+		for(int i = 0; i != uint - 1; i++){
+			result <<= 1 ;
+			result |= 1;
+		}
+		return result;
+	}
+}
+
+
+unsigned int myrand(const unsigned int bound)
+{
+	return rand()%bound +1;
+}
+
+
+/*Transfer a string [0~f]+ into unsigned integer*/
+unsigned int string2uint(const string s){
+	unsigned int ret=0;
+	for(unsigned int i=0;i<s.size();i++){
+		switch(s[i]){
+		case '0': ret = ret*16;    break;
+		case '1': ret = ret*16 +1; break;
+		case '2': ret = ret*16 +2; break;
+		case '3': ret = ret*16 +3; break;
+		case '4': ret = ret*16 +4; break;
+		case '5': ret = ret*16 +5; break;
+		case '6': ret = ret*16 +6; break;
+		case '7': ret = ret*16 +7; break;
+		case '8': ret = ret*16 +8; break;
+		case '9': ret = ret*16 +9; break;
+		case 'A':
+		case 'a': ret = ret*16 +10; break;
+		case 'B':
+		case 'b': ret = ret*16 +11; break;
+		case 'C':
+		case 'c': ret = ret*16 +12; break;
+		case 'D':
+		case 'd': ret = ret*16 +13; break;
+		case 'E':
+		case 'e': ret = ret*16 +14; break;
+		case  'F':
+		case 'f': ret = ret*16 +15; break;
+		default:
+			cerr<<"String \""<<s<<"\" contains unexpected character "<<s[i]<<endl;
+			exit(1);
+		}
+	}
+	return ret;
+}
+
+
+
+//unsigned int judge_ch_by_addr(const unsigned int ADDR, const unsigned int CORE_ID){
+//
+//	if(	CORE_ID == CORE0_ID && ADDR >= CORE1_Start_Addr_share_mem && ADDR <= CORE1_End_Addr_share_mem ) return CH0_ID;
+//	
+//	if(	CORE_ID == CORE1_ID && ADDR >= CORE0_Start_Addr_share_mem && ADDR <= CORE0_End_Addr_share_mem ) return CH0_ID;
+//
+////TODO return corresponding ch_id for ADDR 
+//	return CH2_ID;
+//
+//}

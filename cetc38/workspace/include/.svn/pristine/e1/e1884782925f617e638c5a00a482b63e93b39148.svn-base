@@ -1,0 +1,165 @@
+ #include "sc_iss.h"
+
+/*-------------------------------------- implimention -------------------------------------*/
+void sc_iss::InitBPs()
+{
+	g_u32BPSetNum = 0U;
+	m_u32BPMask = 0U;
+	/*
+	for (int i = 0; i < BP_NUM; i++)
+	{
+		g_arrBPs[i].bolEmpty = true;
+	}
+	*/
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::HasBPRes()
+{
+	if (g_u32BPSetNum > BP_NUM)
+	{
+		printf("HasBPRes: shouldn't see this msg\n");
+		return false;
+	}
+	return (m_u32BPMask != 0xffffffffU);
+	/*
+	bool bolHasRes = false;
+
+	if (g_u32BPSetNum == BP_NUM)
+	{
+		return false;
+	}
+	for (int i = 0; i < BP_NUM; i++)
+	{
+		if (g_arrBPs[i].bolEmpty)
+		{
+			bolHasRes = true;
+			break;
+		}
+	}
+
+	return bolHasRes;
+	*/
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::IsBPAddrValid(DSPU32 p_u32Addr)
+{
+	bool bolAddrValid = false;
+	return true;
+//	if ( (p_u32Addr >= SHARED_PROG_LOW_ADDR) && (p_u32Addr <= SHARED_PROG_HIGH_ADDR) )
+	if ( ((p_u32Addr >= 0x0b000000) && (p_u32Addr < 0x0b200000))  ||
+		((p_u32Addr >= SHARED_PROG_LOW_ADDR) && (p_u32Addr <= SHARED_PROG_HIGH_ADDR)) ||
+		((p_u32Addr >= 0xE20000) && (p_u32Addr <= 0xE2FFFF)))
+	{
+		bolAddrValid = true;
+	}
+
+	return bolAddrValid;
+}
+//----------------------------------------------------------------------------------------------------
+void sc_iss::TriggerBP(DSPU32 p_u32Addr)
+{
+	// bubble shouldn't trigger breakpoint
+	if (PIPE_EX.EX_WB.m_right.u32r_SlotNum == 0)
+	{
+		return;
+	}
+	
+	if (g_u32BPSetNum != 0)
+	{
+		for (int i = 0; i < BP_NUM; i++)
+		{
+			if( GIsBitSet(m_u32BPMask, i) && (p_u32Addr == g_arrBPs[i].u32Addr) )
+			{
+				if (g_arrBPs[i].u32NegCount == 0)
+				{
+					m_u32BPTrigReg = GSetBit(m_u32BPTrigReg, i);
+				}
+				else
+				{
+					g_arrBPs[i].u32NegCount--;
+				}
+
+				break;
+				
+			} // if ( (!g_arrBPs[i].bolEmpty) && (p_u32Addr == g_arrBPs[i].u32Addr) )
+
+		} // for (int i = 0; i < BP_NUM; i++)
+
+	} // if (g_u32BPSetNum != 0)
+
+}
+//----------------------------------------------------------------------------------------------------
+void sc_iss::ISSClearBreakpoint()
+{
+	InitBPs();
+}
+//----------------------------------------------------------------------------------------------------
+/*
+void sc_iss::ClrBPTrigerFlag()
+{
+
+	for (int i = 0; i < BP_NUM; i++)
+	{
+		if ( !g_arrBPs[i].bolEmpty )
+		{
+			g_arrBPs[i].bolTriggered = false;
+		}
+	}
+}
+*/
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::ISSIsBPHit()
+{	
+	return (m_u32BPTrigReg != 0U);
+
+	/*
+	bool bolHit = false;
+
+	for (int i = 0; i < BP_NUM; i++)
+	{
+		if ( (!g_arrBPs[i].bolEmpty) && (g_arrBPs[i].bolTriggered) )
+		{
+			bolHit = true;
+			break;
+		}
+	}
+
+	return bolHit;
+	*/
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::ISSInsertBreakpoint(DSPU32 p_u32Addr, DSPU32 p_u32NegCnt)
+{
+	if ( !HasBPRes() )
+	{
+		PrintToCerr("ISSInsertBreakpoint: All watchpoint resource were used!\n");
+		return false;
+	}
+
+	if ( !IsBPAddrValid(p_u32Addr) )
+	{
+		PrintToCerr("ISSInsertBreakpoint: Invalid watchpoint address!\n");
+		return false;
+	}
+
+	for (int i = 0; i < BP_NUM; i++)
+	{
+//		if (g_arrBPs[i].bolEmpty)
+		if( !GIsBitSet(m_u32BPMask, i) )
+		{
+			g_arrBPs[i].u32Addr = p_u32Addr;
+			g_arrBPs[i].u32NegCount = p_u32NegCnt;
+			
+//			g_arrBPs[i].bolTriggered = false;
+//			g_arrBPs[i].bolEmpty = false;
+			m_u32BPMask = GSetBit(m_u32BPMask, i);
+			g_u32BPSetNum++;
+			break;
+		}
+	}
+
+	return true;
+}
+
+
+

@@ -1,0 +1,203 @@
+#include "L2_mmc_new.h"
+
+using namespace BWDSP104X;
+using std::endl;
+using std::hex;
+
+
+void L2_mmc_new::reset()
+{
+	//Input signals
+	L2_irq = false;
+	L2_irq_pc = 0;
+	//Output signals
+	L2_ack = false;
+	L2_ack_pc = 0;
+	L2_ack_insn.reset();
+	//Internal storage
+	reg_L2_ack.reset();
+	reg_L2_ack_pc.reset();
+	reg_L2_ack_insn.reset();
+	reg_L2_irq_pc.reset();
+	reg_L2_counter.reset();
+	//L2 memory
+	mode = L2_INTERNAL_MEM;		//Using on-chip shared SRAM as default
+	internalMem = new DSPU32[L2_INTERNAL_MEM_DEFAULT_SIZE];
+	internalMem_lowspace = L2_INTERNAL_MEM_DEFAULT_LOW_ADDR;
+	for(int i=0;i<L2_INTERNAL_MEM_DEFAULT_SIZE;i++){
+		internalMem[i] = 0;
+	}
+	externalMem = NULL;
+	externalMem_lowspace = 0;
+	externalMem_size = 0;
+	inProcessing.reset();
+}
+
+void L2_mmc_new::setMode(L2_mode m, DSPU32 p_u32MemSize,DSPU32 p_u32LowAddr){
+	mode =m;
+	DEBUG_INFO_STREAM("L2_mmc is set to mode: "<<m<<std::endl);
+	if(m == L2_INTERNAL_MEM){
+		DEBUG_INFO_STREAM("Using default memory: space = 0x"<<std::hex<<L2_INTERNAL_MEM_DEFAULT_LOW_ADDR<<" ~ 0x"<<
+			L2_INTERNAL_MEM_DEFAULT_HIGH_ADDR<<"\tsize ="<<L2_INTERNAL_MEM_DEFAULT_SIZE<<std::endl);
+	}
+	if(m == L2_EXTERN_MEM){
+		externalMem_lowspace = p_u32LowAddr;
+		externalMem_size = p_u32MemSize;
+		DEBUG_INFO_STREAM("Using custom memory: space = 0x"<<std::hex<<externalMem_lowspace<<" ~ 0x"<<
+			(externalMem_lowspace+externalMem_size-1)<<"\tsize = 0x"<<externalMem_size<<std::endl);
+	}
+	if(m == L2_NOP_MEM){
+		DEBUG_INFO_STREAM("Using unlimited memory with NOP"<<std::endl);
+	}
+	return;
+}
+
+void L2_mmc_new::evaluate()
+{
+	if(L2_irq && (!inProcessing.read())&&(reg_L2_counter.read()==0)){
+		DEBUG_INFO_STREAM("L2 Event: L2 received an request for PC=0x"<<hex<<L2_irq_pc<<endl);
+		reg_L2_counter.write(L2_DEFAULT_LATENCY);
+		reg_L2_irq_pc.write(L2_irq_pc);
+		inProcessing.write(true);
+	}
+	if(reg_L2_counter.read() == 1){
+		//Time to react
+		reg_L2_ack.write(true);
+		reg_L2_ack_pc.write(reg_L2_irq_pc.read());
+		reg_L2_ack_insn.write(getInsnLineFromMem());
+		//inProcessing.write(false);
+	}
+	if((reg_L2_counter.read()==0)&&(inProcessing.read().val)){
+		inProcessing.write(false);
+	}
+	if(reg_L2_counter.read()>0){
+		reg_L2_counter.write(reg_L2_counter.read()-1);
+	}
+	if(reg_L2_ack.read().val){
+		reg_L2_ack.write(false);		//only last for one cycle
+	}
+}
+
+void L2_mmc_new::update()
+{
+	reg_L2_ack.update();
+	reg_L2_ack_pc.update();
+	reg_L2_ack_insn.update();
+	reg_L2_irq_pc.update();
+	reg_L2_counter.update();
+	inProcessing.update();
+}
+
+insnLine512 L2_mmc_new::getInsnLineFromMem()
+{
+	insnLine512 ret;
+	ret.reset();
+	switch(mode){
+	case L2_INVALID:
+		{
+			DEBUG_INFO_STREAM("Error: L2_mmc mode invalid, can't require a instruction line from L2 memory.\n\
+							  please set L2_mmc mode first");
+			break;
+		}
+	case L2_NOP_MEM:
+		{
+			for(int i=0;i<16;i++){
+				ret.insnSlot[i] = 0x80200000;		//all nop line
+			}
+			break;
+		}
+	case L2_INTERNAL_MEM:
+		{
+			if(reg_L2_irq_pc.read() >L2_INTERNAL_MEM_DEFAULT_HIGH_ADDR){
+				DEBUG_INFO_STREAM("Error:L2 PC(0x"<<std::hex<<reg_L2_irq_pc.read()<<" required is out of range[0x"
+					<<L2_INTERNAL_MEM_DEFAULT_LOW_ADDR<<",0x"<<L2_INTERNAL_MEM_DEFAULT_HIGH_ADDR<<"]\n");
+				exit(1);
+			}else{
+				unsigned int tmp_pc=reg_L2_irq_pc.read();
+//				if(tmp_pc%16 !=0){
+//					DEBUG_INFO_STREAM("Warning: L2 PC should be aligned to 16,automatically aligned\n");
+//					tmp_pc = tmp_pc&0xfffffff0;
+//				}
+				tmp_pc = (tmp_pc %16 == 0)? tmp_pc : (tmp_pc&0xfffffff0);
+				for(int i=0;i<16;i++){
+					ret.insnSlot[i] = internalMem[tmp_pc + i];
+				}
+			}
+			break;
+		}
+	case L2_EXTERN_MEM:
+		{
+			if((reg_L2_irq_pc.read()<externalMem_lowspace) || (reg_L2_irq_pc.read()>(externalMem_lowspace+externalMem_size-1))){
+				DEBUG_INFO_STREAM("Error:L2 PC(0x"<<std::hex<<reg_L2_irq_pc.read()<<" required is out of range[0x"\
+					<<externalMem_lowspace<<", 0x"<<(externalMem_lowspace+externalMem_size-1)<<"]\n");
+				exit(1);
+			}else{
+				unsigned int tmp_pc=reg_L2_irq_pc.read();
+//				if(tmp_pc%16 !=0){
+//					DEBUG_INFO_STREAM("Warning: L2 PC should be aligned to 16,automatically aligned\n");
+//					tmp_pc = tmp_pc&0xfffffff0;
+//				}
+				tmp_pc = (tmp_pc %16 == 0)? tmp_pc : (tmp_pc&0xfffffff0);
+				for(int i=0;i<16;i++){
+					//external memory is [lowspace, lowspace+size-1]
+					ret.insnSlot[i] = externalMem[tmp_pc-externalMem_lowspace + i];
+				}
+			}
+			break;
+		}
+	}
+	return ret;
+}
+
+bool L2_mmc_new::LoadInnerMem()
+{
+	//This function load InternalMem[32K] using file
+	FILE *fp = NULL;
+	unsigned int u32Value, u32BaseAddr;
+
+	if ((fp = fopen("a.out.img", "r")) == NULL)
+	{
+		DEBUG_INFO_STREAM("Error:failed to open example104.out.img\n");
+		return false;
+	}
+
+	u32BaseAddr = 0;
+	for (int i = 0; i < L2_INTERNAL_MEM_DEFAULT_SIZE; i++)
+	{
+		if (((i + 1) % 16) == 0)
+		{
+			fscanf(fp, "%08x \n", &u32Value);
+		}
+		else
+		{
+			fscanf(fp, "%08x ", &u32Value);
+		}
+
+		internalMem[u32BaseAddr +i] = u32Value;
+	}
+	fclose(fp);
+	return true;
+
+}
+
+void L2_mmc_new::gatherInputSignals(bool p_L2_irq, unsigned int p_L2_irq_pc)
+{
+	L2_irq = p_L2_irq;
+	L2_irq_pc = p_L2_irq_pc;
+	return;
+}
+
+void L2_mmc_new::emitOutputSignals(bool *p_L2_ack, unsigned int *p_L2_ack_pc, insnLine512 *p_L2_ack_insn)
+{
+	if(reg_L2_ack.read().val){
+		DEBUG_INFO_STREAM("L2 event: L2 returns instruction line for PC:0x"<<hex<<reg_L2_ack_pc.read()<<endl);
+		for(int i=0;i<16;i++){
+			DEBUG_INFO_STREAM("0x"<<reg_L2_ack_insn.read().insnSlot[i]<<"\t");
+		}
+		DEBUG_INFO_STREAM("\n");
+	}
+
+	*p_L2_ack = reg_L2_ack.read().val;
+	*p_L2_ack_pc = reg_L2_ack_pc.read();
+	*p_L2_ack_insn = reg_L2_ack_insn.read();
+}

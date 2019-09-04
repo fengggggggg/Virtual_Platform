@@ -1,0 +1,167 @@
+
+#include "sc_iss.h"
+
+/*-------------------------------------- implimention -------------------------------------*/
+void sc_iss::InitWPs()
+{
+	g_u32WPSetNum = 0U;
+	m_u32WPMask = 0U;
+	/*
+	for (int i = 0; i < WP_NUM; i++)
+	{
+		g_arrWPs[i].bolEmpty = true;
+	}
+	*/
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::HasWPRes()
+{
+	if (g_u32WPSetNum > WP_NUM)
+	{
+		printf("HasWPRes: shouldn't see this msg\n");
+		return false;
+	}
+	return (m_u32WPMask != 0xffffU);
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::IsWPOverlap(DSPU32 p_u32StartAddr, DSPU32 p_u32EndAddr)
+{
+	bool bolFound = false;
+	bool bolOnOneSide = false;
+
+	for (int i = 0; i < WP_NUM; i++)
+	{
+		if(GIsBitSet(m_u32WPMask, i))
+		{
+			if ( (g_arrWPs[i].u32StartAddr < p_u32StartAddr) && (g_arrWPs[i].u32EndAddr < p_u32StartAddr) )
+			{
+				bolOnOneSide = true;
+			}
+
+			if ( (g_arrWPs[i].u32StartAddr > p_u32EndAddr) && (g_arrWPs[i].u32EndAddr > p_u32EndAddr) )
+			{
+				bolOnOneSide = true;
+			}
+
+			if ( !bolOnOneSide )
+			{
+				bolFound = true;
+				break;
+			}			
+		}
+	}
+
+	return bolFound;
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::IsWPAddrValid(DSPU32 p_u32StartAddr, DSPU32 p_u32EndAddr)
+{
+	bool bolAddrValid = false;
+	DSPU32 u32CoreID0, u32CoreID1;
+
+	if ( IsGAddr(p_u32StartAddr) && IsGAddr(p_u32EndAddr) )
+	{
+		u32CoreID0 = (p_u32StartAddr >> 24);
+		u32CoreID1 = (p_u32EndAddr >> 24);
+		if(u32CoreID0 == u32CoreID1)
+		{
+			bolAddrValid = true;
+		}
+	}
+	return bolAddrValid;
+}
+//----------------------------------------------------------------------------------------------------
+void sc_iss::TriggerWP(DSPU32 p_u32Addr, bool p_bolIsWr)
+{
+	if (g_u32WPSetNum != 0)
+	{
+		for (int i = 0; i < WP_NUM; i++)
+		{
+			if( GIsBitSet(m_u32WPMask, i) )
+			{
+				if ( (p_u32Addr >= g_arrWPs[i].u32StartAddr) && (p_u32Addr <= g_arrWPs[i].u32EndAddr) )
+				{
+					if (p_bolIsWr && (g_arrWPs[i].u32Type == 1))
+					{
+						continue;
+					}
+					
+					if ((!p_bolIsWr) && (g_arrWPs[i].u32Type == 2))
+					{
+						continue;
+					}
+
+					if (g_arrWPs[i].u32NegCount == 0)
+					{
+						m_u32WPTrigReg = GSetBit(m_u32WPTrigReg, i);
+					}
+					else
+					{
+						g_arrWPs[i].u32NegCount--;
+					}
+
+					break;
+
+				} // if ( (p_u32Addr >= g_arrWPs[i].u32StartAddr) && (p_u32Addr <= g_arrWPs[i].u32EndAddr) )
+				
+			} // if ( !g_arrWPs[i].bolEmpty )
+
+		} // for (int i = 0; i < WP_NUM; i++)
+
+	} // if (g_u32WPSetNum != 0)
+
+}
+//----------------------------------------------------------------------------------------------------
+void sc_iss::ISSClearWatchpoint()
+{
+	InitWPs();
+}
+//----------------------------------------------------------------------------------------------------
+DSPU32 sc_iss::ISSGetWPTriggerReg()
+{
+	DSPU32 u32Temp = m_u32WPTrigReg;
+	
+	return u32Temp;
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::ISSInsertWatchpoint(DSPU32 p_u32StartAddr, DSPU32 p_u32EndAddr, DSPU32 p_u32NegCnt, DSPU8 p_u8Type)
+{
+	if ( !HasWPRes() )
+	{
+		PrintToCerr("ISSInsertWatchpoint: All watchpoint resource were used!\n");
+		return false;
+	}
+
+	if ( !IsWPAddrValid(p_u32StartAddr, p_u32EndAddr) )
+	{
+		PrintToCerr("ISSInsertWatchpoint: Invalid watchpoint address!\n");
+		return false;
+	}
+
+	/*if ( IsWPOverlap(p_u32StartAddr, p_u32EndAddr) )
+	{
+		PrintToCerr("ISSInsertWatchpoint: address of watchpoint overlapped!\n");
+		return false;
+	}*/
+	
+
+	for (int i = 0; i < WP_NUM; i++)
+	{
+		if(!GIsBitSet(m_u32WPMask, i))
+		{
+			g_arrWPs[i].u32StartAddr = p_u32StartAddr;
+			g_arrWPs[i].u32EndAddr = p_u32EndAddr;
+			g_arrWPs[i].u32NegCount = p_u32NegCnt;
+			g_arrWPs[i].u32Type = p_u8Type;
+			
+			m_u32WPMask = GSetBit(m_u32WPMask, i);
+			g_u32WPSetNum++;
+			break;
+		}
+	}
+
+	return true;
+}
+
+
+

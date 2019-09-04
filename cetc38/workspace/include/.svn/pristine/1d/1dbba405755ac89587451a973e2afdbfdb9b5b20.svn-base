@@ -1,0 +1,40 @@
+#include "UART_MODULE.h"
+
+
+UART_MODULE::UART_MODULE(sc_module_name mn)
+
+{
+
+	//init_socket2apb.bind(*this);
+	targ_socket2apb.bind(*this);
+
+
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+}
+
+
+tlm::tlm_sync_enum UART_MODULE::nb_transport_bw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+
+tlm::tlm_sync_enum UART_MODULE::nb_transport_fw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+void UART_MODULE::clock_tick(){
+
+
+}

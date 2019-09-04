@@ -1,0 +1,3195 @@
+#include "SystemConfigReg.h"
+
+
+
+SystemConfigReg::SystemConfigReg(sc_module_name mn)
+
+{
+
+	init_socket2dmac0.bind(*this); 
+	targ_socket2dmac0.bind(*this); 
+
+	init_socket2dmac1.bind(*this); 
+	targ_socket2dmac1.bind(*this); 
+
+	m_sync_ins.LinkToReg(this);
+
+	SC_METHOD(clock_tick);
+	sensitive_pos << clk;
+
+
+}
+
+
+tlm::tlm_sync_enum SystemConfigReg::nb_transport_bw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+
+tlm::tlm_sync_enum SystemConfigReg::nb_transport_fw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+
+
+		DMAC_RW_REG_S*	msg;
+		unsigned int	rd_result = 0;
+
+//--------------------------------------------------regs write normal
+		if(trans.get_address() == CORE_REQ_WR_REG){
+			msg = (DMAC_RW_REG_S*)trans.get_data_ptr();
+//NORMAL_REPORT_SYSCFG("get wr regs cmd from core")
+				if(write_reg(msg->u32Addr,msg->u32Value)){
+					trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				}
+		}
+//--------------------------------------------------regs read normal
+		if(trans.get_address() == CORE_REQ_RD_REG){
+			msg = (DMAC_RW_REG_S*)trans.get_data_ptr();
+//NORMAL_REPORT_SYSCFG("get rd regs cmd from core")
+				if(read_reg(msg->u32Addr,rd_result)){
+					msg->u32Value = rd_result;
+					trans.set_response_status(tlm::TLM_OK_RESPONSE);
+				}else{
+					trans.set_response_status(tlm::TLM_ADDRESS_ERROR_RESPONSE);
+				}
+		}
+
+
+//=====================================================================================================================
+
+		return tlm::TLM_UPDATED;
+
+}
+
+
+void SystemConfigReg::clock_tick(){
+		
+	m_sync_ins.request_update();
+
+}
+
+
+
+
+
+void SystemConfigReg::ShiftRegs(){
+
+//Global
+	CIDR_R.shift();
+	GCSR_R.shift();
+	BOOTCOMPLETE_R.shift();
+	CISR_R.shift();
+	C0_BOOT_ADDR_R.shift();
+	C1_BOOT_ADDR_R.shift();
+	BOOT_DEVICE_R.shift();
+	BOOT_DEVICE_CFG_R.shift();
+	PCIE_MODE_R.shift();
+	CHIP_MODE_R.shift();
+	//µ˜ ‘œµÕ≥∏®÷˙≈‰÷√ø’
+	MCRCR_R.shift();
+	//PMA∏®÷˙≈‰÷√ø’º‰
+	PMACR0_R.shift();
+	PMACR1_R.shift();
+	PMACR2_R.shift();
+	PMACR3_R.shift();
+	PMACR4_R.shift();
+	PMACR5_R.shift();
+	//PCIE∏®÷˙≈‰÷√ø’º‰
+	PGSR_R.shift();
+	PLACR_R.shift();
+	PLICR_R.shift();
+	PLIPSR_R.shift();
+	PLIPMR_R.shift();
+	PLISR_R.shift();
+	PCER_R.shift();
+	PPSCAR_R.shift();
+	PCEFR_R.shift();
+	PMSGR0_R.shift();
+	PMSGR1_R.shift();
+	PMSGR2_R.shift();
+	PMSGR3_R.shift();
+	PMSGR4_R.shift();
+	PMSGR5_R.shift();
+	PMUER_R.shift();
+	PVFER_R.shift();
+	EP_IRQ_SET_R.shift();
+	ER_IRQ_CLR_R.shift();
+	ER_IRQ_STATUS_R.shift();
+	MSI_DATA_R.shift();
+	MSI0_IRQ_STATUS_R.shift();
+	MSI0_IRQ_ENABLE_R.shift();
+	MSI0_IRQ_CLR_R.shift();
+	MSI1_IRQ_STATUS_R.shift();
+	MSI1_IRQ_ENABLE_R.shift();
+	MSI1_IRQ_CLR_R.shift();
+	MSI2_IRQ_STATUS_R.shift();
+	MSI2_IRQ_ENABLE_R.shift();
+	MSI2_IRQ_CLR_R.shift();
+	MSI3_IRQ_STATUS_R.shift();
+	MSI3_IRQ_ENABLE_R.shift();
+	MSI3_IRQ_CLR_R.shift();
+	MSI4_IRQ_STATUS_R.shift();
+	MSI4_IRQ_ENABLE_R.shift();
+	MSI4_IRQ_CLR_R.shift();
+	MSI5_IRQ_STATUS_R.shift();
+	MSI5_IRQ_ENABLE_R.shift();
+	MSI5_IRQ_CLR_R.shift();
+	MSI6_IRQ_STATUS_R.shift();
+	MSI6_IRQ_ENABLE_R.shift();
+	MSI6_IRQ_CLR_R.shift();
+	MSI7_IRQ_STATUS_R.shift();
+	MSI7_IRQ_ENABLE_R.shift();
+	MSI7_IRQ_CLR_R.shift();
+	L1_PM_SUBSTATE_R.shift();
+	HRTR_R.shift();
+	//SRIO∏®÷˙≈‰÷√ø’º‰ 
+	SEITR0_R.shift();
+	SEISR0_R.shift();
+	SEICR0_R.shift();
+	SLCR0_R.shift();
+	SDIDCAR0_R.shift();
+	SDINFCAR0_R.shift();
+	SAIDCAR0_R.shift();
+	SGCR0_R.shift();
+	SPNR0_R.shift();
+	SPVR0_R.shift();
+	SDPSR0_R.shift();
+	SSPLSR0_R.shift();
+	SPSR0_R.shift();
+	SPCR0_R.shift();
+	SSLSSR0_R.shift();
+
+	SLKSPD0_R.shift();
+	TXPRSTINSI0_R.shift();
+	TXPOMAX0_R.shift();
+	TXPOMIN0_R.shift();
+	TXMAMAX0_R.shift();
+	TXMAMIN0_R.shift();
+	TXPEMAX0_R.shift();
+	TXPEMIN0_R.shift();
+	RETREMC0_R.shift();
+	TIMERC20_R.shift();
+	TIMERC10_R.shift();
+	TIMERC00_R.shift();
+	AETST0_R.shift();
+
+
+	SEITR1_R.shift();
+	SEISR1_R.shift();
+	SEICR1_R.shift();
+	SLCR1_R.shift();
+	SDIDCAR1_R.shift();
+	SDINFCAR1_R.shift();
+	SAIDCAR1_R.shift();
+	SGCR1_R.shift();
+	SPNR1_R.shift();
+	SPVR1_R.shift();
+	SDPSR1_R.shift();
+	SSPLSR1_R.shift();
+	SPSR1_R.shift();
+	SPCR1_R.shift();
+	SSLSSR1_R.shift();
+
+	SLKSPD1_R.shift();
+	TXPRSTINSI1_R.shift();
+	TXPOMAX1_R.shift();
+	TXPOMIN1_R.shift();
+	TXMAMAX1_R.shift();
+	TXMAMIN1_R.shift();
+	TXPEMAX1_R.shift();
+	TXPEMIN1_R.shift();
+	RETREMC1_R.shift();
+	TIMERC21_R.shift();
+	TIMERC11_R.shift();
+	TIMERC01_R.shift();
+	AETST1_R.shift();
+
+
+	//∫Àº‰÷–∂œ
+	IPCGR0_R.shift();
+	IPCSR0_R.shift();
+	IPCCR0_R.shift();
+	IPCGR1_R.shift();
+	IPCSR1_R.shift();
+	IPCCR1_R.shift();
+
+	//DDRAXICFG
+	DDR_AXI_CFG0_R.shift();
+	DDR_AXI_CFG1_R.shift();
+
+	// ±÷”°¢∏¥Œª≈‰÷√º∞◊¥
+	PLL0_STATUS_R.shift();
+	PLL0_CTL0_R.shift();
+	PLL0_CTL1_R.shift();
+	PLL0_CTL2_R.shift();
+	//PLL0_STATUS1_R.shift();
+	CLK_SYS_CTL_R.shift();
+
+	PLL1_STATUS_R.shift();
+	PLL1_CTL0_R.shift();
+	PLL1_CTL1_R.shift();
+	PLL1_CTL2_R.shift();
+
+	CLK_PP_CTL_R.shift();
+	CLK_ETHM_CTL_R.shift();
+	CLK_ETHS_CTL_R.shift();
+	CLK_PM_CTL_R.shift();
+
+	CLK_I2C_CTL_R.shift();
+	CLK_SPI_CTL_R.shift();
+
+	PLL2_STATUS_R.shift();
+	PLL2_CTL0_R.shift();
+	PLL2_CTL1_R.shift();
+	PLL2_CTL2_R.shift();
+
+	CLK_DDR_CTL_R.shift();
+
+	RST_STATUS_R.shift();
+	RST_TYPE_STATUS_R.shift();
+	RST_RM_STATUS_R.shift();
+	RST_CTL_R.shift();
+	RST_INIT_CTL_R.shift();
+	RST_SDS_CTL_R.shift();
+	RST_SDS_STATUS_R.shift();
+	DBG_CTL_R.shift();
+	//∂® ±∆˜º∞watchdog≈‰
+	TCR0_R.shift();
+	TCSR0_R.shift();
+	TCCR0_R.shift();
+	TPRLO0_R.shift();
+	TPRHI0_R.shift();
+	TCNTLO0_R.shift();
+	TCNTHI0_R.shift();
+
+	TCR1_R.shift();
+	TCSR1_R.shift();
+	TCCR1_R.shift();
+	TPRLO1_R.shift();
+	TPRHI1_R.shift();
+	TCNTLO1_R.shift();
+	TCNTHI1_R.shift();
+
+	TCR2_R.shift();
+	TCSR2_R.shift();
+	TCCR2_R.shift();
+	TPRLO2_R.shift();
+	TPRHI2_R.shift();
+	TCNTLO2_R.shift();
+	TCNTHI2_R.shift();
+
+	TCR3_R.shift();
+	TCSR3_R.shift();
+	TCCR3_R.shift();
+	TPRLO3_R.shift();
+	TPRHI3_R.shift();
+	TCNTLO3_R.shift();
+	TCNTHI3_R.shift();
+
+	TCR4_R.shift();
+	TCSR4_R.shift();
+	TCCR4_R.shift();
+	TPRLO4_R.shift();
+	TPRHI4_R.shift();
+	TCNTLO4_R.shift();
+	TCNTHI4_R.shift();
+
+	TCR5_R.shift();
+	TCSR5_R.shift();
+	TCCR5_R.shift();
+	TPRLO5_R.shift();
+	TPRHI5_R.shift();
+	TCNTLO5_R.shift();
+	TCNTHI5_R.shift();
+
+	TCR6_R.shift();
+	TCSR6_R.shift();
+	TCCR6_R.shift();
+	TPRLO6_R.shift();
+	TPRHI6_R.shift();
+	TCNTLO6_R.shift();
+	TCNTHI6_R.shift();
+
+	TCR7_R.shift();
+	TCSR7_R.shift();
+	TCCR7_R.shift();
+	TPRLO7_R.shift();
+	TPRHI7_R.shift();
+	TCNTLO7_R.shift();
+	TCNTHI7_R.shift();
+
+	WDTCR0_R.shift();
+	WDTCSR0_R.shift();
+	WDTCCR0_R.shift();
+	WDTPRLO0_R.shift();
+	WDTPRHI0_R.shift();
+	WDTCNTLO0_R.shift();
+	WDTCNTHI0_R.shift();
+
+	WDTCR1_R.shift();
+	WDTCSR1_R.shift();
+	WDTCCR1_R.shift();
+	WDTPRLO1_R.shift();
+	WDTPRHI1_R.shift();
+	WDTCNTLO1_R.shift();
+	WDTCNTHI1_R.shift();
+
+	//Rabio Ctl0
+	RAB_RST_CTRL0_R.shift();
+
+	//Rabio Ctl1
+	RAB_RST_CTRL1_R.shift();
+
+	//UART Ctl
+	LCR_R.shift();
+	FAR_R.shift();
+	//I2C  Ctl
+
+
+	//GPIO Ctl
+	GPIOPADR_R.shift();											//gpio_swporta_dr
+	GPIOPCDR_R.shift();											//gpio_swportc_dr
+	GPIOPDCTL_R.shift();											//gpio_portd_ctl
+	//SPI  Ctl
+	CTRLR0_R.shift();
+	BAUDR_R.shift();
+	DR_R.shift();
+	//PCIE  Ctl
+	IBADDR0A_R.shift();											//ib_addr0_pcie0,
+	IBADDR0B_R.shift();											//ib_addr0_pcie1
+
+
+
+
+
+
+
+
+
+
+// ”≤º˛–≈∫≈¡øºƒ¥Ê∆˜
+	for(int i = 0; i  < HSRegNum; i++)
+	{
+		HW_SEM_R[i].shift();
+	}
+}
+
+
+void SystemConfigReg::reset(){
+
+CIDR_R.name =			CIDR;			CIDR_R.offset_addr = 0x00;			 CIDR_R.m_out =				0x0;			CIDR_R.m_in =				0x0;		
+GCSR_R.name = 			GCSR;			GCSR_R.offset_addr = 0x01;			GCSR_R.m_out = 				0x0;			GCSR_R.m_in = 				0x0;
+BOOTCOMPLETE_R.name = 	BOOTCOMPLETE;	BOOTCOMPLETE_R.offset_addr =0x02; 	BOOTCOMPLETE_R.m_out =  	0x0;			BOOTCOMPLETE_R.m_in = 		0x0;
+CISR_R.name = 			CISR;			CISR_R.offset_addr =0x03; 			CISR_R.m_out = 				0x0;			CISR_R.m_in = 				0x0;
+C0_BOOT_ADDR_R.name = 	C0_BOOT_ADDR;	C0_BOOT_ADDR_R.offset_addr = 0x10;	C0_BOOT_ADDR_R.m_out = 		0x0b000000;			C0_BOOT_ADDR_R.m_in = 		0x0b000000;
+C1_BOOT_ADDR_R.name = 	C1_BOOT_ADDR;	C1_BOOT_ADDR_R.offset_addr = 0x11;	C1_BOOT_ADDR_R.m_out = 		0x0b000000;			C1_BOOT_ADDR_R.m_in = 		0x0b000000;
+BOOT_DEVICE_R.name = 	BOOT_DEVICE;	BOOT_DEVICE_R.offset_addr = 0x12; 	BOOT_DEVICE_R.m_out = 		0x0;			BOOT_DEVICE_R.m_in = 		0x0;
+BOOT_DEVICE_CFG_R.name =BOOT_DEVICE_CFG;BOOT_DEVICE_CFG_R.offset_addr =0x13;BOOT_DEVICE_CFG_R.m_out =	0x0;			BOOT_DEVICE_CFG_R.m_in =	0x0;
+PCIE_MODE_R.name = 		PCIE_MODE;		PCIE_MODE_R.offset_addr = 0x14;		PCIE_MODE_R.m_out = 		0x0;			PCIE_MODE_R.m_in = 			0x0;
+CHIP_MODE_R.name = 		CHIP_MODE;		CHIP_MODE_R.offset_addr = 0x15;		CHIP_MODE_R.m_out = 		0x0;			CHIP_MODE_R.m_in = 			0x0;
+//µ˜ ‘œµÕ≥∏®÷˙≈‰÷√ø’º‰					//µ˜ ‘œµÕ≥∏®÷˙≈‰÷√ø’º‰				//µ˜ ‘œµÕ≥∏®÷˙≈‰÷√ø’º‰					//µ˜ ‘œµÕ≥∏®÷˙≈‰÷√ø’º‰	
+MCRCR_R.name =			MCRCR;			MCRCR_R.offset_addr = 0x00;			MCRCR_R.m_out =				0x0;			MCRCR_R.m_in =				0x0;
+//PMA∏®÷˙≈‰÷√ø’º‰						//PMA∏®÷˙≈‰÷√ø’º‰					//PMA∏®÷˙≈‰÷√ø’º‰						//PMA∏®÷˙≈‰÷√ø’º‰
+PMACR0_R.name =			PMACR0;			PMACR0_R.offset_addr = 0x00;		PMACR0_R.m_out =			0x0;			PMACR0_R.m_in =				0x0;
+PMACR1_R.name =			PMACR1;			PMACR1_R.offset_addr = 0x01;		PMACR1_R.m_out =			0x0;			PMACR1_R.m_in =				0x0;
+PMACR2_R.name =			PMACR2;			PMACR2_R.offset_addr = 0x02;		PMACR2_R.m_out =			0x0;			PMACR2_R.m_in =				0x0;
+PMACR3_R.name =			PMACR3;			PMACR3_R.offset_addr = 0x03;		PMACR3_R.m_out =			0x0;			PMACR3_R.m_in =				0x0;
+PMACR4_R.name =			PMACR4;			PMACR4_R.offset_addr = 0x04;		PMACR4_R.m_out =			0x0;			PMACR4_R.m_in =				0x0;
+PMACR5_R.name =			PMACR5;			PMACR5_R.offset_addr = 0x05;		PMACR5_R.m_out =			0x0;			PMACR5_R.m_in =				0x0;
+//PCIE∏®÷˙≈‰÷√ø’º‰						//PCIE∏®÷˙≈‰÷√ø’º‰					//PCIE∏®÷˙≈‰÷√ø’º‰						//PCIE∏®÷˙≈‰÷√ø’º‰				
+PGSR_R.name =			PGSR;			PGSR_R.offset_addr = 0x00;			PGSR_R.m_out =				0x0;			PGSR_R.m_in =				0x0;	
+PLACR_R.name =			PLACR;			PLACR_R.offset_addr = 0x01;			PLACR_R.m_out =				0x0;			PLACR_R.m_in =				0x0;	
+PLICR_R.name =			PLICR;			PLICR_R.offset_addr = 0x02;			PLICR_R.m_out =				0x0;			PLICR_R.m_in =				0x0;	
+PLIPSR_R.name =			PLIPSR;			PLIPSR_R.offset_addr = 0x03;		PLIPSR_R.m_out =			0x0;			PLIPSR_R.m_in =				0x0;
+PLIPMR_R.name =			PLIPMR;			PLIPMR_R.offset_addr = 0x04;		PLIPMR_R.m_out =			0x0;			PLIPMR_R.m_in =				0x0;
+PLISR_R.name =			PLISR;			PLISR_R.offset_addr = 0x05;			PLISR_R.m_out =				0x0;			PLISR_R.m_in =				0x0;
+PCER_R.name =			PCER;			PCER_R.offset_addr = 0x06;			PCER_R.m_out =				0x0;			PCER_R.m_in =				0x0;
+PPSCAR_R.name =			PPSCAR;			PPSCAR_R.offset_addr = 0x07;		PPSCAR_R.m_out =			0x0;			PPSCAR_R.m_in =				0x0;
+PCEFR_R.name =			PCEFR;			PCEFR_R.offset_addr = 0x08;			PCEFR_R.m_out =				0x0;			PCEFR_R.m_in =				0x0;
+PMSGR0_R.name =			PMSGR0;			PMSGR0_R.offset_addr = 0x09;		PMSGR0_R.m_out =			0x0;			PMSGR0_R.m_in =				0x0;
+PMSGR1_R.name =			PMSGR1;			PMSGR1_R.offset_addr = 0x0a;		PMSGR1_R.m_out =			0x0;			PMSGR1_R.m_in =				0x0;
+PMSGR2_R.name =			PMSGR2;			PMSGR2_R.offset_addr = 0x0b;		PMSGR2_R.m_out =			0x0;			PMSGR2_R.m_in =				0x0;
+PMSGR3_R.name =			PMSGR3;			PMSGR3_R.offset_addr = 0x0c;		PMSGR3_R.m_out =			0x0;			PMSGR3_R.m_in =				0x0;
+PMSGR4_R.name =			PMSGR4;			PMSGR4_R.offset_addr = 0x0d;	 	PMSGR4_R.m_out =			0x0;			PMSGR4_R.m_in =				0x0;
+PMSGR5_R.name =			PMSGR5;			PMSGR5_R.offset_addr = 0x0e;		PMSGR5_R.m_out =			0x0;			PMSGR5_R.m_in =				0x0;
+PMUER_R.name =			PMUER;			PMUER_R.offset_addr =  0x0f;		PMUER_R.m_out =				0x0;			PMUER_R.m_in =				0x0;
+PVFER_R.name =			PVFER;			PVFER_R.offset_addr =  0x10;		PVFER_R.m_out =				0x0;			PVFER_R.m_in =				0x0;
+EP_IRQ_SET_R.name =		EP_IRQ_SET;		EP_IRQ_SET_R.offset_addr = 0x1c;	EP_IRQ_SET_R.m_out =		0x0;			EP_IRQ_SET_R.m_in =			0x0;
+ER_IRQ_CLR_R.name =		ER_IRQ_CLR;		ER_IRQ_CLR_R.offset_addr = 0x1d;	ER_IRQ_CLR_R.m_out =		0x0;			ER_IRQ_CLR_R.m_in =			0x0;
+ER_IRQ_STATUS_R.name =	ER_IRQ_STATUS;	ER_IRQ_STATUS_R.offset_addr = 0x1e;	ER_IRQ_STATUS_R.m_out =		0x0;			ER_IRQ_STATUS_R.m_in =		0x0;
+MSI_DATA_R.name =		MSI_DATA;		MSI_DATA_R.offset_addr = 0x1f;		MSI_DATA_R.m_out =			0x0;			MSI_DATA_R.m_in =			0x0;
+MSI0_IRQ_STATUS_R.name =MSI0_IRQ_STATUS;MSI0_IRQ_STATUS_R.offset_addr =0x20;MSI0_IRQ_STATUS_R.m_out =	0x0;			MSI0_IRQ_STATUS_R.m_in =	0x0;
+MSI0_IRQ_ENABLE_R.name =MSI0_IRQ_ENABLE;MSI0_IRQ_ENABLE_R.offset_addr =0x21;MSI0_IRQ_ENABLE_R.m_out =	0x0;			MSI0_IRQ_ENABLE_R.m_in =	0x0;
+MSI0_IRQ_CLR_R.name =	MSI0_IRQ_CLR;	MSI0_IRQ_CLR_R.offset_addr = 0x22;	MSI0_IRQ_CLR_R.m_out =		0x0;			MSI0_IRQ_CLR_R.m_in =		0x0;
+MSI1_IRQ_STATUS_R.name =MSI1_IRQ_STATUS;MSI1_IRQ_STATUS_R.offset_addr =0x23;MSI1_IRQ_STATUS_R.m_out =	0x0;			MSI1_IRQ_STATUS_R.m_in =	0x0;
+MSI1_IRQ_ENABLE_R.name =MSI1_IRQ_ENABLE;MSI1_IRQ_ENABLE_R.offset_addr =0x24;MSI1_IRQ_ENABLE_R.m_out =	0x0;			MSI1_IRQ_ENABLE_R.m_in =	0x0;
+MSI1_IRQ_CLR_R.name =	MSI1_IRQ_CLR;	MSI1_IRQ_CLR_R.offset_addr = 0x25;	MSI1_IRQ_CLR_R.m_out =		0x0;			MSI1_IRQ_CLR_R.m_in =		0x0;
+MSI2_IRQ_STATUS_R.name =MSI2_IRQ_STATUS;MSI2_IRQ_STATUS_R.offset_addr =0x26;MSI2_IRQ_STATUS_R.m_out =	0x0;			MSI2_IRQ_STATUS_R.m_in =	0x0;
+MSI2_IRQ_ENABLE_R.name =MSI2_IRQ_ENABLE;MSI2_IRQ_ENABLE_R.offset_addr =0x27;MSI2_IRQ_ENABLE_R.m_out =	0x0;			MSI2_IRQ_ENABLE_R.m_in =	0x0;
+MSI2_IRQ_CLR_R.name =	MSI2_IRQ_CLR;	MSI2_IRQ_CLR_R.offset_addr = 0x28;	MSI2_IRQ_CLR_R.m_out =		0x0;			MSI2_IRQ_CLR_R.m_in =		0x0;
+MSI3_IRQ_STATUS_R.name =MSI3_IRQ_STATUS;MSI3_IRQ_STATUS_R.offset_addr =0x29;MSI3_IRQ_STATUS_R.m_out =	0x0;			MSI3_IRQ_STATUS_R.m_in =	0x0;
+MSI3_IRQ_ENABLE_R.name =MSI3_IRQ_ENABLE;MSI3_IRQ_ENABLE_R.offset_addr =0x2a;MSI3_IRQ_ENABLE_R.m_out =	0x0;			MSI3_IRQ_ENABLE_R.m_in =	0x0;
+MSI3_IRQ_CLR_R.name =	MSI3_IRQ_CLR;	MSI3_IRQ_CLR_R.offset_addr = 0x2b;	MSI3_IRQ_CLR_R.m_out =		0x0;			MSI3_IRQ_CLR_R.m_in =		0x0;
+MSI4_IRQ_STATUS_R.name =MSI4_IRQ_STATUS;MSI4_IRQ_STATUS_R.offset_addr =0x2c;MSI4_IRQ_STATUS_R.m_out =	0x0;			MSI4_IRQ_STATUS_R.m_in =	0x0;
+MSI4_IRQ_ENABLE_R.name =MSI4_IRQ_ENABLE;MSI4_IRQ_ENABLE_R.offset_addr =0x2d;MSI4_IRQ_ENABLE_R.m_out =	0x0;			MSI4_IRQ_ENABLE_R.m_in =	0x0;
+MSI4_IRQ_CLR_R.name =	MSI4_IRQ_CLR;	MSI4_IRQ_CLR_R.offset_addr = 0x2e;	MSI4_IRQ_CLR_R.m_out =		0x0;			MSI4_IRQ_CLR_R.m_in =		0x0;
+MSI5_IRQ_STATUS_R.name =MSI5_IRQ_STATUS;MSI5_IRQ_STATUS_R.offset_addr =0x2f;MSI5_IRQ_STATUS_R.m_out =	0x0;			MSI5_IRQ_STATUS_R.m_in =	0x0;
+MSI5_IRQ_ENABLE_R.name =MSI5_IRQ_ENABLE;MSI5_IRQ_ENABLE_R.offset_addr =0x30;MSI5_IRQ_ENABLE_R.m_out =	0x0;			MSI5_IRQ_ENABLE_R.m_in =	0x0;
+MSI5_IRQ_CLR_R.name =	MSI5_IRQ_CLR;	MSI5_IRQ_CLR_R.offset_addr = 0x31;	MSI5_IRQ_CLR_R.m_out =		0x0;			MSI5_IRQ_CLR_R.m_in =		0x0;
+MSI6_IRQ_STATUS_R.name =MSI6_IRQ_STATUS;MSI6_IRQ_STATUS_R.offset_addr =0x32;MSI6_IRQ_STATUS_R.m_out =	0x0;			MSI6_IRQ_STATUS_R.m_in =	0x0;
+MSI6_IRQ_ENABLE_R.name =MSI6_IRQ_ENABLE;MSI6_IRQ_ENABLE_R.offset_addr =0x33;MSI6_IRQ_ENABLE_R.m_out =	0x0;			MSI6_IRQ_ENABLE_R.m_in =	0x0;
+MSI6_IRQ_CLR_R.name =	MSI6_IRQ_CLR;	MSI6_IRQ_CLR_R.offset_addr = 0x34;	MSI6_IRQ_CLR_R.m_out =		0x0;			MSI6_IRQ_CLR_R.m_in =		0x0;
+MSI7_IRQ_STATUS_R.name =MSI7_IRQ_STATUS;MSI7_IRQ_STATUS_R.offset_addr =0x35;MSI7_IRQ_STATUS_R.m_out =	0x0;			MSI7_IRQ_STATUS_R.m_in =	0x0;
+MSI7_IRQ_ENABLE_R.name =MSI7_IRQ_ENABLE;MSI7_IRQ_ENABLE_R.offset_addr =0x36;MSI7_IRQ_ENABLE_R.m_out =	0x0;			MSI7_IRQ_ENABLE_R.m_in =	0x0;
+MSI7_IRQ_CLR_R.name =	MSI7_IRQ_CLR;	MSI7_IRQ_CLR_R.offset_addr = 0x37;	MSI7_IRQ_CLR_R.m_out =		0x0;			MSI7_IRQ_CLR_R.m_in =		0x0;
+L1_PM_SUBSTATE_R.name =	L1_PM_SUBSTATE;	L1_PM_SUBSTATE_R.offset_addr = 0x38;L1_PM_SUBSTATE_R.m_out =	0x0;			L1_PM_SUBSTATE_R.m_in  =	0x0;
+HRTR_R.name			  =	HRTR;			HRTR_R.offset_addr			 = 0x39;HRTR_R.m_out		   =	0x0;			HRTR_R.m_in			   =	0x0;
+
+
+//SRIO∏®÷˙≈‰÷√ø’º‰						//SRIO∏®÷˙≈‰÷√ø’º‰					//SRIO∏®÷˙≈‰÷√ø’º‰						//SRIO∏®÷˙≈‰÷√ø’º‰ 
+SEITR0_R.name =			SEITR0;			SEITR0_R.offset_addr = 0x00;		SEITR0_R.m_out =			0x0;			SEITR0_R.m_in =			0x0;
+SEISR0_R.name =			SEISR0;			SEISR0_R.offset_addr = 0x01;		SEISR0_R.m_out =			0x0;			SEISR0_R.m_in =			0x0;
+SEICR0_R.name =			SEICR0;			SEICR0_R.offset_addr = 0x02;		SEICR0_R.m_out =			0x0;			SEICR0_R.m_in =			0x0;
+SLCR0_R.name =			SLCR0;			SLCR0_R.offset_addr = 0x03;			SLCR0_R.m_out =				0x0;			SLCR0_R.m_in =			0x0;
+SDIDCAR0_R.name =		SDIDCAR0;		SDIDCAR0_R.offset_addr = 0x04;		SDIDCAR0_R.m_out =			0x0;			SDIDCAR0_R.m_in =		0x0;
+SDINFCAR0_R.name =		SDINFCAR0;		SDINFCAR0_R.offset_addr = 0x05;		SDINFCAR0_R.m_out =			0x0;			SDINFCAR0_R.m_in =		0x0;
+SAIDCAR0_R.name =		SAIDCAR0;		SAIDCAR0_R.offset_addr = 0x06;		SAIDCAR0_R.m_out =			0x0;			SAIDCAR0_R.m_in =		0x0;
+SGCR0_R.name =			SGCR0;			SGCR0_R.offset_addr = 0x07;			SGCR0_R.m_out =				0x0;			SGCR0_R.m_in =			0x0;
+SPNR0_R.name =			SPNR0;			SPNR0_R.offset_addr = 0x08;			SPNR0_R.m_out =				0x0;			SPNR0_R.m_in =			0x0;
+SPVR0_R.name =			SPVR0;			SPVR0_R.offset_addr = 0x09;			SPVR0_R.m_out =				0x0;			SPVR0_R.m_in =			0x0;
+SDPSR0_R.name =			SDPSR0;			SDPSR0_R.offset_addr = 0x0a;		SDPSR0_R.m_out =			0x0;			SDPSR0_R.m_in =			0x0;
+SSPLSR0_R.name =		SSPLSR0;		SSPLSR0_R.offset_addr =	0x0b;		SSPLSR0_R.m_out =			0x0;			SSPLSR0_R.m_in =		0x0;
+SPSR0_R.name =			SPSR0;			SPSR0_R.offset_addr = 0x0c;			SPSR0_R.m_out =				0x0;			SPSR0_R.m_in =			0x0;
+SPCR0_R.name =			SPCR0;			SPCR0_R.offset_addr = 0x0d;			SPCR0_R.m_out =				0x0;			SPCR0_R.m_in =			0x0;
+SSLSSR0_R.name =		SSLSSR0;		SSLSSR0_R.offset_addr = 0x0e;		SSLSSR0_R.m_out =			0x0;			SSLSSR0_R.m_in =		0x0;
+
+
+SLKSPD0_R.name =		SLKSPD0;		SLKSPD0_R.offset_addr = 0x0f;		SLKSPD0_R.m_out =			0x0;			SLKSPD0_R.m_in =		0x0;
+TXPRSTINSI0_R.name =	TXPRSTINSI0;	TXPRSTINSI0_R.offset_addr = 0x10;	TXPRSTINSI0_R.m_out =		0x0;			TXPRSTINSI0_R.m_in =	0x0;
+TXPOMAX0_R.name =		TXPOMAX0;		TXPOMAX0_R.offset_addr = 0x11;		TXPOMAX0_R.m_out =			0x0;			TXPOMAX0_R.m_in =		0x0;
+TXPOMIN0_R.name =		TXPOMIN0;		TXPOMIN0_R.offset_addr = 0x12;		TXPOMIN0_R.m_out =			0x0;			TXPOMIN0_R.m_in =		0x0;
+TXMAMAX0_R.name =		TXMAMAX0;		TXMAMAX0_R.offset_addr = 0x13;		TXMAMAX0_R.m_out =			0x0;			TXMAMAX0_R.m_in =		0x0;
+TXMAMIN0_R.name =		TXMAMIN0;		TXMAMIN0_R.offset_addr = 0x14;		TXMAMIN0_R.m_out =			0x0;			TXMAMIN0_R.m_in =		0x0;
+TXPEMAX0_R.name =		TXPEMAX0;		TXPEMAX0_R.offset_addr = 0x15;		TXPEMAX0_R.m_out =			0x0;			TXPEMAX0_R.m_in =		0x0;
+TXPEMIN0_R.name =		TXPEMIN0;		TXPEMIN0_R.offset_addr = 0x16;		TXPEMIN0_R.m_out =			0x0;			TXPEMIN0_R.m_in =		0x0;
+RETREMC0_R.name =		RETREMC0;		RETREMC0_R.offset_addr = 0x17;		RETREMC0_R.m_out =			0x0;			RETREMC0_R.m_in =		0x0;
+TIMERC20_R.name =		TIMERC20;		TIMERC20_R.offset_addr = 0x18;		TIMERC20_R.m_out =			0x0;			TIMERC20_R.m_in =		0x0;
+TIMERC10_R.name =		TIMERC10;		TIMERC10_R.offset_addr = 0x19;		TIMERC10_R.m_out =			0x0;			TIMERC10_R.m_in =		0x0;
+TIMERC00_R.name =		TIMERC00;		TIMERC00_R.offset_addr = 0x1a;		TIMERC00_R.m_out =			0x0;			TIMERC00_R.m_in =		0x0;
+AETST0_R.name =			AETST0;			AETST0_R.offset_addr   = 0x1b;		AETST0_R.m_out =			0x0;			AETST0_R.m_in =			0x0;
+						
+			
+
+
+
+
+SEITR1_R.name =			SEITR1;			SEITR1_R.offset_addr = 0x40;		SEITR1_R.m_out =			0x0;			SEITR1_R.m_in =			0x0;
+SEISR1_R.name =			SEISR1;			SEISR1_R.offset_addr = 0x41;		SEISR1_R.m_out =			0x0;			SEISR1_R.m_in =			0x0;
+SEICR1_R.name =			SEICR1;			SEICR1_R.offset_addr = 0x42;		SEICR1_R.m_out =			0x0;			SEICR1_R.m_in =			0x0;
+SLCR1_R.name =			SLCR1;			SLCR1_R.offset_addr = 0x43;			SLCR1_R.m_out =				0x0;			SLCR1_R.m_in =			0x0;
+SDIDCAR1_R.name =		SDIDCAR1;		SDIDCAR1_R.offset_addr = 0x44;		SDIDCAR1_R.m_out =			0x0;			SDIDCAR1_R.m_in =		0x0;
+SDINFCAR1_R.name =		SDINFCAR1;		SDINFCAR1_R.offset_addr = 0x45;		SDINFCAR1_R.m_out =			0x0;			SDINFCAR1_R.m_in =		0x0;
+SAIDCAR1_R.name =		SAIDCAR1;		SAIDCAR1_R.offset_addr = 0x46;		SAIDCAR1_R.m_out =			0x0;			SAIDCAR1_R.m_in =		0x0;
+SGCR1_R.name =			SGCR1;			SGCR1_R.offset_addr = 0x47;			SGCR1_R.m_out =				0x0;			SGCR1_R.m_in =			0x0;
+SPNR1_R.name =			SPNR1;			SPNR1_R.offset_addr = 0x48;			SPNR1_R.m_out =				0x0;			SPNR1_R.m_in =			0x0;
+SPVR1_R.name =			SPVR1;			SPVR1_R.offset_addr = 0x49;			SPVR1_R.m_out =				0x0;			SPVR1_R.m_in =			0x0;
+SDPSR1_R.name =			SDPSR1;			SDPSR1_R.offset_addr = 0x4a;		SDPSR1_R.m_out =			0x0;			SDPSR1_R.m_in =			0x0;
+SSPLSR1_R.name =		SSPLSR1;		SSPLSR1_R.offset_addr =	0x4b;		SSPLSR1_R.m_out =			0x0;			SSPLSR1_R.m_in =		0x0;
+SPSR1_R.name =			SPSR1;			SPSR1_R.offset_addr =	0x4c;		SPSR1_R.m_out =				0x0;			SPSR1_R.m_in =			0x0;
+SPCR1_R.name =			SPCR1;			SPCR1_R.offset_addr =	0x4d;		SPCR1_R.m_out =				0x0;			SPCR1_R.m_in =			0x0;
+SSLSSR1_R.name =		SSLSSR1;		SSLSSR1_R.offset_addr =	0x4e;		SSLSSR1_R.m_out =			0x0;			SSLSSR1_R.m_in =		0x0;
+
+SLKSPD1_R.name =		SLKSPD1;		SLKSPD1_R.offset_addr = 0x4f;		SLKSPD1_R.m_out =			0x0;			SLKSPD1_R.m_in =		0x0;
+TXPRSTINSI1_R.name =	TXPRSTINSI1;	TXPRSTINSI1_R.offset_addr = 0x50;	TXPRSTINSI1_R.m_out =		0x0;			TXPRSTINSI1_R.m_in =	0x0;
+TXPOMAX1_R.name =		TXPOMAX1;		TXPOMAX1_R.offset_addr = 0x51;		TXPOMAX1_R.m_out =			0x0;			TXPOMAX1_R.m_in =		0x0;
+TXPOMIN1_R.name =		TXPOMIN1;		TXPOMIN1_R.offset_addr = 0x52;		TXPOMIN1_R.m_out =			0x0;			TXPOMIN1_R.m_in =		0x0;
+TXMAMAX1_R.name =		TXMAMAX1;		TXMAMAX1_R.offset_addr = 0x53;		TXMAMAX1_R.m_out =			0x0;			TXMAMAX1_R.m_in =		0x0;
+TXMAMIN1_R.name =		TXMAMIN1;		TXMAMIN1_R.offset_addr = 0x54;		TXMAMIN1_R.m_out =			0x0;			TXMAMIN1_R.m_in =		0x0;
+TXPEMAX1_R.name =		TXPEMAX1;		TXPEMAX1_R.offset_addr = 0x55;		TXPEMAX1_R.m_out =			0x0;			TXPEMAX1_R.m_in =		0x0;
+TXPEMIN1_R.name =		TXPEMIN1;		TXPEMIN1_R.offset_addr = 0x56;		TXPEMIN1_R.m_out =			0x0;			TXPEMIN1_R.m_in =		0x0;
+RETREMC1_R.name =		RETREMC1;		RETREMC1_R.offset_addr = 0x57;		RETREMC1_R.m_out =			0x0;			RETREMC1_R.m_in =		0x0;
+TIMERC21_R.name =		TIMERC21;		TIMERC21_R.offset_addr = 0x58;		TIMERC21_R.m_out =			0x0;			TIMERC21_R.m_in =		0x0;
+TIMERC11_R.name =		TIMERC11;		TIMERC11_R.offset_addr = 0x59;		TIMERC11_R.m_out =			0x0;			TIMERC11_R.m_in =		0x0;
+TIMERC01_R.name =		TIMERC01;		TIMERC01_R.offset_addr = 0x5a;		TIMERC01_R.m_out =			0x0;			TIMERC01_R.m_in =		0x0;
+AETST1_R.name =			AETST1;			AETST1_R.offset_addr   = 0x5b;		AETST1_R.m_out =			0x0;			AETST1_R.m_in =			0x0;
+
+
+
+//∫Àº‰÷–∂œ								//∫Àº‰÷–∂œ							//∫Àº‰÷–∂œ								//∫Àº‰÷–∂œ
+IPCGR0_R.name =			IPCGR0;			IPCGR0_R.offset_addr =	0x00;		IPCGR0_R.m_out =			0x0;			IPCGR0_R.m_in =			0x0;
+IPCSR0_R.name =			IPCSR0;			IPCSR0_R.offset_addr =	0x01;		IPCSR0_R.m_out =			0x0;			IPCSR0_R.m_in =			0x0;
+IPCCR0_R.name =			IPCCR0;			IPCCR0_R.offset_addr =	0x02;		IPCCR0_R.m_out =			0x0;			IPCCR0_R.m_in =			0x0;
+IPCGR1_R.name =			IPCGR1;			IPCGR1_R.offset_addr =	0x03;		IPCGR1_R.m_out =			0x0;			IPCGR1_R.m_in =			0x0;
+IPCSR1_R.name =			IPCSR1;			IPCSR1_R.offset_addr =	0x04;		IPCSR1_R.m_out =			0x0;			IPCSR1_R.m_in =			0x0;
+IPCCR1_R.name =			IPCCR1;			IPCCR1_R.offset_addr =	0x05;		IPCCR1_R.m_out =			0x0;			IPCCR1_R.m_in =			0x0;
+
+//DDRAXICFG
+DDR_AXI_CFG0_R.name =	DDR_AXI_CFG0;	DDR_AXI_CFG0_R.offset_addr =	0x00;		DDR_AXI_CFG0_R.m_out =			0x0;			DDR_AXI_CFG0_R.m_in =			0x0;
+DDR_AXI_CFG1_R.name =	DDR_AXI_CFG1;	DDR_AXI_CFG1_R.offset_addr =	0x01;		DDR_AXI_CFG1_R.m_out =			0x0;			DDR_AXI_CFG1_R.m_in =			0x0;
+
+
+
+// ±÷”°¢∏¥Œª≈‰÷√º∞◊¥Ã¨ºƒ¥Ê∆˜			// ±÷”°¢∏¥Œª≈‰÷√º∞◊¥Ã¨ºƒ			// ±÷”°¢∏¥Œª≈‰÷√º∞◊¥Ã¨ºƒ				// ±÷”°¢∏¥Œª≈‰÷√º∞◊¥Ã¨ºƒ
+PLL0_STATUS_R.name =	PLL0_STATUS;	PLL0_STATUS_R.offset_addr =	0x00;	PLL0_STATUS_R.m_out =		0x0;			PLL0_STATUS_R.m_in =	0x0;
+PLL0_CTL0_R.name =		PLL0_CTL0;		PLL0_CTL0_R.offset_addr =	0x01;	PLL0_CTL0_R.m_out =			0x0;			PLL0_CTL0_R.m_in =		0x0;
+PLL0_CTL1_R.name =		PLL0_CTL1;		PLL0_CTL1_R.offset_addr =	0x02;	PLL0_CTL1_R.m_out =			0x0;			PLL0_CTL1_R.m_in =		0x0;
+PLL0_CTL2_R.name =		PLL0_CTL2;		PLL0_CTL2_R.offset_addr =	0x03;	PLL0_CTL2_R.m_out =			0x0;			PLL0_CTL2_R.m_in =		0x0;
+//PLL0_STATUS1_R.name =	PLL0_STATUS1;	PLL0_STATUS1_R.offset_addr =0x04;	PLL0_STATUS1_R.m_out =		0x0;			PLL0_STATUS1_R.m_in =	0x0;
+CLK_SYS_CTL_R.name =	CLK_SYS_CTL;	CLK_SYS_CTL_R.offset_addr =	0x08;	CLK_SYS_CTL_R.m_out =		0x0;			CLK_SYS_CTL_R.m_in =	0x0;
+																																
+PLL1_STATUS_R.name =	PLL1_STATUS;	PLL1_STATUS_R.offset_addr = 0x10;	PLL1_STATUS_R.m_out =		0x0;			PLL1_STATUS_R.m_in =	0x0;
+PLL1_CTL0_R.name =		PLL1_CTL0;		PLL1_CTL0_R.offset_addr =	0x11;	PLL1_CTL0_R.m_out =			0x0;			PLL1_CTL0_R.m_in =		0x0;
+PLL1_CTL1_R.name =		PLL1_CTL1;		PLL1_CTL1_R.offset_addr =	0x12;	PLL1_CTL1_R.m_out =			0x0;			PLL1_CTL1_R.m_in =		0x0;
+PLL1_CTL2_R.name =		PLL1_CTL2;		PLL1_CTL2_R.offset_addr =	0x13;	PLL1_CTL2_R.m_out =			0x0;			PLL1_CTL2_R.m_in =		0x0;
+																															
+CLK_PP_CTL_R.name =		CLK_PP_CTL;		CLK_PP_CTL_R.offset_addr =	0x18;	CLK_PP_CTL_R.m_out =		0x0;			CLK_PP_CTL_R.m_in =		0x0;
+CLK_ETHM_CTL_R.name =	CLK_ETHM_CTL;	CLK_ETHM_CTL_R.offset_addr =0x19;	CLK_ETHM_CTL_R.m_out =		0x0;			CLK_ETHM_CTL_R.m_in =	0x0;
+CLK_ETHS_CTL_R.name =	CLK_ETHS_CTL;	CLK_ETHS_CTL_R.offset_addr =0x1a;	CLK_ETHS_CTL_R.m_out =		0x0;			CLK_ETHS_CTL_R.m_in =	0x0;
+CLK_PM_CTL_R.name =		CLK_PM_CTL;		CLK_PM_CTL_R.offset_addr =	0x1b;	CLK_PM_CTL_R.m_out =		0x0;			CLK_PM_CTL_R.m_in =		0x0;
+	
+CLK_I2C_CTL_R.name =	CLK_I2C_CTL;	CLK_I2C_CTL_R.offset_addr =	0x1d;	CLK_I2C_CTL_R.m_out =		0x0;			CLK_I2C_CTL_R.m_in =	0x0;
+CLK_SPI_CTL_R.name =	CLK_SPI_CTL;	CLK_SPI_CTL_R.offset_addr =	0x1e;	CLK_SPI_CTL_R.m_out =		0x0;			CLK_SPI_CTL_R.m_in =	0x0;
+
+
+PLL2_STATUS_R.name =	PLL2_STATUS;	PLL2_STATUS_R.offset_addr = 0x20;	PLL2_STATUS_R.m_out =		0x0;			PLL2_STATUS_R.m_in =	0x0;
+PLL2_CTL0_R.name =		PLL2_CTL0;		PLL2_CTL0_R.offset_addr =	0x21;	PLL2_CTL0_R.m_out =			0x0;			PLL2_CTL0_R.m_in =		0x0;
+PLL2_CTL1_R.name =		PLL2_CTL1;		PLL2_CTL1_R.offset_addr =	0x22;	PLL2_CTL1_R.m_out =			0x0;			PLL2_CTL1_R.m_in =		0x0;
+PLL2_CTL2_R.name =		PLL2_CTL2;		PLL2_CTL2_R.offset_addr =	0x23;	PLL2_CTL2_R.m_out =			0x0;			PLL2_CTL2_R.m_in =		0x0;
+																																
+CLK_DDR_CTL_R.name =	CLK_DDR_CTL;	CLK_DDR_CTL_R.offset_addr =	0x28;	CLK_DDR_CTL_R.m_out =		0x0;			CLK_DDR_CTL_R.m_in =	0x0;
+																																
+RST_STATUS_R.name =		RST_STATUS;		RST_STATUS_R.offset_addr =	0x70;	RST_STATUS_R.m_out =		0x0;			RST_STATUS_R.m_in =		0x0;
+RST_TYPE_STATUS_R.name =RST_TYPE_STATUS;RST_TYPE_STATUS_R.offset_addr =0x71;RST_TYPE_STATUS_R.m_out =	0x0;			RST_TYPE_STATUS_R.m_in =0x0;
+
+RST_RM_STATUS_R.name =RST_TYPE_STATUS;  RST_RM_STATUS_R.offset_addr =0x72;	RST_RM_STATUS_R.m_out =	0x0;				RST_RM_STATUS_R.m_in =0x0;
+
+RST_CTL_R.name =		RST_CTL;		RST_CTL_R.offset_addr =	0x74;		RST_CTL_R.m_out =			0x0;			RST_CTL_R.m_in =		0x0;
+RST_INIT_CTL_R.name =	RST_INIT_CTL;	RST_INIT_CTL_R.offset_addr =0x75;	RST_INIT_CTL_R.m_out =		0x0;			RST_INIT_CTL_R.m_in =	0x0;
+RST_SDS_CTL_R.name =	RST_SDS_CTL;	RST_SDS_CTL_R.offset_addr =	0x78;	RST_SDS_CTL_R.m_out =		0x0;			RST_SDS_CTL_R.m_in =	0x0;
+
+RST_SDS_STATUS_R.name =RST_TYPE_STATUS; RST_SDS_STATUS_R.offset_addr =0x79; RST_SDS_STATUS_R.m_out =	0x0;			RST_SDS_STATUS_R.m_in =0x0;
+DBG_CTL_R.name		  =RST_TYPE_STATUS;	DBG_CTL_R.offset_addr =0x7e;		DBG_CTL_R.m_out =	0x0;					DBG_CTL_R.m_in =0x0;
+
+
+//∂® ±∆˜º∞watchdog≈‰÷√ø’º‰				//∂® ±∆˜º∞watchdog≈‰÷√ø’			//∂® ±∆˜º∞watchdog≈‰÷√ø’				//∂® ±∆˜º∞watchdog≈‰÷√ø’
+TCR0_R.name =			TCR0;			TCR0_R.offset_addr =	0x00;		TCR0_R.m_out =				0x0;			TCR0_R.m_in =			0x0;
+TCSR0_R.name =			TCSR0;			TCSR0_R.offset_addr =	0x01;		TCSR0_R.m_out =				0x0;			TCSR0_R.m_in =			0x0;
+TCCR0_R.name =			TCCR0;			TCCR0_R.offset_addr =	0x02;		TCCR0_R.m_out =				0x0;			TCCR0_R.m_in =			0x0;
+TPRLO0_R.name =			TPRLO0;			TPRLO0_R.offset_addr =	0x03;		TPRLO0_R.m_out =			0x0;			TPRLO0_R.m_in =			0x0;
+TPRHI0_R.name =			TPRHI0;			TPRHI0_R.offset_addr =	0x04;		TPRHI0_R.m_out =			0x0;			TPRHI0_R.m_in =			0x0;
+TCNTLO0_R.name =		TCNTLO0;		TCNTLO0_R.offset_addr =	0x05;		TCNTLO0_R.m_out =			0x0;			TCNTLO0_R.m_in =		0x0;
+TCNTHI0_R.name =		TCNTHI0;		TCNTHI0_R.offset_addr =	0x06;		TCNTHI0_R.m_out =			0x0;			TCNTHI0_R.m_in =		0x0;
+																															
+TCR1_R.name =			TCR1;			TCR1_R.offset_addr =	0x10;		TCR1_R.m_out =				0x0;			TCR1_R.m_in =			0x0;
+TCSR1_R.name =			TCSR1;			TCSR1_R.offset_addr =	0x11;		TCSR1_R.m_out =				0x0;			TCSR1_R.m_in =			0x0;
+TCCR1_R.name =			TCCR1;			TCCR1_R.offset_addr =	0x12;		TCCR1_R.m_out =				0x0;			TCCR1_R.m_in =			0x0;
+TPRLO1_R.name =			TPRLO1;			TPRLO1_R.offset_addr =	0x13;		TPRLO1_R.m_out =			0x0;			TPRLO1_R.m_in =			0x0;
+TPRHI1_R.name =			TPRHI1;			TPRHI1_R.offset_addr =	0x14;		TPRHI1_R.m_out =			0x0;			TPRHI1_R.m_in =			0x0;
+TCNTLO1_R.name =		TCNTLO1;		TCNTLO1_R.offset_addr =	0x15;		TCNTLO1_R.m_out =			0x0;			TCNTLO1_R.m_in =		0x0;
+TCNTHI1_R.name =		TCNTHI1;		TCNTHI1_R.offset_addr =	0x16;		TCNTHI1_R.m_out =			0x0;			TCNTHI1_R.m_in =		0x0;
+																															
+TCR2_R.name =			TCR2;			TCR2_R.offset_addr =	0x20;		TCR2_R.m_out =				0x0;			TCR2_R.m_in =			0x0;
+TCSR2_R.name =			TCSR2;			TCSR2_R.offset_addr =	0x21;		TCSR2_R.m_out =				0x0;			TCSR2_R.m_in =			0x0;
+TCCR2_R.name =			TCCR2;			TCCR2_R.offset_addr =	0x22;		TCCR2_R.m_out =				0x0;			TCCR2_R.m_in =			0x0;
+TPRLO2_R.name =			TPRLO2;			TPRLO2_R.offset_addr =	0x23;		TPRLO2_R.m_out =			0x0;			TPRLO2_R.m_in =			0x0;
+TPRHI2_R.name =			TPRHI2;			TPRHI2_R.offset_addr =	0x24;		TPRHI2_R.m_out =			0x0;			TPRHI2_R.m_in =			0x0;
+TCNTLO2_R.name =		TCNTLO2;		TCNTLO2_R.offset_addr =	0x25;		TCNTLO2_R.m_out =			0x0;			TCNTLO2_R.m_in =		0x0;
+TCNTHI2_R.name =		TCNTHI2;		TCNTHI2_R.offset_addr =	0x26;		TCNTHI2_R.m_out =			0x0;			TCNTHI2_R.m_in =		0x0;
+																															
+TCR3_R.name =			TCR3;			TCR3_R.offset_addr =	0x30;		TCR3_R.m_out =				0x0;			TCR3_R.m_in =			0x0;
+TCSR3_R.name =			TCSR3;			TCSR3_R.offset_addr =	0x31;		TCSR3_R.m_out =				0x0;			TCSR3_R.m_in =			0x0;
+TCCR3_R.name =			TCCR3;			TCCR3_R.offset_addr =	0x32;		TCCR3_R.m_out =				0x0;			TCCR3_R.m_in =			0x0;
+TPRLO3_R.name =			TPRLO3;			TPRLO3_R.offset_addr =	0x33;		TPRLO3_R.m_out =			0x0;			TPRLO3_R.m_in =			0x0;
+TPRHI3_R.name =			TPRHI3;			TPRHI3_R.offset_addr =	0x34;		TPRHI3_R.m_out =			0x0;			TPRHI3_R.m_in =			0x0;
+TCNTLO3_R.name =		TCNTLO3;		TCNTLO3_R.offset_addr =	0x35;		TCNTLO3_R.m_out =			0x0;			TCNTLO3_R.m_in =		0x0;
+TCNTHI3_R.name =		TCNTHI3;		TCNTHI3_R.offset_addr =	0x36;		TCNTHI3_R.m_out =			0x0;			TCNTHI3_R.m_in =		0x0;
+																															
+TCR4_R.name =			TCR4;			TCR4_R.offset_addr =	0x40;		TCR4_R.m_out =				0x0;			TCR4_R.m_in =			0x0;
+TCSR4_R.name =			TCSR4;			TCSR4_R.offset_addr =	0x41;		TCSR4_R.m_out =				0x0;			TCSR4_R.m_in =			0x0;
+TCCR4_R.name =			TCCR4;			TCCR4_R.offset_addr =	0x42;		TCCR4_R.m_out =				0x0;			TCCR4_R.m_in =			0x0;
+TPRLO4_R.name =			TPRLO4;			TPRLO4_R.offset_addr =	0x43;		TPRLO4_R.m_out =			0x0;			TPRLO4_R.m_in =			0x0;
+TPRHI4_R.name =			TPRHI4;			TPRHI4_R.offset_addr =	0x44;		TPRHI4_R.m_out =			0x0;			TPRHI4_R.m_in =			0x0;
+TCNTLO4_R.name =		TCNTLO4;		TCNTLO4_R.offset_addr =	0x45;		TCNTLO4_R.m_out =			0x0;			TCNTLO4_R.m_in =		0x0;
+TCNTHI4_R.name =		TCNTHI4;		TCNTHI4_R.offset_addr =	0x46;		TCNTHI4_R.m_out =			0x0;			TCNTHI4_R.m_in =		0x0;
+																															
+TCR5_R.name =			TCR5;			TCR5_R.offset_addr =	0x50;		TCR5_R.m_out =				0x0;			TCR5_R.m_in =			0x0;
+TCSR5_R.name =			TCSR5;			TCSR5_R.offset_addr =	0x51;		TCSR5_R.m_out =				0x0;			TCSR5_R.m_in =			0x0;
+TCCR5_R.name =			TCCR5;			TCCR5_R.offset_addr =	0x52;		TCCR5_R.m_out =				0x0;			TCCR5_R.m_in =			0x0;
+TPRLO5_R.name =			TPRLO5;			TPRLO5_R.offset_addr =	0x53;		TPRLO5_R.m_out =			0x0;			TPRLO5_R.m_in =			0x0;
+TPRHI5_R.name =			TPRHI5;			TPRHI5_R.offset_addr =	0x54;		TPRHI5_R.m_out =			0x0;			TPRHI5_R.m_in =			0x0;
+TCNTLO5_R.name =		TCNTLO5;		TCNTLO5_R.offset_addr =	0x55;		TCNTLO5_R.m_out =			0x0;			TCNTLO5_R.m_in =		0x0;
+TCNTHI5_R.name =		TCNTHI5;		TCNTHI5_R.offset_addr =	0x56;		TCNTHI5_R.m_out =			0x0;			TCNTHI5_R.m_in =		0x0;
+																															
+TCR6_R.name =			TCR6;			TCR6_R.offset_addr =	0x60;		TCR6_R.m_out =				0x0;			TCR6_R.m_in =			0x0;
+TCSR6_R.name =			TCSR6;			TCSR6_R.offset_addr =	0x61;		TCSR6_R.m_out =				0x0;			TCSR6_R.m_in =			0x0;
+TCCR6_R.name =			TCCR6;			TCCR6_R.offset_addr =	0x62;		TCCR6_R.m_out =				0x0;			TCCR6_R.m_in =			0x0;
+TPRLO6_R.name =			TPRLO6;			TPRLO6_R.offset_addr =	0x63;		TPRLO6_R.m_out =			0x0;			TPRLO6_R.m_in =			0x0;
+TPRHI6_R.name =			TPRHI6;			TPRHI6_R.offset_addr =	0x64;		TPRHI6_R.m_out =			0x0;			TPRHI6_R.m_in =			0x0;
+TCNTLO6_R.name =		TCNTLO6;		TCNTLO6_R.offset_addr =	0x65;		TCNTLO6_R.m_out =			0x0;			TCNTLO6_R.m_in =		0x0;
+TCNTHI6_R.name =		TCNTHI6;		TCNTHI6_R.offset_addr =	0x66;		TCNTHI6_R.m_out =			0x0;			TCNTHI6_R.m_in =		0x0;
+																															
+TCR7_R.name =			TCR7;			TCR7_R.offset_addr =	0x70;		TCR7_R.m_out =				0x0;			TCR7_R.m_in =			0x0;
+TCSR7_R.name =			TCSR7;			TCSR7_R.offset_addr =	0x71;		TCSR7_R.m_out =				0x0;			TCSR7_R.m_in =			0x0;
+TCCR7_R.name =			TCCR7;			TCCR7_R.offset_addr =	0x72;		TCCR7_R.m_out =				0x0;			TCCR7_R.m_in =			0x0;
+TPRLO7_R.name =			TPRLO7;			TPRLO7_R.offset_addr =	0x73;		TPRLO7_R.m_out =			0x0;			TPRLO7_R.m_in =			0x0;
+TPRHI7_R.name =			TPRHI7;			TPRHI7_R.offset_addr =	0x74;		TPRHI7_R.m_out =			0x0;			TPRHI7_R.m_in =			0x0;
+TCNTLO7_R.name =		TCNTLO7;		TCNTLO7_R.offset_addr =	0x75;		TCNTLO7_R.m_out =			0x0;			TCNTLO7_R.m_in =		0x0;
+TCNTHI7_R.name =		TCNTHI7;		TCNTHI7_R.offset_addr =	0x76;		TCNTHI7_R.m_out =			0x0;			TCNTHI7_R.m_in =		0x0;
+																															
+WDTCR0_R.name =			WDTCR0;			WDTCR0_R.offset_addr =	 0x100;		WDTCR0_R.m_out =			0x0;			WDTCR0_R.m_in =			0x0;
+WDTCSR0_R.name =		WDTCSR0;		WDTCSR0_R.offset_addr =	 0x101;		WDTCSR0_R.m_out =			0x0;			WDTCSR0_R.m_in =		0x0;
+WDTCCR0_R.name =		WDTCCR0;		WDTCCR0_R.offset_addr =	 0x102;		WDTCCR0_R.m_out =			0x0;			WDTCCR0_R.m_in =		0x0;
+WDTPRLO0_R.name =		WDTPRLO0;		WDTPRLO0_R.offset_addr = 0x103;		WDTPRLO0_R.m_out =			0x0;			WDTPRLO0_R.m_in =		0x0;
+WDTPRHI0_R.name =		WDTPRHI0;		WDTPRHI0_R.offset_addr = 0x104;		WDTPRHI0_R.m_out =			0x0;			WDTPRHI0_R.m_in =		0x0;
+WDTCNTLO0_R.name =		WDTCNTLO0;		WDTCNTLO0_R.offset_addr =0x105;		WDTCNTLO0_R.m_out =			0x0;			WDTCNTLO0_R.m_in =		0x0;
+WDTCNTHI0_R.name =		WDTCNTHI0;		WDTCNTHI0_R.offset_addr =0x106;		WDTCNTHI0_R.m_out =			0x0;			WDTCNTHI0_R.m_in =		0x0;
+																															
+WDTCR1_R.name =			WDTCR1;			WDTCR1_R.offset_addr =	 0x110;		WDTCR1_R.m_out =			0x0;			WDTCR1_R.m_in =			0x0;
+WDTCSR1_R.name =		WDTCSR1;		WDTCSR1_R.offset_addr =	 0x111;		WDTCSR1_R.m_out =			0x0;			WDTCSR1_R.m_in =		0x0;
+WDTCCR1_R.name =		WDTCCR1;		WDTCCR1_R.offset_addr =	 0x112;		WDTCCR1_R.m_out =			0x0;			WDTCCR1_R.m_in =		0x0;
+WDTPRLO1_R.name =		WDTPRLO1;		WDTPRLO1_R.offset_addr = 0x113;		WDTPRLO1_R.m_out =			0x0;			WDTPRLO1_R.m_in =		0x0;
+WDTPRHI1_R.name =		WDTPRHI1;		WDTPRHI1_R.offset_addr = 0x114;		WDTPRHI1_R.m_out =			0x0;			WDTPRHI1_R.m_in =		0x0;
+WDTCNTLO1_R.name =		WDTCNTLO1;		WDTCNTLO1_R.offset_addr =0x115;		WDTCNTLO1_R.m_out =			0x0;			WDTCNTLO1_R.m_in =		0x0;
+WDTCNTHI1_R.name =		WDTCNTHI1;		WDTCNTHI1_R.offset_addr =0x116;		WDTCNTHI1_R.m_out =			0x0;			WDTCNTHI1_R.m_in =		0x0;
+
+
+//Rabio Ctl0
+RAB_RST_CTRL0_R.name =	RAB_RST_CTRL0;	RAB_RST_CTRL0_R.offset_addr =0x6;	RAB_RST_CTRL0_R.m_out =		0x0;			RAB_RST_CTRL0_R.m_in =		0x0;
+
+//Rabio Ctl1
+RAB_RST_CTRL1_R.name =	RAB_RST_CTRL1;	RAB_RST_CTRL1_R.offset_addr =0x6;	RAB_RST_CTRL1_R.m_out =		0x0;			RAB_RST_CTRL1_R.m_in =		0x0;
+
+//UART Ctl
+LCR_R.name =		ULCR;				LCR_R.offset_addr =0x3;				LCR_R.m_out =			0x0;				LCR_R.m_in =		0x0;
+FAR_R.name =		UFAR;				FAR_R.offset_addr =0x1c;			FAR_R.m_out =			0x0;				FAR_R.m_in =		0x0;
+
+//I2C  Ctl
+
+
+//GPIO Ctl
+GPIOPADR_R.name =		GPIOPADR;		GPIOPADR_R.offset_addr =0x0;		GPIOPADR_R.m_out =			0x0;			GPIOPADR_R.m_in =		0x0;
+GPIOPCDR_R.name =		GPIOPCDR;		GPIOPCDR_R.offset_addr =0x6;		GPIOPCDR_R.m_out =			0x0;			GPIOPCDR_R.m_in =		0x0;
+GPIOPDCTL_R.name =		GPIOPDCTL;		GPIOPDCTL_R.offset_addr =0xb;		GPIOPDCTL_R.m_out =			0x0;			GPIOPDCTL_R.m_in =		0x0;
+
+//SPI  Ctl
+CTRLR0_R.name =			CTRLR0;			CTRLR0_R.offset_addr =0x0;			CTRLR0_R.m_out =			0x0;			CTRLR0_R.m_in =		0x0;
+BAUDR_R.name =			BAUDR;			BAUDR_R.offset_addr =0x5;			BAUDR_R.m_out =				0x0;			BAUDR_R.m_in =		0x0;
+DR_R.name =				DR;				DR_R.offset_addr =0x18;				DR_R.m_out =				0x0;			DR_R.m_in =			0x0;
+
+//PCIE  Ctl
+IBADDR0A_R.name =		IBADDR0A;		IBADDR0A_R.offset_addr =0x0010020a;	IBADDR0A_R.m_out =			0x0;			IBADDR0A_R.m_in =		0x0;
+IBADDR0B_R.name =		IBADDR0B;		IBADDR0B_R.offset_addr =0x00100214;	IBADDR0B_R.m_out =			0x0;			IBADDR0B_R.m_in =		0x0;
+
+
+
+// ”≤º˛–≈∫≈¡ø
+	for(int i = 0; i < HSRegNum; i++)
+	{
+		HW_SEM_R[i].name = NO_NAME;
+		HW_SEM_R[i].offset_addr = i;
+		HW_SEM_R[i].m_in = HW_SEM_R[i].m_out = 0;
+	}
+}
+
+//-------------------------------------------------------------------
+void SystemConfigReg::send_event_to_core(unsigned int core_id, unsigned int event_num, bool is_posedge)
+{
+	tlm::tlm_generic_payload trans;
+	tlm::tlm_phase phase;
+	sc_core::sc_time delay;
+
+	SRC_EVT_S src_evt_info;
+	memset(&src_evt_info, 0, sizeof(src_evt_info));
+	src_evt_info.bolPosEdge = is_posedge;
+	src_evt_info.u32SrcEvt = event_num;
+
+	trans.set_address(SYS_CFG_MSG);
+	trans.set_data_ptr( (unsigned char *)(&src_evt_info) );
+	trans.set_data_length(sizeof(src_evt_info));
+	phase = tlm::BEGIN_REQ;
+
+	if(core_id == 0)
+	{
+		init_socket2dmac0->nb_transport_fw(trans, phase, delay);
+	}
+	if(core_id == 1)
+	{
+		init_socket2dmac1->nb_transport_fw(trans, phase, delay);
+	}
+}
+//-------------------------------------------------------------------
+
+
+
+bool SystemConfigReg::write_reg(unsigned int addr,unsigned int val ){
+
+	unsigned int offset = 0;
+
+	if(addr >= HSRegBase && addr < HSRegBase + HSRegNum)
+	{
+		int reg_idx = addr - HSRegBase;
+		if(val == 0 || HW_SEM_R[reg_idx].read() == 0)
+		{
+			HW_SEM_R[reg_idx].write(val & HSRegMask);
+		}
+		return true;
+	}
+	
+	if(addr >= GlobalRegBase && addr<= GlobalRegBase + GlobalRegMaxOffset){
+
+		offset = addr - GlobalRegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				CIDR_R.write(val & CIDR_MASK);
+				return true;
+					  }
+			case 0x01:{
+				GCSR_R.write(val & GCSR_MASK);
+				return true;
+					  }
+			case 0x02:{
+				BOOTCOMPLETE_R.write(val & BOOTCOMPLETE_MASK);
+				return true;
+					  }
+			case 0x03:{
+				CISR_R.write(val & CISR_MASK);
+				return true;
+					  }
+			case 0x10:{
+				C0_BOOT_ADDR_R.write(val & C0_BOOT_ADDR_MASK);
+				return true;
+					  }
+			case 0x11:{
+				C1_BOOT_ADDR_R.write(val & C1_BOOT_ADDR_MASK);
+				return true;
+					  }
+			case 0x12:{
+				BOOT_DEVICE_R.write(val & BOOT_DEVICE_MASK);
+				return true;
+					  }
+			case 0x13:{
+				BOOT_DEVICE_CFG_R.write(val & BOOT_DEVICE_CFG_MASK);
+				return true;
+					  }
+			case 0x14:{
+				PCIE_MODE_R.write(val & PCIE_MODE_MASK);
+				return true;
+					  }
+			case 0x15:{
+				CHIP_MODE_R.write(val & CHIP_MODE_MASK);
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+				return false;
+					 }
+			}
+	}
+
+
+	if(addr >=  MCRCRRegBase && addr<= MCRCRRegBase + MCRCRRegMaxOffset){
+			offset = addr - MCRCRRegBase;
+
+	switch(offset){
+
+			case 0x00:{
+				MCRCR_R.write(val & MCRCR_MASK);
+				return true;
+					  }
+	default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+			return false;
+			 }
+		}
+	}
+
+
+	if(addr >=  PMARegBase && addr<= PMARegBase + PMARegMaxOffset){
+		offset = addr - PMARegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				PMACR0_R.write(val & PMACR_MASK);
+				return true;
+					  }
+			case 0x01:{
+				PMACR1_R.write(val & PMACR_MASK);
+				return true;
+					  }
+			case 0x02:{
+				PMACR2_R.write(val & PMACR_MASK);
+				return true;
+					  }
+			case 0x03:{
+				PMACR3_R.write(val & PMACR_MASK);
+				return true;
+					  }
+			case 0x04:{
+				PMACR4_R.write(val & PMACR_MASK);
+				return true;
+					  }
+			case 0x05:{
+				PMACR5_R.write(val & PMACR_MASK);
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >=  PCIERegBase && addr<= PCIERegBase + PCIERegMaxOffset){
+		offset = addr - PCIERegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				PGSR_R.write(val & PGSR_MASK);
+				return true;
+					  }
+			case 0x01:{
+				PLACR_R.write(val & PLACR_MASK);
+				return true;
+					  }
+			case 0x02:{
+				PLICR_R.write(val & PLICR_MASK);
+				return true;
+					  }
+			case 0x03:{
+				PLIPSR_R.write(val & PLIPSR_MASK);
+				return true;
+					  }
+			case 0x04:{
+				PLIPMR_R.write(val & PLIPMR_MASK);
+				return true;
+					  }
+			case 0x05:{
+				PLISR_R.write(val & PLISR_MASK);
+				return true;
+					  }
+			case 0x06:{
+				PCER_R.write(val & PCER_MASK);
+				return true;
+					  }
+			case 0x07:{
+				PPSCAR_R.write(val & PPSCAR_MASK);
+				return true;
+					  }
+			case 0x08:{
+				PCEFR_R.write(val & PCEFR_MASK);
+				return true;
+					  }
+			case 0x09:{
+				PMSGR0_R.write(val & PMSGR0_MASK);
+				return true;
+					  }
+			case 0x0a:{
+				PMSGR1_R.write(val & PMSGR1_MASK);
+				return true;
+					  }
+			case 0x0b:{
+				PMSGR2_R.write(val & PMSGR2_MASK);
+				return true;
+					  }
+			case 0x0c:{
+				PMSGR3_R.write(val & PMSGR3_MASK);
+				return true;
+					  }
+			case 0x0d:{
+				PMSGR4_R.write(val & PMSGR4_MASK);
+				return true;
+					  }
+			case 0x0e:{
+				PMSGR5_R.write(val & PMSGR5_MASK);
+				return true;
+					  }
+			case 0x0f:{
+				PMUER_R.write(val & PMUER_MASK);
+				return true;
+					  }
+			case 0x10:{
+				PVFER_R.write(val & PVFER_MASK);
+				return true;
+					  }
+			case 0x1c:{
+				EP_IRQ_SET_R.write(val & EP_IRQ_SET_MASK);
+				return true;
+					  }
+			case 0x1d:{
+				ER_IRQ_CLR_R.write(val & ER_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x1e:{
+				ER_IRQ_STATUS_R.write(val & ER_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x1f:{
+				MSI_DATA_R.write(val & MSI_DATA_MASK);
+				return true;
+					  }
+			case 0x20:{
+				MSI0_IRQ_STATUS_R.write(val & MSI0_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x21:{
+				MSI0_IRQ_ENABLE_R.write(val & MSI0_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x22:{
+				MSI0_IRQ_CLR_R.write(val & MSI0_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x23:{
+				MSI1_IRQ_STATUS_R.write(val & MSI1_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x24:{
+				MSI1_IRQ_ENABLE_R.write(val & MSI1_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x25:{
+				MSI1_IRQ_CLR_R.write(val & MSI1_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x26:{
+				MSI2_IRQ_STATUS_R.write(val & MSI2_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x27:{
+				MSI2_IRQ_ENABLE_R.write(val & MSI2_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x28:{
+				MSI2_IRQ_CLR_R.write(val & MSI2_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x29:{
+				MSI3_IRQ_STATUS_R.write(val & MSI3_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x2a:{
+				MSI3_IRQ_ENABLE_R.write(val & MSI3_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x2b:{
+				MSI3_IRQ_CLR_R.write(val & MSI3_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x2c:{
+				MSI4_IRQ_STATUS_R.write(val & MSI4_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x2d:{
+				MSI4_IRQ_ENABLE_R.write(val & MSI4_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x2e:{
+				MSI4_IRQ_CLR_R.write(val & MSI4_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x2f:{
+				MSI5_IRQ_STATUS_R.write(val & MSI5_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x30:{
+				MSI5_IRQ_ENABLE_R.write(val & MSI5_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x31:{
+				MSI5_IRQ_CLR_R.write(val & MSI5_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x32:{
+				MSI6_IRQ_STATUS_R.write(val & MSI6_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x33:{
+				MSI6_IRQ_ENABLE_R.write(val & MSI6_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x34:{
+				MSI6_IRQ_CLR_R.write(val & MSI6_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x35:{
+				MSI7_IRQ_STATUS_R.write(val & MSI7_IRQ_STATUS_MASK);
+				return true;
+					  }
+			case 0x36:{
+				MSI7_IRQ_ENABLE_R.write(val & MSI7_IRQ_ENABLE_MASK);
+				return true;
+					  }
+			case 0x37:{
+				MSI7_IRQ_CLR_R.write(val & MSI7_IRQ_CLR_MASK);
+				return true;
+					  }
+			case 0x38:{
+				L1_PM_SUBSTATE_R.write(val & L1_PM_SUBSTATE_MASK);
+				return true;
+					  }
+			case 0x39:{
+				HRTR_R.write(val & HRTR_MASK);
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+
+	if(addr >= SRIORegBase && addr<= SRIORegBase + SRIORegMaxOffset){
+
+		offset = addr - SRIORegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				SEITR0_R.write(val & SEITR_MASK);
+				return true;
+					  }
+			case 0x01:{
+				SEISR0_R.write(val & SEISR_MASK);
+				return true;
+					  }
+			case 0x02:{
+				SEICR0_R.write(val & SEICR_MASK);
+				return true;
+					  }
+			case 0x03:{
+				SLCR0_R.write(val & SLCR_MASK);
+				return true;
+					  }
+			case 0x04:{
+				SDIDCAR0_R.write(val & SDIDCAR_MASK);
+				return true;
+					  }
+			case 0x05:{
+				SDINFCAR0_R.write(val & SDINFCAR_MASK);
+				return true;
+					  }
+			case 0x06:{
+				SAIDCAR0_R.write(val & SAIDCAR_MASK);
+				return true;
+					  }
+			case 0x07:{
+				SGCR0_R.write(val & SGCR_MASK);
+				return true;
+					  }
+			case 0x08:{
+				SPNR0_R.write(val & SPNR_MASK);
+				return true;
+					  }
+			case 0x09:{
+				SPVR0_R.write(val & SPVR_MASK);
+				return true;
+					  }
+			case 0x0a:{
+				SDPSR0_R.write(val & SDPSR_MASK);
+				return true;
+					  }
+			case 0x0b:{
+				SSPLSR0_R.write(val & SSPLSR_MASK);
+				return true;
+					  }
+			case 0x0c:{
+				SPSR0_R.write(val & SPSR_MASK);
+				return true;
+					  }
+			case 0x0d:{
+				SPCR0_R.write(val & SPCR_MASK);
+				return true;
+					  }
+			case 0x0e:{
+				SSLSSR0_R.write(val & SSLSSR_MASK);
+				return true;
+					  }
+			case 0x0f:{
+				SLKSPD0_R.write(val & SLKSPD_MASK);
+				return true;
+					  }
+			case 0x10:{
+				TXPRSTINSI0_R.write(val & TXPRSTINSI_MASK);
+				return true;
+					  }
+			case 0x11:{
+				TXPOMAX0_R.write(val & TXPOMAX_MASK);
+				return true;
+					  }
+			case 0x12:{
+				TXPOMIN0_R.write(val & TXPOMIN_MASK);
+				return true;
+					  }
+			case 0x13:{
+				TXMAMAX0_R.write(val & TXMAMAX_MASK);
+				return true;
+					  }
+			case 0x14:{
+				TXMAMIN0_R.write(val & TXMAMIN_MASK);
+				return true;
+					  }
+			case 0x15:{
+				TXPEMAX0_R.write(val & TXPEMAX_MASK);
+				return true;
+					  }
+			case 0x16:{
+				TXPEMIN0_R.write(val & TXPEMIN_MASK);
+				return true;
+					  }
+			case 0x17:{
+				RETREMC0_R.write(val & RETREMC_MASK);
+				return true;
+					  }
+			case 0x18:{
+				TIMERC20_R.write(val & TIMERC2_MASK);
+				return true;
+					  }
+			case 0x19:{
+				TIMERC10_R.write(val & TIMERC1_MASK);
+				return true;
+					  }
+			case 0x1a:{
+				TIMERC00_R.write(val & TIMERC0_MASK);
+				return true;
+					  }
+			case 0x1b:{
+				AETST0_R.write(val & AETST_MASK);
+				return true;
+					  }
+
+
+
+
+
+			case 0x40:{
+				SEITR1_R.write(val & SEITR_MASK);
+				return true;
+					  }
+			case 0x41:{
+				SEISR1_R.write(val & SEISR_MASK);
+				return true;
+					  }
+			case 0x42:{
+				SEICR1_R.write(val & SEICR_MASK);
+				return true;
+					  }
+			case 0x43:{
+				SLCR1_R.write(val & SLCR_MASK);
+				return true;
+					  }
+			case 0x44:{
+				SDIDCAR1_R.write(val & SDIDCAR_MASK);
+				return true;
+					  }
+			case 0x45:{
+				SDINFCAR1_R.write(val & SDINFCAR_MASK);
+				return true;
+					  }
+			case 0x46:{
+				SAIDCAR1_R.write(val & SAIDCAR_MASK);
+				return true;
+					  }
+			case 0x47:{
+				SGCR1_R.write(val & SGCR_MASK);
+				return true;
+					  }
+			case 0x48:{
+				SPNR1_R.write(val & SPNR_MASK);
+				return true;
+					  }
+			case 0x49:{
+				SPVR1_R.write(val & SPVR_MASK);
+				return true;
+					  }
+			case 0x4a:{
+				SDPSR1_R.write(val & SDPSR_MASK);
+				return true;
+					  }
+			case 0x4b:{
+				SSPLSR1_R.write(val & SSPLSR_MASK);
+				return true;
+					  }
+			case 0x4c:{
+				SPSR1_R.write(val & SPSR_MASK);
+				return true;
+					  }
+			case 0x4d:{
+				SPCR1_R.write(val & SPCR_MASK);
+				return true;
+					  }
+			case 0x4e:{
+				SSLSSR1_R.write(val & SSLSSR_MASK);
+				return true;
+					  }
+			case 0x4f:{
+				SLKSPD1_R.write(val & SLKSPD_MASK);
+				return true;
+					  }
+			case 0x50:{
+				TXPRSTINSI1_R.write(val & TXPRSTINSI_MASK);
+				return true;
+					  }
+			case 0x51:{
+				TXPOMAX1_R.write(val & TXPOMAX_MASK);
+				return true;
+					  }
+			case 0x52:{
+				TXPOMIN1_R.write(val & TXPOMIN_MASK);
+				return true;
+					  }
+			case 0x53:{
+				TXMAMAX1_R.write(val & TXMAMAX_MASK);
+				return true;
+					  }
+			case 0x54:{
+				TXMAMIN1_R.write(val & TXMAMIN_MASK);
+				return true;
+					  }
+			case 0x55:{
+				TXPEMAX1_R.write(val & TXPEMAX_MASK);
+				return true;
+					  }
+			case 0x56:{
+				TXPEMIN1_R.write(val & TXPEMIN_MASK);
+				return true;
+					  }
+			case 0x57:{
+				RETREMC1_R.write(val & RETREMC_MASK);
+				return true;
+					  }
+			case 0x58:{
+				TIMERC21_R.write(val & TIMERC2_MASK);
+				return true;
+					  }
+			case 0x59:{
+				TIMERC11_R.write(val & TIMERC1_MASK);
+				return true;
+					  }
+			case 0x5a:{
+				TIMERC01_R.write(val & TIMERC0_MASK);
+				return true;
+					  }
+			case 0x5b:{
+				AETST1_R.write(val & AETST_MASK);
+				return true;
+					  }
+
+
+
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+
+	}
+
+
+
+
+
+
+	if(addr >= IPCRegBase && addr<= IPCRegBase + IPCRegMaxOffset){
+
+		offset = addr - IPCRegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				/*
+				IPCGR0_R.write(val & IPCGR_MASK);
+				return true;
+				*/
+				return false;
+				
+					  }
+			case 0x01:{
+//				IPCSR0_R.write(val & IPCSR_MASK);
+				unsigned int old_val = IPCGR0_R.read();
+				unsigned int new_val = (old_val | (val & IPCGR_MASK));
+
+				if( (new_val & IPCGR_MASK) != 0 )
+				{
+					new_val |= 0x1U;
+				}
+				IPCGR0_R.write(new_val);
+				
+				// 0->1: positive edge
+				if( (old_val & 0x1U) == 0 && (new_val & 0x1U) != 0U )
+				{
+					send_event_to_core(0, IPC_SRC_EVT, true);
+				}
+				
+				return true;
+					  }
+			case 0x02:{
+//				IPCCR0_R.write(val & IPCCR_MASK);
+				unsigned int old_val = IPCGR0_R.read();
+				unsigned int new_val = (old_val & (~(val & IPCGR_MASK)));
+
+				if( (new_val & IPCGR_MASK) == 0 )
+				{
+					new_val &= 0xfffffffeU;
+				}
+				IPCGR0_R.write(new_val);
+
+				// 1->0: negative edge
+				if( (old_val & 0x1U) != 0 && (new_val & 0x1U) == 0U )
+				{
+					send_event_to_core(0, IPC_SRC_EVT, false);
+				}
+				
+				return true;
+					  }
+			case 0x03:{
+				/*
+				IPCGR1_R.write(val & IPCGR_MASK);
+				return true;
+				*/
+				return false;
+					  }
+			case 0x04:{
+//				IPCSR1_R.write(val & IPCSR_MASK);
+				unsigned int old_val = IPCGR1_R.read();
+				unsigned int new_val = (old_val | (val & IPCGR_MASK));
+
+				if( (new_val & IPCGR_MASK) != 0 )
+				{
+					new_val |= 0x1U;
+				}
+				IPCGR1_R.write(new_val);
+				
+				// 0->1: positive edge
+				if( (old_val & 0x1U) == 0 && (new_val & 0x1U) != 0U )
+				{
+					send_event_to_core(1, IPC_SRC_EVT, true);
+				}
+
+				return true;
+					  }
+			case 0x05:{
+//				IPCCR1_R.write(val & IPCCR_MASK);
+				unsigned int old_val = IPCGR1_R.read();
+				unsigned int new_val = (old_val & (~(val & IPCGR_MASK)));
+
+				if( (new_val & IPCGR_MASK) == 0 )
+				{
+					new_val &= 0xfffffffeU;
+				}
+				IPCGR1_R.write(new_val);
+
+				// 1->0: negative edge
+				if( (old_val & 0x1U) != 0 && (new_val & 0x1U) == 0U )
+				{
+					send_event_to_core(1, IPC_SRC_EVT, false);
+				}
+
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+
+	}
+
+
+	if(addr >=  DDRCFGBase && addr<= DDRCFGBase + DDRCFGMaxOffset){
+		offset = addr - DDRCFGBase;
+
+		switch(offset){
+
+			case 0x00:{
+				DDR_AXI_CFG0_R.write(val & DDR_AXI_CFG_MASK);
+				return true;
+					  }
+			case 0x01:{
+				DDR_AXI_CFG1_R.write(val & DDR_AXI_CFG_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+
+
+	if(addr >= CLK_RST_RegBase && addr<= CLK_RST_RegBase + CLK_RST_MaxOffset){
+		offset = addr - CLK_RST_RegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				PLL0_STATUS_R.write(val & PLLi_STATUS_MASK);
+				return true;
+					  }
+			case 0x01:{
+				PLL0_CTL0_R.write(val & PLLi_CTL0_MASK);
+				return true;
+					  }
+			case 0x02:{
+				PLL0_CTL1_R.write(val & PLLi_CTL1_MASK);
+				return true;
+					  }
+			case 0x03:{
+				PLL0_CTL2_R.write(val & PLLi_CTL2_MASK);
+				return true;
+					  }
+			/*case 0x04:{
+				PLL0_STATUS1_R.write(val & PLLi_STATUS1_MASK);
+				return true;
+					  }*/
+			case 0x08:{
+				CLK_SYS_CTL_R.write(val & CLK_SYS_CTL_MASK);
+				return true;
+					  }
+			case 0x10:{
+				PLL1_STATUS_R.write(val & PLLi_STATUS_MASK);
+				return true;
+					  }
+			case 0x11:{
+				PLL1_CTL0_R.write(val & PLLi_CTL0_MASK);
+				return true;
+					  }
+			case 0x12:{
+				PLL1_CTL1_R.write(val & PLLi_CTL1_MASK);
+				return true;
+					  }
+			case 0x13:{
+				PLL1_CTL2_R.write(val & PLLi_CTL2_MASK);
+				return true;
+					  }
+
+			case 0x18:{
+				CLK_PP_CTL_R.write(val & CLK_PP_CTL_MASK);
+				return true;
+					  }
+			case 0x19:{
+				CLK_ETHM_CTL_R.write(val & CLK_ETHM_CTL_MASK);
+				return true;
+					  }
+			case 0x1a:{
+				CLK_ETHS_CTL_R.write(val & CLK_ETHS_CTL_MASK);
+				return true;
+					  }
+			case 0x1b:{
+				CLK_PM_CTL_R.write(val & CLK_PM_CTL_MASK);
+				return true;
+					  }
+			case 0x1d:{
+				CLK_I2C_CTL_R.write(val & CLK_I2C_CTL_MASK);
+				return true;
+					  }
+			case 0x1e:{
+				CLK_SPI_CTL_R.write(val & CLK_SPI_CTL_MASK);
+				return true;
+					  }	
+
+			case 0x20:{
+				PLL2_STATUS_R.write(val & PLLi_STATUS_MASK);
+				return true;
+					  }
+			case 0x21:{
+				PLL2_CTL0_R.write(val & PLLi_CTL0_MASK);
+				return true;
+					  }
+			case 0x22:{
+				PLL2_CTL1_R.write(val & PLLi_CTL1_MASK);
+				return true;
+					  }
+			case 0x23:{
+				PLL2_CTL2_R.write(val & PLLi_CTL2_MASK);
+				return true;
+					  }
+			case 0x28:{
+				CLK_DDR_CTL_R.write(val & CLK_DDR_CTL_MASK);
+				return true;
+					  }
+			case 0x70:{
+				RST_STATUS_R.write(val & RST_STATUS_MASK);
+				return true;
+					  }
+			case 0x71:{
+				RST_TYPE_STATUS_R.write(val & RST_TYPE_STATUS_MASK);
+				return true;
+					  }
+			case 0x72:{
+				RST_RM_STATUS_R.write(val & RST_RM_STATUS_MASK);
+				return true;
+					  }
+
+			case 0x74:{
+				RST_CTL_R.write(val & RST_CTL_MASK);
+				return true;
+					  }
+			case 0x75:{
+				RST_INIT_CTL_R.write(val & RST_INIT_CTL_MASK);
+				return true;
+					  }
+			case 0x78:{
+				RST_SDS_CTL_R.write(val & RST_SDS_CTL_MASK);
+				return true;
+					  }
+			case 0x79:{
+				RST_SDS_STATUS_R.write(val & RST_SDS_STATUS_MASK);
+				return true;
+					  }
+			case 0x7e:{
+				DBG_CTL_R.write(val & DBG_CTL_MASK);
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >= TCR_WDT_RegBase && addr<= TCR_WDT_RegBase + TCR_WDT_MaxOffset){
+		offset = addr - TCR_WDT_RegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				TCR0_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x01:{
+				TCSR0_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x02:{
+				TCCR0_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x03:{
+				TPRLO0_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x04:{
+				TPRHI0_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x05:{
+				TCNTLO0_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x06:{
+				TCNTHI0_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+
+			case 0x10:{
+				TCR1_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x11:{
+				TCSR1_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x12:{
+				TCCR1_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x13:{
+				TPRLO1_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x14:{
+				TPRHI1_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x15:{
+				TCNTLO1_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x16:{
+				TCNTHI1_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x20:{
+				TCR2_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x21:{
+				TCSR2_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x22:{
+				TCCR2_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x23:{
+				TPRLO2_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x24:{
+				TPRHI2_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x25:{
+				TCNTLO2_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x26:{
+				TCNTHI2_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x30:{
+				TCR3_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x31:{
+				TCSR3_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x32:{
+				TCCR3_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x33:{
+				TPRLO3_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x34:{
+				TPRHI3_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x35:{
+				TCNTLO3_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x36:{
+				TCNTHI3_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x40:{
+				TCR4_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x41:{
+				TCSR4_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x42:{
+				TCCR4_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x43:{
+				TPRLO4_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x44:{
+				TPRHI4_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x45:{
+				TCNTLO4_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x46:{
+				TCNTHI4_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x50:{
+				TCR5_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x51:{
+				TCSR5_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x52:{
+				TCCR5_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x53:{
+				TPRLO5_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x54:{
+				TPRHI5_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x55:{
+				TCNTLO5_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x56:{
+				TCNTHI5_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x60:{
+				TCR6_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x61:{
+				TCSR6_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x62:{
+				TCCR6_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x63:{
+				TPRLO6_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x64:{
+				TPRHI6_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x65:{
+				TCNTLO6_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x66:{
+				TCNTHI6_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x70:{
+				TCR7_R.write(val & TCRi_MASK);
+				return true;
+					  }
+			case 0x71:{
+				TCSR7_R.write(val & TCSRi_MASK);
+				return true;
+					  }
+			case 0x72:{
+				TCCR7_R.write(val & TCCRi_MASK);
+				return true;
+					  }
+			case 0x73:{
+				TPRLO7_R.write(val & TPRLOi_MASK);
+				return true;
+					  }
+			case 0x74:{
+				TPRHI7_R.write(val & TPRHIi_MASK);
+				return true;
+					  }
+			case 0x75:{
+				TCNTLO7_R.write(val & TCNTLOi_MASK);
+				return true;
+					  }
+			case 0x76:{
+				TCNTHI7_R.write(val & TCNTHIi_MASK);
+				return true;
+					  }
+			case 0x100:{
+				WDTCR0_R.write(val & WDTCRi_MASK);
+				return true;
+					  }
+			case 0x101:{
+				WDTCSR0_R.write(val & WDTCSRi_MASK);
+				return true;
+					  }
+			case 0x102:{
+				WDTCCR0_R.write(val & WDTCCRi_MASK);
+				return true;
+					  }
+			case 0x103:{
+				WDTPRLO0_R.write(val & WDTPRLOi_MASK);
+				return true;
+					  }
+			case 0x104:{
+				WDTPRHI0_R.write(val & WDTPRHIi_MASK);
+				return true;
+					  }
+			case 0x105:{
+				WDTCNTLO0_R.write(val & WDTCNTLOi_MASK);
+				return true;
+					  }
+			case 0x106:{
+				WDTCNTHI0_R.write(val & WDTCNTHIi_MASK);
+				return true;
+					  }
+
+			case 0x110:{
+				WDTCR1_R.write(val & WDTCRi_MASK);
+				return true;
+					  }
+			case 0x111:{
+				WDTCSR1_R.write(val & WDTCSRi_MASK);
+				return true;
+					  }
+			case 0x112:{
+				WDTCCR1_R.write(val & WDTCCRi_MASK);
+				return true;
+					  }
+			case 0x113:{
+				WDTPRLO1_R.write(val & WDTPRLOi_MASK);
+				return true;
+					  }
+			case 0x114:{
+				WDTPRHI1_R.write(val & WDTPRHIi_MASK);
+				return true;
+					  }
+			case 0x115:{
+				WDTCNTLO1_R.write(val & WDTCNTLOi_MASK);
+				return true;
+					  }
+			case 0x116:{
+				WDTCNTHI1_R.write(val & WDTCNTHIi_MASK);
+				return true;
+					  }
+
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >=   RabioCtl0_RegBase && addr<= RabioCtl0_RegBase + RabioCtl0_MaxOffset){
+		offset = addr - RabioCtl0_RegBase;
+		switch(offset){
+			case 0x06:{
+				RAB_RST_CTRL0_R.write(val & RAB_RST_CTRL0_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+	if(addr >=  RabioCtl1_RegBase && addr<= RabioCtl1_RegBase + RabioCtl1_MaxOffset){
+		offset = addr - RabioCtl1_RegBase;
+		switch(offset){
+			case 0x06:{
+				RAB_RST_CTRL1_R.write(val & RAB_RST_CTRL1_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=  UartCtl_RegBase && addr<=UartCtl_RegBase  + UartCtl_MaxOffset){
+		offset = addr - UartCtl_RegBase;
+		switch(offset){
+			case 0x3:{
+				LCR_R.write(val & LCR_MASK);
+				return true;
+					  }
+			case 0x1c:{
+				FAR_R.write(val & FAR_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=  I2CCtl_RegBase && addr<= I2CCtl_RegBase + I2CCtl_MaxOffset){
+		offset = addr - I2CCtl_RegBase;
+		switch(offset){
+
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=  GPIOCtl_RegBase && addr<= GPIOCtl_RegBase + GPIOCtl_MaxOffset){
+		offset = addr - GPIOCtl_RegBase;
+		switch(offset){
+			case 0x00:{
+				GPIOPADR_R.write(val & GPIOPADR_MASK );
+				return true;
+					  }
+			case 0x6:{
+				GPIOPCDR_R.write(val & GPIOPCDR_MASK);
+				return true;
+					  }
+			case 0xb:{
+				GPIOPDCTL_R.write(val & GPIOPDCTL_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=   SPICtl_RegBase&& addr<= SPICtl_RegBase + SPICtl_MaxOffset){
+		offset = addr - SPICtl_RegBase;
+		switch(offset){
+			case 0x00:{
+				CTRLR0_R.write(val & CTRLR0_MASK);
+				return true;
+					  }
+			case 0x5:{
+				BAUDR_R.write(val & BAUDR_MASK);
+				return true;
+					  }
+			case 0x18:{
+				DR_R.write(val & DR_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=   PCIECtl_RegBase&& addr<= PCIECtl_RegBase + PCIECtl_MaxOffset){
+		offset = addr - PCIECtl_RegBase;
+		switch(offset){
+			case 0x10020a:{
+				IBADDR0A_R.write(val & IBADDR0A_MASK);
+				return true;
+					  }
+			case 0x100214:{
+				IBADDR0B_R.write(val & IBADDR0B_MASK);
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ERROR_REPORT_SYSCFG("Not find this addr!!!")
+		return false;
+}
+
+
+
+
+
+
+bool SystemConfigReg::read_reg(unsigned int addr, unsigned int & result){
+	unsigned int offset = 0;
+
+	if(addr >= HSRegBase && addr < HSRegBase + HSRegNum)
+	{
+		result = HW_SEM_R[addr - HSRegBase].read();
+		return true;
+	}
+
+	if(addr >= GlobalRegBase && addr<= GlobalRegBase + GlobalRegMaxOffset){
+
+		offset = addr - GlobalRegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = CIDR_R.read();
+				return true;
+					  }
+			case 0x01:{
+				result = GCSR_R.read();
+				return true;
+					  }
+			case 0x02:{
+				result = BOOTCOMPLETE_R.read();
+				return true;
+					  }
+			case 0x03:{
+				result = CISR_R.read();
+				return true;
+					  }
+			case 0x10:{
+				result = C0_BOOT_ADDR_R.read();
+				return true;
+					  }
+			case 0x11:{
+				result = C1_BOOT_ADDR_R.read();
+				return true;
+					  }
+			case 0x12:{
+				result = BOOT_DEVICE_R.read();
+				return true;
+					  }
+			case 0x13:{
+				result = BOOT_DEVICE_CFG_R.read();
+				return true;
+					  }
+			case 0x14:{
+				result = PCIE_MODE_R.read();
+				return true;
+					  }
+			case 0x15:{
+				result = CHIP_MODE_R.read();
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >=  MCRCRRegBase && addr<= MCRCRRegBase + MCRCRRegMaxOffset){
+		offset = addr - MCRCRRegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = MCRCR_R.read();
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >=  PMARegBase && addr<= PMARegBase + PMARegMaxOffset){
+		offset = addr - PMARegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = PMACR0_R.read();
+				return true;
+					  }
+			case 0x01:{
+				result = PMACR1_R.read();
+				return true;
+					  }
+			case 0x02:{
+				result = PMACR2_R.read();
+				return true;
+					  }
+			case 0x03:{
+				result = PMACR3_R.read();
+				return true;
+					  }
+			case 0x04:{
+				result = PMACR4_R.read();
+				return true;
+					  }
+			case 0x05:{
+				result = PMACR5_R.read();
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >=  PCIERegBase && addr<= PCIERegBase + PCIERegMaxOffset){
+		offset = addr - PCIERegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = PGSR_R.read();
+				return true;
+					  }
+			case 0x01:{
+				result = PLACR_R.read();
+				return true;
+					  }
+			case 0x02:{
+				result = PLICR_R.read();
+				return true;
+					  }
+			case 0x03:{
+				result = PLIPSR_R.read();
+				return true;
+					  }
+			case 0x04:{
+				result = PLIPMR_R.read();
+				return true;
+					  }
+			case 0x05:{
+				result = PLISR_R.read();
+				return true;
+					  }
+			case 0x06:{
+				result = PCER_R.read();
+				return true;
+					  }
+			case 0x07:{
+				result = PPSCAR_R.read();
+				return true;
+					  }
+			case 0x08:{
+				result = PCEFR_R.read();
+				return true;
+					  }
+			case 0x09:{
+				result = PMSGR0_R.read();
+				return true;
+					  }
+			case 0x0a:{
+				result = PMSGR1_R.read();
+				return true;
+					  }
+			case 0x0b:{
+				result = PMSGR2_R.read();
+				return true;
+					  }
+			case 0x0c:{
+				result = PMSGR3_R.read();
+				return true;
+					  }
+			case 0x0d:{
+				result = PMSGR4_R.read();
+				return true;
+					  }
+			case 0x0e:{
+				result = PMSGR5_R.read();
+				return true;
+					  }
+			case 0x0f:{
+				result = PMUER_R.read();
+				return true;
+					  }
+			case 0x10:{
+				result = PVFER_R.read();
+				return true;
+					  }
+			case 0x1c:{
+				result = EP_IRQ_SET_R.read();
+				return true;
+					  }
+			case 0x1d:{
+				result = ER_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x1e:{
+				result = ER_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x1f:{
+				result = MSI_DATA_R.read();
+				return true;
+					  }
+			case 0x20:{
+				result = MSI0_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x21:{
+				result = MSI0_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x22:{
+				result = MSI0_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x23:{
+				result = MSI1_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x24:{
+				result = MSI1_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x25:{
+				result = MSI1_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x26:{
+				result = MSI2_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x27:{
+				result = MSI2_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x28:{
+				result = MSI2_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x29:{
+				result = MSI3_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x2a:{
+				result = MSI3_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x2b:{
+				result = MSI3_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x2c:{
+				result = MSI4_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x2d:{
+				result = MSI4_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x2e:{
+				result = MSI4_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x2f:{
+				result = MSI5_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x30:{
+				result = MSI5_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x31:{
+				result = MSI5_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x32:{
+				result = MSI6_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x33:{
+				result = MSI6_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x34:{
+				result = MSI6_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x35:{
+				result = MSI7_IRQ_STATUS_R.read();
+				return true;
+					  }
+			case 0x36:{
+				result = MSI7_IRQ_ENABLE_R.read();
+				return true;
+					  }
+			case 0x37:{
+				result = MSI7_IRQ_CLR_R.read();
+				return true;
+					  }
+			case 0x38:{
+				result = L1_PM_SUBSTATE_R.read();
+				return true;
+					  }
+			case 0x39:{
+				result = HRTR_R.read();
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+
+	if(addr >= SRIORegBase && addr<= SRIORegBase + SRIORegMaxOffset){
+
+		offset = addr - SRIORegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = SEITR0_R.read();
+				return true;
+					  }
+			case 0x01:{
+				result = SEISR0_R.read();
+				return true;
+					  }
+			case 0x02:{
+				result = SEICR0_R.read();
+				return true;
+					  }
+			case 0x03:{
+				result = SLCR0_R.read();
+				return true;
+					  }
+			case 0x04:{
+				result = SDIDCAR0_R.read();
+				return true;
+					  }
+			case 0x05:{
+				result = SDINFCAR0_R.read();
+				return true;
+					  }
+			case 0x06:{
+				result = SAIDCAR0_R.read();
+				return true;
+					  }
+			case 0x07:{
+				result = SGCR0_R.read();
+				return true;
+					  }
+			case 0x08:{
+				result = SPNR0_R.read();
+				return true;
+					  }
+			case 0x09:{
+				result = SPVR0_R.read();
+				return true;
+					  }
+			case 0x0a:{
+				result = SDPSR0_R.read();
+				return true;
+					  }
+			case 0x0b:{
+				result = SSPLSR0_R.read();
+				return true;
+					  }
+			case 0x0c:{
+				result = SPSR0_R.read();
+				return true;
+					  }
+			case 0x0d:{
+				result = SPCR0_R.read();
+				return true;
+					  }
+			case 0x0e:{
+				result = SSLSSR0_R.read();
+				return true;
+					  }
+			case 0x0f:{
+				result = SLKSPD0_R.read();
+				return true;
+					  }
+			case 0x10:{
+				result = TXPRSTINSI0_R.read();
+				return true;
+					  }
+			case 0x11:{
+				result = TXPOMAX0_R.read();
+				return true;
+					  }
+			case 0x12:{
+				result = TXPOMIN0_R.read();
+				return true;
+					  }
+			case 0x13:{
+				result = TXMAMAX0_R.read();
+				return true;
+					  }
+			case 0x14:{
+				result = TXMAMIN0_R.read();
+				return true;
+					  }
+			case 0x15:{
+				result = TXPEMAX0_R.read();
+				return true;
+					  }
+			case 0x16:{
+				result = TXPEMIN0_R.read();
+				return true;
+					  }
+			case 0x17:{
+				result = RETREMC0_R.read();
+				return true;
+					  }
+			case 0x18:{
+				result = TIMERC20_R.read();
+				return true;
+					  }
+			case 0x19:{
+				result = TIMERC10_R.read();
+				return true;
+					  }
+			case 0x1a:{
+				result = TIMERC00_R.read();
+				return true;
+					  }
+			case 0x1b:{
+				result = AETST0_R.read();
+				return true;
+					  }
+
+
+
+
+
+			case 0x40:{
+				result = SEITR1_R.read();
+				return true;
+					  }
+			case 0x41:{
+				result = SEISR1_R.read();
+				return true;
+					  }
+			case 0x42:{
+				result = SEICR1_R.read();
+				return true;
+					  }
+			case 0x43:{
+				result = SLCR1_R.read();
+				return true;
+					  }
+			case 0x44:{
+				result = SDIDCAR1_R.read();
+				return true;
+					  }
+			case 0x45:{
+				result = SDINFCAR1_R.read();
+				return true;
+					  }
+			case 0x46:{
+				result = SAIDCAR1_R.read();
+				return true;
+					  }
+			case 0x47:{
+				result = SGCR1_R.read();
+				return true;
+					  }
+			case 0x48:{
+				result = SPNR1_R.read();
+				return true;
+					  }
+			case 0x49:{
+				result = SPVR1_R.read();
+				return true;
+					  }
+			case 0x4a:{
+				result = SDPSR1_R.read();
+				return true;
+					  }
+			case 0x4b:{
+				result = SSPLSR1_R.read();
+				return true;
+					  }
+			case 0x4c:{
+				result = SPSR1_R.read();
+				return true;
+					  }
+			case 0x4d:{
+				result = SPCR1_R.read();
+				return true;
+					  }
+			case 0x4e:{
+				result = SSLSSR1_R.read();
+				return true;
+					  }
+
+			case 0x4f:{
+				result = SLKSPD1_R.read();
+				return true;
+					  }
+			case 0x50:{
+				result = TXPRSTINSI1_R.read();
+				return true;
+					  }
+			case 0x51:{
+				result = TXPOMAX1_R.read();
+				return true;
+					  }
+			case 0x52:{
+				result = TXPOMIN1_R.read();
+				return true;
+					  }
+			case 0x53:{
+				result = TXMAMAX1_R.read();
+				return true;
+					  }
+			case 0x54:{
+				result = TXMAMIN1_R.read();
+				return true;
+					  }
+			case 0x55:{
+				result = TXPEMAX1_R.read();
+				return true;
+					  }
+			case 0x56:{
+				result = TXPEMIN1_R.read();
+				return true;
+					  }
+			case 0x57:{
+				result = RETREMC1_R.read();
+				return true;
+					  }
+			case 0x58:{
+				result = TIMERC21_R.read();
+				return true;
+					  }
+			case 0x59:{
+				result = TIMERC11_R.read();
+				return true;
+					  }
+			case 0x5a:{
+				result = TIMERC01_R.read();
+				return true;
+					  }
+			case 0x5b:{
+				result = AETST1_R.read();
+				return true;
+					  }
+
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+
+	}
+
+
+	if(addr >= IPCRegBase && addr<= IPCRegBase + IPCRegMaxOffset){
+
+		offset = addr - IPCRegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = IPCGR0_R.read();
+				return true;
+					  }
+			case 0x01:{
+//				result = IPCSR0_R.read();
+				result = 0;
+				return true;
+					  }
+			case 0x02:{
+//				result = IPCCR0_R.read();
+				result = 0;
+				return true;
+					  }
+			case 0x03:{
+				result = IPCGR1_R.read();
+				return true;
+					  }
+			case 0x04:{
+//				result = IPCSR1_R.read();
+				result = 0;
+				return true;
+					  }
+			case 0x05:{
+//				result = IPCCR1_R.read();
+				result = 0;
+				return true;
+					  }
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+
+	}
+
+	if(addr >= DDRCFGBase && addr<= DDRCFGBase + DDRCFGMaxOffset){
+
+		offset = addr - DDRCFGBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = DDR_AXI_CFG0_R.read();
+				return true;
+					  }
+			case 0x01:{
+				//				result = IPCSR0_R.read();
+				result = DDR_AXI_CFG1_R.read();
+				return true;
+					  }
+		
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+
+	}
+
+
+	if(addr >= CLK_RST_RegBase && addr<= CLK_RST_RegBase + CLK_RST_MaxOffset){
+		offset = addr - CLK_RST_RegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = PLL0_STATUS_R.read();
+				return true;
+					  }
+			case 0x01:{
+				result = PLL0_CTL0_R.read();
+				return true;
+					  }
+			case 0x02:{
+				result = PLL0_CTL1_R.read();
+				return true;
+					  }
+			case 0x03:{
+				result = PLL0_CTL2_R.read();
+				return true;
+					  }
+			/*case 0x04:{
+				result = PLL0_STATUS1_R.read();
+				return true;
+					  }*/
+			case 0x08:{
+				result = CLK_SYS_CTL_R.read();
+				return true;
+					  }
+			case 0x10:{
+				result = PLL1_STATUS_R.read();
+				return true;
+					  }
+			case 0x11:{
+				result = PLL1_CTL0_R.read();
+				return true;
+					  }
+			case 0x12:{
+				result = PLL1_CTL1_R.read();
+				return true;
+					  }
+			case 0x13:{
+				result = PLL1_CTL2_R.read();
+				return true;
+					  }
+
+			case 0x18:{
+				result = CLK_PP_CTL_R.read();
+				return true;
+					  }
+			case 0x19:{
+				result = CLK_ETHM_CTL_R.read();
+				return true;
+					  }
+			case 0x1a:{
+				result = CLK_ETHS_CTL_R.read();
+				return true;
+					  }
+			case 0x1b:{
+				result = CLK_PM_CTL_R.read();
+				return true;
+					  }
+			case 0x1d:{
+				result = CLK_I2C_CTL_R.read();
+				return true;
+					  }
+			case 0x1e:{
+				result = CLK_SPI_CTL_R.read();
+				return true;
+					  }
+
+
+
+			case 0x20:{
+				result = PLL2_STATUS_R.read();
+				return true;
+					  }
+			case 0x21:{
+				result = PLL2_CTL0_R.read();
+				return true;
+					  }
+			case 0x22:{
+				result = PLL2_CTL1_R.read();
+				return true;
+					  }
+			case 0x23:{
+				result = PLL2_CTL2_R.read();
+				return true;
+					  }
+			case 0x28:{
+				result = CLK_DDR_CTL_R.read();
+				return true;
+					  }
+			case 0x70:{
+				result = RST_STATUS_R.read();
+				return true;
+					  }
+			case 0x71:{
+				result = RST_TYPE_STATUS_R.read();
+				return true;
+					  }
+			case 0x72:{
+				result = RST_RM_STATUS_R.read();
+				return true;
+					  }
+			case 0x74:{
+				result = RST_CTL_R.read();
+				return true;
+					  }
+			case 0x75:{
+				result = RST_INIT_CTL_R.read();
+				return true;
+					  }
+			case 0x78:{
+				result = RST_SDS_CTL_R.read();
+				return true;
+					  }
+			case 0x79:{
+				result = RST_SDS_STATUS_R.read();
+				return true;
+					  }
+			case 0x7e:{
+				result = DBG_CTL_R.read();
+				return true;
+					  }
+
+
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+	if(addr >= TCR_WDT_RegBase && addr<= TCR_WDT_RegBase + TCR_WDT_MaxOffset){
+		offset = addr - TCR_WDT_RegBase;
+
+		switch(offset){
+
+			case 0x00:{
+				result = TCR0_R.read();
+				return true;
+					  }
+			case 0x01:{
+				result = TCSR0_R.read();
+				return true;
+					  }
+			case 0x02:{
+				result = TCCR0_R.read();
+				return true;
+					  }
+			case 0x03:{
+				result = TPRLO0_R.read();
+				return true;
+					  }
+			case 0x04:{
+				result = TPRHI0_R.read();
+				return true;
+					  }
+			case 0x05:{
+				result = TCNTLO0_R.read();
+				return true;
+					  }
+			case 0x06:{
+				result = TCNTHI0_R.read();
+				return true;
+					  }
+
+			case 0x10:{
+				result = TCR1_R.read();
+				return true;
+					  }
+			case 0x11:{
+				result = TCSR1_R.read();
+				return true;
+					  }
+			case 0x12:{
+				result = TCCR1_R.read();
+				return true;
+					  }
+			case 0x13:{
+				result = TPRLO1_R.read();
+				return true;
+					  }
+			case 0x14:{
+				result = TPRHI1_R.read();
+				return true;
+					  }
+			case 0x15:{
+				result = TCNTLO1_R.read();
+				return true;
+					  }
+			case 0x16:{
+				result = TCNTHI1_R.read();
+				return true;
+					  }
+			case 0x20:{
+				result = TCR2_R.read();
+				return true;
+					  }
+			case 0x21:{
+				result = TCSR2_R.read();
+				return true;
+					  }
+			case 0x22:{
+				result = TCCR2_R.read();
+				return true;
+					  }
+			case 0x23:{
+				result = TPRLO2_R.read();
+				return true;
+					  }
+			case 0x24:{
+				result = TPRHI2_R.read();
+				return true;
+					  }
+			case 0x25:{
+				result = TCNTLO2_R.read();
+				return true;
+					  }
+			case 0x26:{
+				result = TCNTHI2_R.read();
+				return true;
+					  }
+			case 0x30:{
+				result = TCR3_R.read();
+				return true;
+					  }
+			case 0x31:{
+				result = TCSR3_R.read();
+				return true;
+					  }
+			case 0x32:{
+				result = TCCR3_R.read();
+				return true;
+					  }
+			case 0x33:{
+				result = TPRLO3_R.read();
+				return true;
+					  }
+			case 0x34:{
+				result = TPRHI3_R.read();
+				return true;
+					  }
+			case 0x35:{
+				result = TCNTLO3_R.read();
+				return true;
+					  }
+			case 0x36:{
+				result = TCNTHI3_R.read();
+				return true;
+					  }
+			case 0x40:{
+				result = TCR4_R.read();
+				return true;
+					  }
+			case 0x41:{
+				result = TCSR4_R.read();
+				return true;
+					  }
+			case 0x42:{
+				result = TCCR4_R.read();
+				return true;
+					  }
+			case 0x43:{
+				result = TPRLO4_R.read();
+				return true;
+					  }
+			case 0x44:{
+				result = TPRHI4_R.read();
+				return true;
+					  }
+			case 0x45:{
+				result = TCNTLO4_R.read();
+				return true;
+					  }
+			case 0x46:{
+				result = TCNTHI4_R.read();
+				return true;
+					  }
+			case 0x50:{
+				result = TCR5_R.read();
+				return true;
+					  }
+			case 0x51:{
+				result = TCSR5_R.read();
+				return true;
+					  }
+			case 0x52:{
+				result = TCCR5_R.read();
+				return true;
+					  }
+			case 0x53:{
+				result = TPRLO5_R.read();
+				return true;
+					  }
+			case 0x54:{
+				result = TPRHI5_R.read();
+				return true;
+					  }
+			case 0x55:{
+				result = TCNTLO5_R.read();
+				return true;
+					  }
+			case 0x56:{
+				result = TCNTHI5_R.read();
+				return true;
+					  }
+			case 0x60:{
+				result = TCR6_R.read();
+				return true;
+					  }
+			case 0x61:{
+				result = TCSR6_R.read();
+				return true;
+					  }
+			case 0x62:{
+				result = TCCR6_R.read();
+				return true;
+					  }
+			case 0x63:{
+				result = TPRLO6_R.read();
+				return true;
+					  }
+			case 0x64:{
+				result = TPRHI6_R.read();
+				return true;
+					  }
+			case 0x65:{
+				result = TCNTLO6_R.read();
+				return true;
+					  }
+			case 0x66:{
+				result = TCNTHI6_R.read();
+				return true;
+					  }
+			case 0x70:{
+				result = TCR7_R.read();
+				return true;
+					  }
+			case 0x71:{
+				result = TCSR7_R.read();
+				return true;
+					  }
+			case 0x72:{
+				result = TCCR7_R.read();
+				return true;
+					  }
+			case 0x73:{
+				result = TPRLO7_R.read();
+				return true;
+					  }
+			case 0x74:{
+				result = TPRHI7_R.read();
+				return true;
+					  }
+			case 0x75:{
+				result = TCNTLO7_R.read();
+				return true;
+					  }
+			case 0x76:{
+				result = TCNTHI7_R.read();
+				return true;
+					  }
+			case 0x100:{
+				result = WDTCR0_R.read();
+				return true;
+					   }
+			case 0x101:{
+				result = WDTCSR0_R.read();
+				return true;
+					   }
+			case 0x102:{
+				result = WDTCCR0_R.read();
+				return true;
+					   }
+			case 0x103:{
+				result = WDTPRLO0_R.read();
+				return true;
+					   }
+			case 0x104:{
+				result = WDTPRHI0_R.read();
+				return true;
+					   }
+			case 0x105:{
+				result = WDTCNTLO0_R.read();
+				return true;
+					   }
+			case 0x106:{
+				result = WDTCNTHI0_R.read();
+				return true;
+					   }
+
+			case 0x110:{
+				result = WDTCR1_R.read();
+				return true;
+					   }
+			case 0x111:{
+				result = WDTCSR1_R.read();
+				return true;
+					   }
+			case 0x112:{
+				result = WDTCCR1_R.read();
+				return true;
+					   }
+			case 0x113:{
+				result = WDTPRLO1_R.read();
+				return true;
+					   }
+			case 0x114:{
+				result = WDTPRHI1_R.read();
+				return true;
+					   }
+			case 0x115:{
+				result = WDTCNTLO1_R.read();
+				return true;
+					   }
+			case 0x116:{
+				result = WDTCNTHI1_R.read();
+				return true;
+					   }
+
+			default: {
+ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+
+	if(addr >=   RabioCtl0_RegBase && addr<= RabioCtl0_RegBase + RabioCtl0_MaxOffset){
+		offset = addr - RabioCtl0_RegBase;
+		switch(offset){
+			case 0x06:{
+				result = RAB_RST_CTRL0_R.read();
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+	if(addr >=  RabioCtl1_RegBase && addr<= RabioCtl1_RegBase + RabioCtl1_MaxOffset){
+		offset = addr - RabioCtl1_RegBase;
+		switch(offset){
+			case 0x06:{
+				result = RAB_RST_CTRL1_R.read();
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=  UartCtl_RegBase && addr<=UartCtl_RegBase  + UartCtl_MaxOffset){
+		offset = addr - UartCtl_RegBase;
+		switch(offset){
+			case 0x3:{
+				result = LCR_R.read();
+				return true;
+					 }
+			case 0x1c:{
+				result = FAR_R.read();
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=  I2CCtl_RegBase && addr<= I2CCtl_RegBase + I2CCtl_MaxOffset){
+		offset = addr - I2CCtl_RegBase;
+		switch(offset){
+
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=  GPIOCtl_RegBase && addr<= GPIOCtl_RegBase + GPIOCtl_MaxOffset){
+		offset = addr - GPIOCtl_RegBase;
+		switch(offset){
+			case 0x00:{
+				result = GPIOPADR_R.read();
+				return true;
+					  }
+			case 0x6:{
+				result = GPIOPCDR_R.read();
+				return true;
+					 }
+			case 0xb:{
+				result = GPIOPDCTL_R.read();
+				return true;
+					 }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=   SPICtl_RegBase&& addr<= SPICtl_RegBase + SPICtl_MaxOffset){
+		offset = addr - SPICtl_RegBase;
+		switch(offset){
+			case 0x00:{
+				result = CTRLR0_R.read();
+				return true;
+					  }
+			case 0x5:{
+				result = BAUDR_R.read();
+				return true;
+					 }
+			case 0x18:{
+				result = DR_R.read();
+				return true;
+					  }
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+	if(addr >=   PCIECtl_RegBase&& addr<= PCIECtl_RegBase + PCIECtl_MaxOffset){
+		offset = addr - PCIECtl_RegBase;
+		switch(offset){
+			case 0x10020a:{
+				result = IBADDR0A_R.read();
+				return true;
+						  }
+			case 0x100214:{
+				result = IBADDR0B_R.read();
+				return true;
+					}
+			default: {
+				ERROR_REPORT_SYSCFG("Not this addr")
+					return false;
+					 }
+		}
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+	ERROR_REPORT_SYSCFG("Not find this addr!!!")
+		return false;
+
+}	

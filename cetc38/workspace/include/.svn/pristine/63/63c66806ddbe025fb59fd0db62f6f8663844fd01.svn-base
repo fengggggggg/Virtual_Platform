@@ -1,0 +1,1141 @@
+
+#include "sc_iss.h"
+
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::IsPAddr(DSPU32 p_u32Addr)
+{
+	if(p_u32Addr >= PADDR_START && p_u32Addr < PADDR_END)
+	{
+		return true;
+	}
+	return false;
+}
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::IsGAddr(DSPU32 p_u32Addr)
+{
+	DSPU32 u32GAddrC0 = BLK_SIZE_PER_CORE;
+	DSPU32 u32GAddrC1 = BLK_SIZE_PER_CORE * 2;
+	if(p_u32Addr >= GADDR_START && p_u32Addr < GADDR_END)
+	{
+		// belongs to DMAC
+		if ( (p_u32Addr >= (JTAG_ADDR_START + u32GAddrC0) && p_u32Addr < (JTAG_ADDR_END + u32GAddrC0)) || 
+			(p_u32Addr >= (JTAG_ADDR_START + u32GAddrC1) && p_u32Addr < (JTAG_ADDR_END + u32GAddrC1)) )
+		return false;
+		return true;
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------
+// 判断p_u32MemAddr是否为有效的核内私有数据存储空间地址，即不包括保留空间
+// p_u32MemAddr必须为私有地址形式
+//
+bool sc_iss::IsValidPAddr(DSPU32 p_u32MemAddr)
+{
+	bool bolValid = false;
+
+	if ( (p_u32MemAddr >= BLK0_LOW_ADDR) && (p_u32MemAddr <= BLK0_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+	else if ( (p_u32MemAddr >= BLK1_LOW_ADDR) && (p_u32MemAddr <= BLK1_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+	else if ( (p_u32MemAddr >= BLK2_LOW_ADDR) && (p_u32MemAddr <= BLK2_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+	else if ( (p_u32MemAddr >= BLK3_LOW_ADDR) && (p_u32MemAddr <= BLK3_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+	else if ( (p_u32MemAddr >= BLK4_LOW_ADDR) && (p_u32MemAddr <= BLK4_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+	else if ( (p_u32MemAddr >= BLK5_LOW_ADDR) && (p_u32MemAddr <= BLK5_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+
+	return bolValid;
+}
+//-----------------------------------------------------------------------------------------------
+// 核内私有数据存储空间地址转全局地址
+bool sc_iss::PAddrToGAddr(DSPU32 p_u32PAddr, DSPU32 p_u32CoreID, DSPU32 &p_u32GAddr)
+{
+	DSPU32 u32BaseGAddr, u32GAddr;
+
+	if ( !IsPAddr(p_u32PAddr) )
+	{
+		return false;
+	}
+	if (p_u32CoreID >= ISS_NUM_DEF)
+	{
+		return false;
+	}
+
+	u32BaseGAddr = GADDR_START + p_u32CoreID * BLK_SIZE_PER_CORE;
+	p_u32GAddr = p_u32PAddr - BLK0_LOW_ADDR + u32BaseGAddr;
+
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+// 全局地址转核内私有数据存储空间地址
+// 该函数并不保证转变得到的核内私有数据存储空间地址为有效地址(因为含保留地址)
+// p_u32CoreID: 返回该全局地址所属核号
+bool sc_iss::GAddrToPAddr(DSPU32 p_u32GAddr, DSPU32 &p_u32CoreID, DSPU32 &p_u32PAddr)
+{
+	DSPU32 u32BaseGAddr, u32NextBaseGAddr;
+	bool bolOK = false;
+
+	p_u32PAddr = 0x5a5a5a5a;
+	p_u32CoreID = 0x5a5a5a5a;
+	for (int i = 0; i < ISS_NUM_DEF; i++) // BWDSP104x最多8个核心
+	{
+		u32BaseGAddr = GADDR_START + i * BLK_SIZE_PER_CORE;
+		u32NextBaseGAddr = GADDR_START + (i + 1) * BLK_SIZE_PER_CORE;
+		if ( (p_u32GAddr >= u32BaseGAddr) && (p_u32GAddr < u32NextBaseGAddr) )
+		{
+			p_u32PAddr = p_u32GAddr - u32BaseGAddr + BLK0_LOW_ADDR;
+			p_u32CoreID = i;
+			bolOK = true;
+		}
+	}
+
+	return bolOK;
+}
+//-----------------------------------------------------------------------------------------------
+// 是否为当前核的有效核内数据存储空间(不包括保留地址空间)
+// 若返回true, p_u32PAddr为p_u32MemAddr对应的当前核内的私有地址。
+bool sc_iss::ToCurrentCorePAddr(DSPU32 p_u32MemAddr, DSPU32 &p_u32PAddr)
+{
+	DSPU32 u32PAddr, u32CoreID;
+
+	p_u32PAddr = 0x5a5a5a5a;
+	if ( IsValidPAddr(p_u32MemAddr) )
+	{
+		p_u32PAddr = p_u32MemAddr;
+		return true;
+	}
+	else if ( GAddrToPAddr(p_u32MemAddr, u32CoreID, u32PAddr) )
+	{
+		if ( IsValidPAddr(u32PAddr) && (u32CoreID == u32r_CoreID) )
+		{
+			p_u32PAddr = u32PAddr;
+			return true;
+		}
+	}	
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------
+void sc_iss::SrvMemReq_WB()
+{
+	DSPU32 u32MPSLKIdx, u32MemAddr, u32Value;
+
+	u32MPSLKIdx = PIPE_EX.EX_WB.m_right.u32_MPSLKIdx;
+	if (u32MPSLKIdx != 0)
+	{
+		// 若有附着在流水线上的内核写访存请求
+		for (int i = 0; i < m_arrMemPipeSLK[u32MPSLKIdx].u32WrElemNum; i++)
+		{
+			u32MemAddr = m_arrMemPipeSLK[u32MPSLKIdx].arrWrAddr[i];
+			u32Value = m_arrMemPipeSLK[u32MPSLKIdx].arrWrValue[i];
+
+			WriteCoreDataMem(u32MemAddr, u32Value);
+			// WB级写入时封DC4级合法读操作对应BLK端口：先写后读
+			CloseRdPort(m_arrMemPipeSLK[u32MPSLKIdx].arrBlkIdx[i]);
+			CloseOutPort(m_arrMemPipeSLK[u32MPSLKIdx].arrBlkIdx[i]);
+		}
+
+		FreeMPSLK(u32MPSLKIdx);
+	}
+
+}
+
+//-----------------------------------------------------------------------------------------------
+DSPU32 sc_iss::GetReqType(DSPU32 &p_u32MemAddr)
+{
+	DSPU32 u32CoreID, u32Block, u32PAddr, u32ReqType;
+
+	u32ReqType = 0U;
+
+	// 1. Private Addr: check addr valid
+	if(IsPAddr(p_u32MemAddr))
+	{
+		u32ReqType = GSetBit(u32ReqType, 0);	
+	}
+	// 2. Global Addr
+	else if(IsGAddr(p_u32MemAddr))
+	{
+		if(GAddrToPAddr(p_u32MemAddr, u32CoreID, u32PAddr))
+		{		
+			// Note: GAddr need to be translated to PAddr
+			p_u32MemAddr = u32PAddr;
+			
+			if(u32CoreID == (DSPU32)u32r_CoreID)
+			{
+				// 2.1 Private Addr: check addr valid
+				u32ReqType = GSetBit(u32ReqType, 1);
+			}			
+			else
+			{
+				// 2.2 ICMA Addr: also need to check addr valid
+				u32ReqType = GSetBit(u32ReqType, 2);
+			}
+		}
+	}
+	// 3. DMA Addr
+	else
+	{
+		u32ReqType = GSetBit(u32ReqType, 3);
+		return u32ReqType;
+	}	
+	
+	if ( !IsValidPAddr(p_u32MemAddr) )
+	{
+		// 落在RSV空间的访存请求都归入虚拟block
+		u32ReqType = GSetBit(u32ReqType, 8);
+		u32Block = BLK_NUM_PERCORE;
+	}
+	else
+	{
+		u32Block = ADDR_BLK_IDX(p_u32MemAddr);
+	}
+	u32ReqType |= (u32Block << 16);
+	return u32ReqType;
+}
+//-----------------------------------------------------------------------------------------------
+// u32AddrType:
+//
+// bit0:		This addr belongs to Private space(use local addr)
+// bit1:		This addr belongs to Private space(use global addr)
+// bit2:		This addr belongs to ICMA space
+// bit3:		This addr belongs to DMA space
+// bit4~7:		RSV for addr attribute code
+//
+// bit8:		地址越界/跨界(越界是指访问保留空间，跨界是指单条访存指令的多个地址跨Block)
+// bit9:		地址冲突(单条写指令)
+// bit10: 		地址冲突(两条写指令)
+// bit11~15:	RSV for addr fault code
+//
+// bit16~18:	Block Index of this insn
+// bit19~31:	RSV	
+//
+DSPU32 sc_iss::GetAddrType(DSPU32 p_u32SLKIdx)
+{
+	DSPU32 u32AddrMask, u32AddrType, u32AddrNum, u32Attr, u32ReqType;
+	DSPU32 u32AddrBlk, u32ReqBlk;
+	SLOT_RES_USED *pSlotResUsed = &(m_arrResSLK[p_u32SLKIdx].slot_res_used);
+
+	u32AddrMask = pSlotResUsed->u32AddrMask;
+	u32AddrNum = 0;
+	u32AddrType = 0;
+	u32AddrBlk = ~0U;
+	u32ReqBlk = ~0U;
+
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		if ( GIsBitSet(u32AddrMask, 2 * i) )
+		{
+			for (int j = 0; j < 2; j++) 
+			{
+				if ( GIsBitSet(u32AddrMask, 2 * i + j) )
+				{
+					u32ReqType = GetReqType(pSlotResUsed->arrAddrs[i][j]);
+					u32ReqBlk = TYPE_BLK_IDX(u32ReqType);
+					if(u32AddrNum == 0)
+					{
+						u32AddrBlk = TYPE_BLK_IDX(u32ReqType);
+					}
+					else
+					{
+						// 一条指令的所有访存地址只可以落在一个block里
+						if( u32ReqBlk != u32AddrBlk )
+						{
+							u32ReqType &= 0xffffU;
+							u32ReqType = GSetBit(u32ReqType, 8);
+						}
+					}
+					u32AddrType |= u32ReqType;
+					u32AddrNum++;
+				}
+			}
+		}
+	}
+
+	u32Attr = TYPE_ATTR_CODE(u32AddrType);
+	// 地址跨界(bit 0~3只能取其中一位)
+	if(u32Attr != 1 && u32Attr != 2 && u32Attr != 4 && u32Attr != 8)
+	{
+		u32AddrType = GSetBit(u32AddrType, 8);
+	}
+	return u32AddrType;
+}
+//-----------------------------------------------------------------------------------------------
+// 没有地址错误且地址属性相同
+bool sc_iss::IsSameAddrType(DSPU32 p_u32Type1, DSPU32 p_u32Type2)
+{
+	if( TYPE_FAULT_CODE(p_u32Type1) == 0U && TYPE_FAULT_CODE(p_u32Type2) == 0U )
+	{
+		if ( TYPE_ATTR_CODE(p_u32Type1) == TYPE_ATTR_CODE(p_u32Type2) )
+		{
+			return true;
+		}
+	}
+	return false;
+}
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::IsSameAddr_Insn(DSPU32 *p_pAddrs, DSPU32 p_u32AddrMask)
+{
+	for (int i = 0; i < 8; i++)
+	{
+		if ( GIsBitSet(p_u32AddrMask, i) )
+		{
+			for (int j = i + 1; j < 8; j++)
+			{
+				if ( GIsBitSet(p_u32AddrMask, j) ) 
+				{
+					if (p_pAddrs[i] == p_pAddrs[j])
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}
+	return false;	
+}
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::IsSameAddr_Line(DSPU32 *p_pAddrs1, DSPU32 p_u32AddrMask1, DSPU32 *p_pAddrs2, DSPU32 p_u32AddrMask2)
+{
+	for (int i = 0; i < 8; i++)
+	{
+		if (GIsBitSet(p_u32AddrMask1, i))
+		{
+			for (int j = 0; j < 8; j++)
+			{
+				if (GIsBitSet(p_u32AddrMask2, j)) 
+				{
+					if (p_pAddrs1[i] == p_pAddrs2[j])
+					{
+						return true;
+					}
+				}
+			}
+		}
+	}		
+	return false;	
+}
+#if 0
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::GetAtomIMask()
+{
+	DSPU32 u32MPSLKIdx_AC, u32MPSLKIdx_EX, u32MPSLKIdx_WB;
+
+	u32MPSLKIdx_AC = PIPE_EX.DC4_AC.m_right.u32_MPSLKIdx;
+	if (u32MPSLKIdx_AC != 0)
+	{
+		for (int i = 0; i < m_arrMemPipeSLK[u32MPSLKIdx_AC].u32WrElemNum; i++)
+		{
+			if (m_arrMemPipeSLK[u32MPSLKIdx_AC].arrAtom[i])
+			{
+				CloseOutPort(m_arrMemPipeSLK[u32MPSLKIdx_AC].arrBlkIdx[i]);
+			}
+		}
+	}
+
+	u32MPSLKIdx_EX = PIPE_EX.AC_EX.m_right.u32_MPSLKIdx;
+	if (u32MPSLKIdx_EX != 0) 
+	{
+		for (int i = 0; i < m_arrMemPipeSLK[u32MPSLKIdx_EX].u32WrElemNum; i++)
+		{
+			if (m_arrMemPipeSLK[u32MPSLKIdx_EX].arrAtom[i])
+			{
+				CloseOutPort(m_arrMemPipeSLK[u32MPSLKIdx_EX].arrBlkIdx[i]);
+			}
+		}
+	}
+
+	// WB级写占用通道，不论原子与否
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+// 检查p_pAddrs指向的数组(长度为8)中在p_u32AddrMask指定的位置上是否存在相同值。
+// 返回true表示发现相同值。
+bool sc_iss::IsSameAddrFound(DSPU32 *p_pAddrs, DSPU32 p_u32AddrMask)
+{
+	for (int i = 0; i < 8; i++)
+	{
+		if ( GIsBitSet(p_u32AddrMask, i) )  // 仅比较p_u32AddrMask指定位置上的值
+		{
+			for (int j = i + 1; j < 8; j++)
+			{
+				if ( GIsBitSet(p_u32AddrMask, j) )  // 仅比较p_u32AddrMask指定位置上的值
+				{
+					if (p_pAddrs[i] == p_pAddrs[j])
+					{
+						return true;
+					}
+				}
+			}  // for (int j = i + 1; j < 8; j++)
+		}
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------
+// 是否为核内私有数据存储空间地址
+// 本函数并不检查地址的有效性
+bool sc_iss::IsPAddr(DSPU32 p_u32Addr)
+{
+	if ((p_u32Addr < BLK0_LOW_ADDR) | (p_u32Addr > 0x0DFFFFF))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------------------
+void sc_iss::getType(DSPU32 p_u32AddrNum, DSPU32 p_u32Addr, BLK_INFO &p_blkinfo)
+{
+	DSPU32 u32Result, u32Temp, u32CoreID;
+	if (p_u32AddrNum == 0)
+	{
+		// 若是单条访存指令的多个访存地址中的第一个地址
+		// 根据第一个地址将当前指令产生的地址序列归类(核内或核外)				
+		if (!IsCurrentCoreAddr(p_u32Addr))
+		{
+			// 若第一个地址不是核内地址
+			p_blkinfo.u32AddrType = GSetBit(p_blkinfo.u32AddrType, 31);
+		}
+		//==========分析addr0所属block============
+		DSPU32 u32BlkIdx = 6;  // 虚拟block编号
+		if ( IsValidPAddr(p_u32Addr) )
+		{
+			// 若u32Addr是私有地址形式且有效
+			GetBlockIdx(p_u32Addr, &u32BlkIdx); // 获取u32Addr所属block 序号
+		}
+		else if ( GAddrToPAddr(p_u32Addr, u32CoreID, u32Temp) )
+		{
+			// 若u32Addr处于某个核心的共享地址空间范围
+			// 此时u32Temp是与u32Addr相应的私有空间地址
+			if ( IsValidPAddr(u32Temp) && (u32CoreID == u32r_CoreID) )
+			{
+				// 若u32Temp是当前核有效的私有地址
+				GetBlockIdx(u32Temp, &u32BlkIdx); // 获取u32Addr所属block 序号
+			}
+		}	
+		p_blkinfo.u32AddrType |= (u32BlkIdx << 28);  // 将block信息加入u32AddrType
+	} // if (u32AddrNum == 0)
+	if ( IsCurrentCoreValidDAddr(p_u32Addr, &u32Temp) )
+	{
+		// 若u32Addr是当前核合法的数据存储空间地址
+		// 此时u32Temp是u32Addr所属block的掩码
+		p_blkinfo.u32CurrentCoreBlks |= u32Temp; // 将u32Addr所属block信息附加在u32CurrentCoreBlks上
+		if (IsValidPAddr(p_u32Addr))
+		{
+			// 若u32Addr是私有地址形式
+			// bolThisCorePAddrFound = true; // 访存指令中使用了有效的私有地址
+			p_blkinfo.u32Result = GSetBit(p_blkinfo.u32Result, 0);
+		}
+		else
+		{
+			// 若u32Addr是共享地址形式
+			// bolThisCoreGAddrFound = true; // 访存指令中使用了有效的共享地址
+			p_blkinfo.u32Result = GSetBit(p_blkinfo.u32Result, 1);
+		}
+	}
+	else if (IsOtherCoreValidDAddr(p_u32Addr, &u32Temp))
+	{
+		// 若u32Addr是其他核合法的数据存储空间地址
+		// 此时u32Temp是u32Addr所属block的掩码
+		p_blkinfo.u32OtherCoreBlks |= u32Temp; // 将u32Addr所属core以及block信息附加在u32OtherCoreBlks上
+	}
+	else if (IsOutCoreDAddr(p_u32Addr, &u32Temp))
+	{
+		// 若u32Addr是合法的核外地址
+		// 此时u32Temp是u32Addr所属核外连续地址区间的掩码
+		p_blkinfo.u32OutCoreDevs |= u32Temp; // 将u32Addr所属核外连续地址区间信息附加在u32OutCoreDevs上
+	}
+	else
+	{
+		// 检测到不合法地址
+		// bolInvalidAddr = true;
+		p_blkinfo.u32Result = GSetBit(p_blkinfo.u32Result, 31);
+	}
+	
+}
+//-----------------------------------------------------------------------------------------------
+// 检查单条访存指令生成的访存地址
+// 返回值:
+// bit[0..2] == 0: 地址非法(地址越界或跨界)
+// bit[0] == 1: 所有地址均位于本核内某一个block上；
+// bit[1] == 1: 所有地址均位于其他某一个核内某一个block上；
+// bit[2] == 1: 所有地址均位于核外某个连续的外设地址区间	     
+// bit[3] == 1: 单条指令内的写访存地址冲突(即相同)
+// bit[4] == 1: 与当前执行行中其他写访存指令的写访存地址冲突(两条指令间的写访存地址冲突在ChkMemReqAddr()检测)
+
+// bit[7] == 1: 所有地址均位于簇内外核的某一个block上；
+// bit[28..30] : 当前指令访存地址所属block号 (即判断Addr0所属block号)
+// bit[31] == 0: 当前访存指令访问核内存储器(即判断Addr0属于核内地址区间)
+//           1: 当前访存指令访问核外存储器(即判断Addr0属于核外地址区间)
+//
+DSPU32 sc_iss::GetAddrType(DSPU32 p_u32SLKIdx)
+{
+	DSPU32 u32Addr, u32Temp, u32AddrMask, u32BlkIdx, u32OtherCoreID;
+	DSPU32 arrAddr[8];
+	DSPU32 u32AddrNum = 0;
+	DSPU32 u32AddrType = 0;
+	
+	DSPU32 u32CurrentCoreBlkNum = 0;  // 用于掩码计数
+	DSPU32 u32OtherCoreMaskNum = 0; // 用于掩码计数
+	DSPU32 u32OutCoreDevNum = 0;    // 用于掩码计数
+	
+	DSPU32 u32CurrentCoreBlks = 0; // 低6位是代表当前核内不同block的掩码
+	DSPU32 u32OtherCoreBlks = 0;  // 高16位是代表芯片内不同core的掩码
+								// 低6位是代表当前核内不同block的掩码
+			
+	DSPU32 u32OutCoreDevs = 0; // 掩码，每一位代表核外一个连续的地址范围
+	bool bolInvalidAddr = false;
+	bool bolIsRead;
+	bool bolThisCorePAddrFound = false; // 为true表示访存指令中使用了有效的私有地址
+	bool bolThisCoreGAddrFound = false; // 为true表示访存指令中使用了有效的共享地址
+	bool bolAddrConflict = false;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("GetAddrType: p_u32SLKIdx is invalid\n");
+		return 0;
+	}
+
+	SLOT_RES_USED *pSlotResUsed = &(m_arrResSLK[p_u32SLKIdx].slot_res_used);
+	BLK_INFO blk_info;
+	memset(&blk_info, 0, sizeof(blk_info));
+
+	u32AddrMask = pSlotResUsed->u32AddrMask;
+	bolIsRead = pSlotResUsed->bolRead;
+	// 取单条访存指令的8个访存地址到arrAddr[]	
+	memcpy(arrAddr, pSlotResUsed->arrAddrs, NUM_OF_UNITS*2*sizeof(DSPU32));
+	
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		if ( !GIsBitSet(u32AddrMask, 2 * i) ) 
+			continue;
+
+		for (int j = 0; j < 2; j++) 
+		{
+			if ( !GIsBitSet(u32AddrMask, 2 * i + j) )
+				continue;
+
+			u32Addr = pSlotResUsed->arrAddrs[ i ][ j ];
+			getType(u32AddrNum, u32Addr, blk_info);
+			u32AddrNum++;  
+		}
+	}
+	//===================================================
+	// 分析掩码u32CurrentCoreBlks, u32OtherCoreBlks, u32OutCoreDevs
+	// 形成u32CurrentCoreBlkNum, u32OtherCoreMaskNum, u32OutCoreDevNum
+	for (int i = 0; i < 32; i++)
+	{
+		if ( GIsBitSet(blk_info.u32CurrentCoreBlks, i) )
+		{
+			// 若u32CurrentCoreBlkNum = 1
+			// 则访存地址均位于本核内的同一block内
+			blk_info.u32CurrentCoreBlkNum++;
+		}
+		if ( GIsBitSet(blk_info.u32OtherCoreBlks, i) )
+		{
+			// u32OtherCoreBlks 高16位是代表芯片内不同core的掩码
+			// 低6位是代表当前核内不同block的掩码
+			// 因此仅当u32OtherCoreMaskNum = 2时
+			// (即u32OtherCoreBlks中仅有一个core以及一个block置位)，
+			// 表示访存地址均位于某一个其他核内的某个block内
+			blk_info.u32OtherCoreMaskNum++;
+			if(i >= 16)
+			{
+				u32OtherCoreID = (i -16);
+			}
+		}
+		if ( GIsBitSet(blk_info.u32OutCoreDevs, i) )
+		{
+			// 若u32OutCoreDevNum = 1
+			// 则访存地址均位于核外的某个连续的地址范围内
+			blk_info.u32OutCoreDevNum++;
+		}
+	}
+	//===================================================
+	bolInvalidAddr			= GIsBitSet(blk_info.u32Result, 31);
+	bolThisCorePAddrFound	= GIsBitSet(blk_info.u32Result, 0);
+	bolThisCoreGAddrFound	= GIsBitSet(blk_info.u32Result, 1);
+	u32AddrType			= blk_info.u32AddrType;
+	u32CurrentCoreBlkNum	= blk_info.u32CurrentCoreBlkNum;
+	u32OtherCoreMaskNum	= blk_info.u32OtherCoreMaskNum;
+	u32OutCoreDevNum	= blk_info.u32OutCoreDevNum;
+		
+	if ( !bolInvalidAddr )
+	{
+		bolAddrConflict = ((!bolIsRead) && IsSameAddrFound(arrAddr, u32AddrMask));
+
+		if (bolAddrConflict)
+			u32AddrType = GSetBit(u32AddrType, 3);
+
+		//===================================================		
+		// 若当前指令的所有访存地址均位于合法地址空间范围
+		if  (bolThisCorePAddrFound && bolThisCoreGAddrFound)
+		{
+			// 若单条访存指令既使用了私有地址，又使用了共享地址，则属于地址跨界
+			// 即单条访存指令不可混合使用私有地址和共享地址
+			// do nothing
+			// bit[0..2] of u32AddrType == 0
+		}
+		else if ((u32CurrentCoreBlkNum == 1) && (u32OtherCoreMaskNum == 0) && (u32OutCoreDevNum == 0))
+		{
+			// 当前指令的所有访存地址均位于本核内的某个block内
+			// 核内数据存储空间地址
+			u32AddrType = GSetBit(u32AddrType, 0);
+		}
+		else if ((u32CurrentCoreBlkNum == 0) && (u32OtherCoreMaskNum == 2) && (u32OutCoreDevNum == 0))
+		{
+			// 当前指令的所有访存地址均位于某一个其他核内的某个block内
+			// 其他核内数据存储空间地址
+			u32AddrType = GSetBit(u32AddrType, 1);
+			if( u32OtherCoreID == (u32r_CoreID + 1)%2 )
+				u32AddrType = GSetBit(u32AddrType, 7);
+		}
+		else if ((u32CurrentCoreBlkNum == 0) && (u32OtherCoreMaskNum == 0) && (u32OutCoreDevNum == 1))
+		{
+			// 当前指令的所有访存地址均位于核外的某个连续的地址范围内
+			// 核外存储空间地址
+			u32AddrType = GSetBit(u32AddrType, 2);
+		}
+		//===================================================
+	} // if ( !bolInvalidAddr )
+	return u32AddrType;
+}
+
+//-----------------------------------------------------------------------------------------------
+// 是否为指定核的有效核内数据存储空间(不包括保留地址空间)
+// p_u32PAddr: 若返回true, 则为p_u32MemAddr对应的私有地址。
+bool sc_iss::IsSpecificCoreDAddr(DSPU32 p_u32MemAddr, DSPU32 p_u32CoreID, DSPU32 &p_u32PAddr)
+{
+	DSPU32 u32PAddr, u32CoreID;
+
+	p_u32PAddr = 0x5a5a5a5a;
+	if ( IsValidPAddr(p_u32MemAddr) )
+	{
+		if (p_u32CoreID == u32r_CoreID)
+		{
+			// 输入地址为私有地址，
+			// 且输入核号即为本核核号
+			p_u32PAddr = p_u32MemAddr;
+			return true;
+		}
+	}
+	else if ( GAddrToPAddr(p_u32MemAddr, u32CoreID, u32PAddr) )
+	{
+		if ( IsValidPAddr(u32PAddr) && (p_u32CoreID == u32CoreID) )
+		{
+			p_u32PAddr = u32PAddr;
+			return true;
+		}
+	}	
+
+	return false;
+}
+//-----------------------------------------------------------------------------------------------
+// p_u32MemAddr是否为合法的核外地址
+// 
+// p_pMask返回掩码: 每一位表示核外一个连续的地址区间。
+//
+// 外设空间地址是否有效并不仅根据统一地址空间的定义判断
+// 基地址由统一地址空间定义确定，内存容量大小根据各外设的配置寄存器确定。
+// GRQ: 待补充实现
+//
+bool sc_iss::IsOutCoreDAddr(DSPU32 p_u32MemAddr, DSPU32 *p_pMask)
+{
+	
+	if ( (p_u32MemAddr >= 0x10000000) && (p_u32MemAddr <= 0x1FFFFFFF) )
+	{
+		// CE0
+		*p_pMask = GSetBit(*p_pMask, 0);
+		return true;
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------
+// 是否为当前核的有效核内数据存储空间(不包括保留地址空间)
+// 
+// p_pBlkMask: 若地址合法，以掩码形式返回其所属block信息。
+//
+bool sc_iss::IsCurrentCoreValidDAddr(DSPU32 p_u32MemAddr, DSPU32 *p_pBlkMask)
+{
+	DSPU32 u32PAddr, u32CoreID, u32BlkIdx;
+
+	*p_pBlkMask = 0;
+	if ( IsValidPAddr(p_u32MemAddr) )
+	{
+		GetBlockIdx(p_u32MemAddr, &u32BlkIdx);
+		*p_pBlkMask = GSetBit(*p_pBlkMask, u32BlkIdx);
+		return true;
+	}
+	else if ( GAddrToPAddr(p_u32MemAddr, u32CoreID, u32PAddr) )
+	{
+		if ( IsValidPAddr(u32PAddr) && (u32CoreID == u32r_CoreID) )
+		{
+			GetBlockIdx(u32PAddr, &u32BlkIdx);
+			*p_pBlkMask = GSetBit(*p_pBlkMask, u32BlkIdx);
+			return true;
+		}
+	}	
+
+	return false;
+}
+//-----------------------------------------------------------------------------------------------
+// 是否为其他核的有效核内数据存储空间(不包括保留地址空间)
+//
+// 返回掩码，高16位是代表芯片内不同core,
+// 低6位是代表当前核内不同block.
+bool sc_iss::IsOtherCoreValidDAddr(DSPU32 p_u32MemAddr, DSPU32 *p_pMask)
+{
+	DSPU32 u32PAddr, u32CoreID, u32BlkIdx;
+	bool bolIsOtherCoreDAddr = false;
+
+	*p_pMask = 0;
+	if ( IsValidPAddr(p_u32MemAddr) )
+	{
+		GetBlockIdx(p_u32MemAddr, &u32BlkIdx);
+		*p_pMask = GSetBit(*p_pMask, u32BlkIdx);
+		*p_pMask = GSetBit(*p_pMask, u32r_CoreID + 16);
+		bolIsOtherCoreDAddr = false;
+	}
+	else
+	{
+		if ( GAddrToPAddr(p_u32MemAddr, u32CoreID, u32PAddr) )
+		{
+			if ( IsValidPAddr(u32PAddr) && (u32CoreID != u32r_CoreID) )
+			{
+				GetBlockIdx(u32PAddr, &u32BlkIdx);
+				*p_pMask = GSetBit(*p_pMask, u32BlkIdx);
+				*p_pMask = GSetBit(*p_pMask, u32CoreID + 16);
+				bolIsOtherCoreDAddr = true;
+			}
+		}			
+	}	
+
+	return bolIsOtherCoreDAddr;
+}
+//-----------------------------------------------------------------------------------------------
+// 判断p_u32Addr 是否为当前核内地址。(仅供根据addr0将地址序列分类)
+// 本函数并不检查地址的有效性，仅按地址区间区分
+//
+// p_u32Addr: 私有地址或全局地址。
+//
+// 20130813: 待最终确认
+//
+bool sc_iss::IsCurrentCoreAddr(DSPU32 p_u32Addr)
+{
+	DSPU32 u32GAddrLow, u32GAddrHigh;
+
+	u32GAddrLow = 0x01400000 + u32r_CoreID * 0x1000000;
+	u32GAddrHigh = 0x01400000 + (u32r_CoreID + 1) * 0x1000000 - 1;
+
+	if ((p_u32Addr >= 0x200000) && (p_u32Addr <= 0x011FFFFF))
+	{
+		// p_u32Addr位于核内存储空间(16M) 的私有地址空间范围
+		return true;
+	}
+	else if ((p_u32Addr >= u32GAddrLow) && (p_u32Addr <= u32GAddrHigh))
+	{
+		// p_u32Addr位于当前核内存储空间(16M) 的共享地址空间范围
+		return true;
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------
+void sc_iss::SrvMemReq_DC4()
+{	
+	bool bolPermitPipe = false; // 流水线是否允许内核访存指令执行
+	DSPU32 u32SlotNum;
+	DSPU32 u32WrBlks, u32AtomWrBlks;
+
+	// 与GenPipeEXStall()中m_bolStall_DC4AC信号的产生条件保持一致
+	// 注意这里并不用检查m_DC4_bolMemStall_DC4AC信号	
+	if ( m_bolStall_ACEX || m_DC4_bolCPredStall_DC4AC || m_DC4_bolISRStall_DC4AC  || m_DC4_bolIRETStall_DC4AC ) 
+	{
+		// 若前方流水线已经确定DC4/AC将被stall, 则当前周期不执行内核访存指令
+		// do nothing
+	}
+	else
+	{
+		if ( PIPE_EX.DC4_AC.m_left.u32r_SlotNum != 0 )
+		{
+			// 若DC4/AC的左侧不为气泡
+
+			// 判断DC4/AC的左侧是否被清除
+			// in flush condition, memory access reqs are abadoned in DSP_Flush_DC4_AC
+			if ( !m_bolFlush_DC4AC && ( m_RdReq_DC4.bolInUse || m_WrReq_DC4.bolInUse ) )
+			{
+				// 若DC4/AC的左侧不被清除					
+			
+				bolPermitPipe = true; // 流水线允许内核访存指令执行
+			}			
+		}
+		
+	}	
+
+	//--------------------------------------
+	u32WrBlks = 0;
+	u32AtomWrBlks = 0;
+	
+	GetWrMemBlkInfo(u32WrBlks, u32AtomWrBlks);
+
+	//---------------------------------------------------------------
+	// 来自核外的访存请求不受流水线状态的影响
+
+	if (bolPermitPipe)
+	{
+		// 以下按照优先级顺序执行
+		// 根据对原子访存指令的定义，对于同一执行行，
+		// 本核原子读与本核非原子读不会同时出现。
+		if ( m_RdReq_DC4.bolInUse )
+		{
+			if ( PermitRd_DC4() )
+			{
+				SrvRdReq_DC4(true);
+				SrvRdReq_DC4(false);
+			}
+			if ( m_WrReq_DC4.bolInUse )
+			{
+				if ( PermitWr_DC4() )
+				{
+					SrvWrReq_DC4();
+				}
+			}
+		}
+		else
+		{
+			SrvWrReq_DC4();
+		}
+	}	
+
+	// 若DC4, AC, EX各级存在未完成的核内写访存请求
+	// 以block为单位禁止服务来自核外的原子访存请求
+	SetOutReqBlkPort(u32WrBlks);
+#ifdef ICMA_TESTING
+	SrvICMA_DC4(true);
+	SetOutReqBlkPort(u32AtomWrBlks);
+	SrvICMA_DC4(false);
+#endif	
+#ifdef DMAC_TESTING
+	for(int i = 0; i < DMAC_MAX_CHANNELS; i++)
+	{
+		if ( m_dmac_resp[i].bolInUse && !m_dmac_resp[i].bolServed )
+		{
+			if( m_dmac_resp[i].u32ElemNum == 0 )
+			{
+				if(m_dmac_resp[i].dmac_mem.bolAllWrReq)
+				{
+					m_dmac_resp[i].bolInUse = false;
+					m_dmac_resp[i].bolServed = true;
+					continue;
+				}
+				if(m_dmac_resp[i].u32DelayResp == 0)
+				{
+					m_dmac_resp[i].bolInUse = false;
+					m_dmac_resp[i].bolServed = true;
+					send_resp_dmac(&(m_dmac_resp[i].dmac_mem));
+				}
+				else
+				{
+					m_dmac_resp[i].u32DelayResp--;
+				}
+			}
+			else if ( IsBlkPortValid(m_dmac_resp[i].u32Block, OUT_REQ_BLK_PORT) )
+			{				
+				SrvDMACH_DC4(&(m_dmac_resp[i]));
+				SetBlkPortMask(m_dmac_resp[i].u32Block, OUT_REQ_BLK_PORT);
+			}
+		}
+	}
+#endif
+}
+
+//-----------------------------------------------------------------------------------------------
+// 发射内核写访存请求(不区分是否为原子操作)
+bool sc_iss::SrvWrReq_DC4()
+{
+	DSPU32 u32Block, u32Bank, u32CurrSlot, u32ElemIdx, u32MPSLKIdx;
+	bool bolAddrIllegal;
+	DSPU32 u32MemAddr, u32NumToWr = 0;
+	WR_REQ_BANK *pWrReqBank = NULL;
+
+	u32MPSLKIdx = MallocMPSLK(); // 用于支持以流水方式实现写访存
+	if (u32MPSLKIdx == 0)
+	{
+		printf("SrvWrReq_DC4: MPSLK has no resource\n");
+		return false;
+	}
+
+	for (u32Block = 0; u32Block < BLK_NUM_PERCORE + 1; u32Block++) // 遍历每一个block,需要支持虚拟block
+	{
+		if ( !m_WrReq_DC4.arrReqBlock[u32Block].bolInUse || !IsBlkPortValid(u32Block, WR_BLK_PORT))
+		{
+			// 若当前block上无核内写访存请求
+			// 或者对应BLK端口已经被同一指令行的一条读指令占据了
+			continue;
+		}
+
+		// 在指定block,找出当前需要服务的访存指令
+		// 返回该访存指令在执行行中的slot序号
+		if ( !GetWrReqCurrSlot(&u32CurrSlot, u32Block) )
+		{
+			// 正常情况不应进入此分支
+			printf("SrvWrReq_DC4 0: you shouldn't see this message\n");
+			continue;
+		}
+		for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++) // 遍历每一个bank
+		{
+			pWrReqBank = &(m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank]);
+			if ( pWrReqBank->u32ElemNum == 0 )
+			{
+				// 若当前bank中无写访存请求
+				continue;
+			}
+
+			// 在指定的block和bank上,取具有指定slot序号的写访存请求。
+			if (GetWrReqElemIdx(u32Block, u32Bank, &u32ElemIdx, u32CurrSlot))
+			{
+				u32MemAddr = pWrReqBank->arrReqElem[u32ElemIdx].u32MemAddr;
+				bolAddrIllegal = pWrReqBank->arrReqElem[u32ElemIdx].bolIllegal;
+				if (!bolAddrIllegal)
+				{
+					if ( GIsBitSet( pWrReqBank->u32SpecWrMask, u32ElemIdx ) )
+					{
+						m_arrMemPipeSLK[u32MPSLKIdx].arrWrValue[u32NumToWr] = pWrReqBank->arrReqElem[u32ElemIdx].u32Value;
+						m_arrMemPipeSLK[u32MPSLKIdx].u32SpecWrMask = GSetBit(m_arrMemPipeSLK[u32MPSLKIdx].u32SpecWrMask, u32NumToWr);
+					}
+					else
+					{
+						m_arrMemPipeSLK[u32MPSLKIdx].arrUnitIdx[u32NumToWr] = pWrReqBank->arrReqElem[u32ElemIdx].u32RegUnit;
+						m_arrMemPipeSLK[u32MPSLKIdx].arrRegIdx[u32NumToWr] = pWrReqBank->arrReqElem[u32ElemIdx].u32RegIdx;
+						m_arrMemPipeSLK[u32MPSLKIdx].arrSrcPageIdx[u32NumToWr] = pWrReqBank->arrReqElem[u32ElemIdx].u32PageIdx;
+					}
+					m_arrMemPipeSLK[u32MPSLKIdx].arrWrAddr[u32NumToWr] = u32MemAddr;
+					m_arrMemPipeSLK[u32MPSLKIdx].arrBlkIdx[u32NumToWr] = u32Block;
+					m_arrMemPipeSLK[u32MPSLKIdx].arrAtom[u32NumToWr] = m_WrReq_DC4.bolAtom;
+					m_arrMemPipeSLK[u32MPSLKIdx].u32WrElemNum++;
+					u32NumToWr++;				
+				}
+			
+				// remove the write request
+				DelWrReq(u32Block, u32Bank, u32ElemIdx);
+
+				for (int i = 0; i < 16; i++)
+				{
+					// 是否具有相同写访存地址(异常)，虚拟Block内的请求slot相等
+					if ( pWrReqBank->arrReqElem[i].bolInUse && (pWrReqBank->arrReqElem[i].u32Slot == u32CurrSlot) )
+					{
+						if ( pWrReqBank->arrReqElem[i].u32MemAddr == u32MemAddr )
+						{
+							DelWrReq(u32Block, u32Bank, i);
+						}
+					}
+				}
+				
+#ifdef STALL_REASON_LOG
+				if ( !m_bolLogBankConf && pWrReqBank->u32ElemNum != 0 )
+				{
+					LogBankConf(false, BANK_CONF, u32Block, u32Bank);
+					m_bolLogBankConf = true;
+				}
+#endif
+			}
+		} // for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+#ifdef STALL_REASON_LOG
+		if( !m_bolLogBankConf && m_WrReq_DC4.arrReqBlock[u32Block].bolInUse )
+		{
+			LogBankConf(false, SLOT_CONF, u32Block, u32CurrSlot);
+			m_bolLogBankConf = true;
+		}
+#endif
+	} // for (u32Block = 0; u32Block < BLK_NUM_PERCORE + 1; u32Block++)
+
+	// if there are memory write req, then update the global signal m_u32MPReqIdx
+	// value of m_u32MPReqIdx will be put into pipeline and carried to WB phase.
+	// value of m_u32MPReqIdx will be used in SrvMemReq_AC_POST() and SrvMemReq_WB()
+	if (m_arrMemPipeSLK[u32MPSLKIdx].u32WrElemNum > 0)
+	{		
+		m_u32MPReqIdx = u32MPSLKIdx;
+	}
+	else
+	{
+		FreeMPSLK(u32MPSLKIdx);
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::PermitRd_DC4()
+{
+	// 如果WB级写封DC4级读，那么DC4级读写都被封
+	DSPU32 u32ClosedBlk;
+	
+	u32ClosedBlk = (m_u32RdBlockMask & m_RdReq_DC4.u32BlkMask);	
+	if ( u32ClosedBlk != 0 )
+	{
+		SetRdBlkPort(~0U);
+		SetWrBlkPort(~0U);
+#ifdef STALL_REASON_LOG
+		if( !m_bolLogBankConf )
+		{
+			LogBankConf(true, BLK_PORT_CLOSED, GetLSB_32(u32ClosedBlk), 0);
+			m_bolLogBankConf = true;
+		}
+#endif
+		return false;
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::PermitWr_DC4()
+{
+	DSPU32 u32ClosedBlk;
+
+	u32ClosedBlk = ( m_WrReq_DC4.u32BlkMask & (~m_u32WrBlockMask) );
+	if ( u32ClosedBlk == 0 )
+	{
+	#ifdef STALL_REASON_LOG
+		if ( !m_bolLogBankConf )
+		{
+			LogBankConf(false, BLK_PORT_CLOSED, GetLSB_32(m_WrReq_DC4.u32BlkMask), 0);
+			m_bolLogBankConf = true;
+		}
+	#endif	
+		return false;
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+// 本核读访存
+// p_bolAtom: 仅当当前执行行的原子属性与p_bolAtom相符时才提供服务。
+
+// 在硬件设计中,若一个执行行中有一个原子访存操作,
+// 则该执行行中的所有访存操作都被认为是原子的。(不区分读写)
+bool sc_iss::SrvRdReq_DC4(bool p_bolAtom)
+{
+	DSPU32 u32Block, u32Bank;
+	DSPU32 u32MemAddr, u32Value, u32ElemIdx, u32CurrSlot;
+	bool bolAddrIllegal, bolUseBlkPort;
+	RD_REQ_BANK *pRdReqBank;
+	PIPE_RD_RESULT *pInstrRdResult;
+
+	// 核内读访存结果存放于PIPE_EX.DC4_AC.m_left.INST_LINE_RD_RESULT;
+	pInstrRdResult = &PIPE_EX.DC4_AC.m_left.INST_LINE_RD_RESULT;
+	if ( m_RdReq_DC4.bolAtom != p_bolAtom )
+	{
+		return true;
+	}
+
+	for (u32Block = 0; u32Block < BLK_NUM_PERCORE + 1; u32Block++) // 遍历每一个block, 需要支持虚拟block
+	{		
+		if ( !m_RdReq_DC4.arrReqBlock[u32Block].bolInUse )
+		{
+			// 若当前block上无核内读访存请求
+			continue;
+		}
+
+		bolUseBlkPort = false;  // 清block端口使用标志
+
+		if ( !GetRdReqCurrSlot(&u32CurrSlot, u32Block) )
+		{
+			// 正常情况不应进入此分支
+			printf("SrvRdReq_DC4 0: you shouldn't see this message\n");
+			continue;
+		}
+
+		// 服务当前block上具有指定slot序号的访存请求
+		for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+		{
+			pRdReqBank = &(m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank]);
+			if ( pRdReqBank->u32ElemNum == 0 )
+			{
+				continue;
+			}
+
+			// 找出指定bank上具有指定slot序号的访存请求		
+			if (GetRdReqElemIdx(u32Block, u32Bank, &u32ElemIdx, u32CurrSlot))
+			{
+				u32MemAddr = pRdReqBank->arrReqElem[u32ElemIdx].u32MemAddr;
+				bolAddrIllegal = pRdReqBank->arrReqElem[u32ElemIdx].bolIllegal;
+
+				if (!bolAddrIllegal)
+				{
+					bolUseBlkPort = true; // 置block端口使用标志
+					
+					// 首先尝试从流水线中前推获得数据
+					if ( !RdDataFrmPipe(u32MemAddr, &u32Value, PIPE_EX.AC_EX.m_left.u32_MPSLKIdx) ) // try to forward from PIPE_EX.DC4_AC.m_right					
+					{
+						if ( !RdDataFrmPipe(u32MemAddr, &u32Value, PIPE_EX.EX_WB.m_left.u32_MPSLKIdx) ) // try to forward from PIPE_EX.AC_EX.m_right						
+						{
+							// 若不能以前推方式获得数据，则直接从存储器中读数据
+							ReadCoreDataMem(u32MemAddr, &u32Value);
+						}
+					}
+					// put the value read into the result data structure
+					PutReqResult(u32MemAddr, u32Value, (*pInstrRdResult));				
+				}
+				DelRdReq(u32Block, u32Bank, u32ElemIdx);
+
+				// 遍历当前bank上的读访存请求
+				// 删除具有相同访存地址且属于相同指令的读访存请求。
+				// 因为对于该地址的读访存请求已被服务。
+				for (int i = 0; i < 16; i++)
+				{
+					// 是否具有相同读访存地址且属于相同指令，虚拟Block无需特别处理(slot相同)
+					if ( pRdReqBank->arrReqElem[i].bolInUse && (pRdReqBank->arrReqElem[i].u32Slot == u32CurrSlot) )
+					{
+						if ( pRdReqBank->arrReqElem[i].u32MemAddr == u32MemAddr )
+						{
+							// 删除得到服务的访存请求
+							// 单条访存指令混合使用私有地址和共享地址视为地址跨界
+							// 所以此处不必考虑两种地址混合使用情况
+							DelRdReq(u32Block, u32Bank, i);
+						}
+					}
+				} // for (int i = 0; i < 16; i++)					
+#ifdef STALL_REASON_LOG
+				if ( !m_bolLogBankConf && pRdReqBank->u32ElemNum != 0 )
+				{
+					LogBankConf(true, BANK_CONF, u32Block, u32Bank);
+					m_bolLogBankConf = true;
+				}
+#endif				
+			} 
+		}
+#ifdef STALL_REASON_LOG
+		if ( !m_bolLogBankConf && m_RdReq_DC4.arrReqBlock[u32Block].bolInUse )
+		{
+			LogBankConf(true, SLOT_CONF, u32Block, u32CurrSlot);
+			m_bolLogBankConf = true;
+		}
+#endif			
+		if (bolUseBlkPort)
+		{
+			// DC4级读写操作在同一行时，先读后写，封相同BLK的写端口
+			SetBlkPortMask(u32Block, WR_BLK_PORT);
+		}
+	} 
+
+	return true;
+}
+#endif

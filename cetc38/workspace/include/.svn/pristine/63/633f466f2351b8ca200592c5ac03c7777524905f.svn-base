@@ -1,0 +1,13 @@
+#IC=-I/home/share/systemc-2.2.0/include -I/home/share/TLM-2009-07-15/include/tlm
+CC=g++
+CCFLAG=${IC} -I../../icache_sim/ -c
+
+.PHONY:	all clean
+
+all:	mmac.o
+
+%.o: %.cpp
+	$(CC) $(CCFLAG) $^ -o $@
+
+clean:
+	rm -rf *.o

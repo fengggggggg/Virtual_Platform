@@ -1,0 +1,901 @@
+
+#include "sc_iss.h"
+
+//-----------------------------------------------------------------------------------------------
+// 仅支持核内私有地址
+bool sc_iss::GetBlockIdx(DSPU32 p_u32PAddr, DSPU32 *p_pu32Block)
+{
+	bool bolAddrValid = false;
+
+	*p_pu32Block = 0;
+	if ( (p_u32PAddr >= BLK0_LOW_ADDR) && (p_u32PAddr <= BLK0_HIGH_ADDR) )
+	{
+		*p_pu32Block = 0;
+		bolAddrValid = true;
+	}
+	else if ( (p_u32PAddr >= BLK1_LOW_ADDR) && (p_u32PAddr <= BLK1_HIGH_ADDR) )
+	{
+		*p_pu32Block = 1;
+		bolAddrValid = true;
+	}
+	else if ( (p_u32PAddr >= BLK2_LOW_ADDR) && (p_u32PAddr <= BLK2_HIGH_ADDR) )
+	{
+		*p_pu32Block = 2;
+		bolAddrValid = true;
+	}
+	else if ( (p_u32PAddr >= BLK3_LOW_ADDR) && (p_u32PAddr <= BLK3_HIGH_ADDR) )
+	{
+		*p_pu32Block = 3;
+		bolAddrValid = true;
+	}
+	else if ( (p_u32PAddr >= BLK4_LOW_ADDR) && (p_u32PAddr <= BLK4_HIGH_ADDR) )
+	{
+		*p_pu32Block = 4;
+		bolAddrValid = true;
+	}
+	else if ( (p_u32PAddr >= BLK5_LOW_ADDR) && (p_u32PAddr <= BLK5_HIGH_ADDR) )
+	{
+		*p_pu32Block = 5;
+		bolAddrValid = true;
+	}
+	return bolAddrValid;
+}
+//-----------------------------------------------------------------------------------------------
+// 仅支持核内私有地址
+bool sc_iss::GetBankIdx(DSPU32 p_u32PAddr, DSPU32 *p_pu32Bank)
+{
+	if ( !IsValidPAddr(p_u32PAddr) )
+	{
+		*p_pu32Bank = 0;
+		return false;
+	}
+	
+	*p_pu32Bank = p_u32PAddr % 8;
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------------------
+void sc_iss::RstMemReqs_DC4()
+{
+#if 0
+	memset( &m_WrReq_DC4, 0, sizeof(WR_REQ_DSP) );
+	memset( &m_RdReq_DC4, 0, sizeof(RD_REQ_DSP) );
+#endif
+	memset( m_RdBus, 0, sizeof(m_RdBus) );
+	memset( m_WrBus, 0, sizeof(m_WrBus) );
+}
+
+//-----------------------------------------------------------------------------------------------
+void sc_iss::SrvMemReq_AC_POST()
+{
+	DSPU32 u32RegUnit, u32RegIdx, u32SrcPageIdx, u32MPSLKIdx;
+
+	u32MPSLKIdx = PIPE_EX.DC4_AC.m_right.u32_MPSLKIdx;
+
+	if (u32MPSLKIdx != 0) // note special wr(liuyu)
+	{
+		for (int i = 0; i < m_arrMemPipeSLK[u32MPSLKIdx].u32WrElemNum; i++)
+		{
+			if(GIsBitSet(m_arrMemPipeSLK[u32MPSLKIdx].u32SpecWrMask, i))
+				continue;
+			
+			u32RegUnit = m_arrMemPipeSLK[u32MPSLKIdx].arrUnitIdx[i];
+			u32RegIdx = m_arrMemPipeSLK[u32MPSLKIdx].arrRegIdx[i];
+			u32SrcPageIdx = m_arrMemPipeSLK[u32MPSLKIdx].arrSrcPageIdx[i];
+
+			// read source value and put into the pipeline
+			// the value will be written into memory in WB phase
+			// in BWDSP104x, there is no data hazard about GEN REG, 
+			// so read directly from GEN REG here.
+			m_arrMemPipeSLK[u32MPSLKIdx].arrWrValue[i] = ReadGPR_Page(u32RegUnit, u32RegIdx, u32SrcPageIdx);
+		}		
+	}
+}
+
+//-----------------------------------------------------------------------------------------------
+// 仅支持核内地址空间
+bool sc_iss::get_core_rd_result(DSPU32 p_u32MemAddr, DSPU32 &p_u32Value)
+{
+	DSPU32 u32ResultNum = PIPE_EX.AC_EX.m_right.INST_LINE_RD_RESULT.u32ResultNum;
+	PIPE_RD_RESULT_ELEM *pRdResultElem = PIPE_EX.AC_EX.m_right.INST_LINE_RD_RESULT.arrRdResultElems;	
+	
+	for (int i = 0; i < u32ResultNum; i++)
+	{
+		if (p_u32MemAddr == pRdResultElem[i].u32MemAddr)
+		{
+			p_u32Value = pRdResultElem[i].u32Value;
+			return true;
+		}
+	}
+
+	return false;
+}
+//-----------------------------------------------------
+// 发出ICMA读请求的核在AC_POST取得读取结果
+bool sc_iss::get_icma_rd_result(DSPU32 p_u32GAddr, DSPU32 &p_u32Value)
+{
+#ifdef ICMA_TESTING
+	RD_BUS_T *pRdBus;
+	RD_BUS_BANK *pRdBank;
+	DSPU32 u32ElemIdx;
+	ICMA_RD_RESULT *pIcmaRdResult = &(m_icma_req.icma_rd_result);
+
+	for(int i = 0; i < pIcmaRdResult->u32ElemNum; i++)
+	{
+		if(pIcmaRdResult->u32RdAddr[i] == p_u32GAddr)
+		{
+			p_u32Value = pIcmaRdResult->u32RdValue[i];
+			return true;
+		}
+	}
+#endif
+	return false;
+}
+
+//-------------------------------------------------------------------
+bool sc_iss::get_dmac_rd_result(DSPU32 p_u32GAddr, DSPU32 &p_u32Value)
+{
+	DSPU32 u32ElemNum, u32Addr;
+	bool bolIsRead;
+
+	u32ElemNum = m_dmac_req.dmac_mem.u32ElemNum;
+	if (u32ElemNum > 24)
+	{
+		PrintToCerr("%s: elemnum is invalid", __FUNCTION__);
+		return false;
+	}
+
+	for (int i = 0; i < u32ElemNum; i++)
+	{
+		u32Addr = m_dmac_req.dmac_mem.arrRWInfo[i].u32Addr;
+		bolIsRead = m_dmac_req.dmac_mem.arrRWInfo[i].bolIsRead;
+		if ((u32Addr == p_u32GAddr) && bolIsRead)
+		{
+			p_u32Value = m_dmac_req.dmac_mem.arrRWInfo[i].u32Value;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::PutReqResult(DSPU32 p_u32MemAddr, DSPU32 p_u32Value, PIPE_RD_RESULT &p_INST_LINE_RD_RESULT)
+{
+	DSPU32 u32Num;
+
+	u32Num = p_INST_LINE_RD_RESULT.u32ResultNum;
+	if (u32Num > (BANK_NUM_PERBLK * 2))
+	{
+		printf("PutReqResult: error here\n");
+		return false;
+	}
+
+	p_INST_LINE_RD_RESULT.arrRdResultElems[u32Num].u32MemAddr = p_u32MemAddr;
+	p_INST_LINE_RD_RESULT.arrRdResultElems[u32Num].u32Value = p_u32Value;
+
+	p_INST_LINE_RD_RESULT.u32ResultNum++;
+
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::RdDataFrmPipe(DSPU32 p_u32MemAddr, DSPU32 *p_pValue, DSPU32 p_u32MPSLKIdx)
+{
+	MEM_PIPE_SLK_ELEM  *pMemSlkElem;
+	bool bolFound = false;
+
+	if (p_u32MPSLKIdx == 0)
+	{
+		return false;
+	}
+
+	DSPU32 u32BlkIdx, u32BankIdx;
+	pMemSlkElem = &m_arrMemPipeSLK[p_u32MPSLKIdx];
+	for (int i = 0; i < pMemSlkElem->u32WrElemNum; i++)
+	{
+		if (p_u32MemAddr == pMemSlkElem->arrWrAddr[i])
+		{
+			(*p_pValue) = pMemSlkElem->arrWrValue[i];
+			u32BlkIdx = pMemSlkElem->arrBlkIdx[i];
+			u32BankIdx = pMemSlkElem->arrWrAddr[i]%8;
+			bolFound = true;
+			break;
+		}
+	}
+
+#ifdef MEM_CE_TESTING
+	if(bolFound)
+	{
+		MEM_CE_INFO *p_mce = &g_arrMemCE[u32BlkIdx][u32BankIdx];
+		p_mce->u32Data = 0U;
+		p_mce->u32Addr = ExtractBinStr(p_u32MemAddr, 3, 15);
+		p_mce->bolNotCE = true;
+		p_mce->bolEN = true;		
+	}
+#endif
+	// 以全局地址方式触发断点
+	DSPU32 u32GAddr;
+	PAddrToGAddr(p_u32MemAddr, u32r_CoreID, u32GAddr);
+	TriggerWP(u32GAddr, false);
+
+	return bolFound;
+}
+//-----------------------------------------------------------------------------------------------------------------------
+// 支持私有地址或当前核全局地址
+// 读核内数据存储器
+bool sc_iss::ReadCoreDataMem(DSPU32 p_u32MemAddr, DSPU32 *p_pValue)
+{
+	bool  bolAddrValid = false;
+	DSPU32  u32RegIdx, u32BlkBaseAddr, u32PAddr, u32GAddr;	
+	
+	// 转变为核内私有地址进一步处理
+	if ( ToCurrentCorePAddr(p_u32MemAddr, u32PAddr) == false )
+	{
+		// 读操作地址越界不产生异常，返回的读数据为全0.
+		*p_pValue = 0;
+		return false;
+	}
+
+#ifdef ECS_RES_STAT
+	if(m_bolStatEn)
+	{
+		m_u32RdMemCnt++;
+	}
+#endif
+
+#ifdef LIBTEST
+	//该段代码用于算法测试
+	if(m_bolTestForLib)
+	{
+		GetAccessStackStatus();
+
+		bool flag = false;
+		//检测所写地址是否在栈空间内
+		DSPU32 AddrU8 = u32ro_U[8];
+		//DSPU32 AddrU9 = u32ro_U[9];
+		//if((u32PAddr >= AddrU8) && (u32PAddr <= AddrU9))
+		if((u32PAddr >= AddrU8) && (u32PAddr <= 0x60ffffU))
+		{
+			//所读地址在栈空间内
+			flag = true;
+		}
+		else
+		{	
+			//所读地址不在栈空间内
+			list<AreaAddr>::iterator iter = m_TestLibInput.InParaMemList.begin();
+			list<AreaAddr>::iterator iter_end = m_TestLibInput.InParaMemList.end();
+			for (; iter!=iter_end; ++iter)
+			{
+				if( (u32PAddr >= iter->StartAddr) && (u32PAddr <= iter->EndAddr) )
+				{
+					//所读地址在ParaMem空间内
+					flag = true;
+					break;
+				}
+			}
+		}
+		if (!flag)
+		{
+			bool CheckDataPagFlag = false;  
+			//需要检测读地址是否在data段		
+			list<AreaAddr>::iterator Diter = m_TestLibInput.DataPagList.begin();
+			list<AreaAddr>::iterator Diter_end = m_TestLibInput.DataPagList.end();
+			for (; Diter!=Diter_end; ++Diter)
+			{
+				if(  (u32PAddr >= Diter->StartAddr) && (u32PAddr <= Diter->EndAddr) )
+				{
+					CheckDataPagFlag = true;  //发生了读操作
+					break;
+				}
+			}
+			if(!CheckDataPagFlag)
+			{
+				WrtStackError tmpstack;
+				//tmpstack.PC = PIPE_EX.EX_WB.m_right.uint32r_pc;
+				tmpstack.PC = u32r_EPC;
+				tmpstack.AddrU8 = AddrU8;
+				tmpstack.AddrU9 = 0x60ffffU;
+				tmpstack.WriteAddr = u32PAddr;
+				m_TestLibOutput.ReadIllegalAddr.push_back(tmpstack);
+			}
+		}
+		
+	}
+#endif
+
+	for (int i = 0; i < BLK_NUM_PERCORE; i++) // 不必支持虚拟block
+	{
+		u32BlkBaseAddr = BLK0_LOW_ADDR + (i * 0x200000);
+		if ( (u32PAddr >= u32BlkBaseAddr) && (u32PAddr < (u32BlkBaseAddr + INNER_DATA_BLK_SIZE)) )
+		{
+			u32RegIdx = u32PAddr - u32BlkBaseAddr;
+			*p_pValue = u32_data_mem[i][u32RegIdx];
+			bolAddrValid = true;
+#ifdef MEM_CE_TESTING
+			MEM_CE_INFO *p_mce = &g_arrMemCE[i][u32RegIdx%8];
+			p_mce->u32Data = 0U;
+			p_mce->u32Addr = ExtractBinStr(u32PAddr, 3, 15);
+			p_mce->bolNotCE = true;
+			p_mce->bolEN = true;
+#endif
+			break;
+		}
+	}
+
+	if ( !bolAddrValid )
+	{
+		PrintToCerr("ReadDataMem: address is invalid\n");
+	}
+	else
+	{
+		// 以全局地址方式触发断点
+		PAddrToGAddr(u32PAddr, u32r_CoreID, u32GAddr);
+		TriggerWP(u32GAddr, false);
+	}
+
+	return  bolAddrValid;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------
+// 支持私有地址或当前核全局地址
+// 写核内数据存储器
+bool sc_iss::WriteCoreDataMem(DSPU32 p_u32MemAddr, DSPU32 p_u32Value)
+{
+	bool  bolAddrValid = false;
+	DSPU32 u32RegIdx, u32BlkBaseAddr, u32PAddr, u32GAddr;
+
+	// 转变为核内私有地址进一步处理
+	if ( ToCurrentCorePAddr(p_u32MemAddr, u32PAddr) == false )
+	{
+		return false;
+	}
+#ifdef ECS_RES_STAT
+	if(m_bolStatEn)
+	{
+		m_u32WrMemCnt++;
+	}
+#endif
+	for (int i = 0; i < BLK_NUM_PERCORE; i++) // 不必支持虚拟block
+	{
+		u32BlkBaseAddr = BLK0_LOW_ADDR + (i * 0x200000);
+		if ( (u32PAddr >= u32BlkBaseAddr) && (u32PAddr < (u32BlkBaseAddr + INNER_DATA_BLK_SIZE)) )
+		{
+			u32RegIdx = u32PAddr - u32BlkBaseAddr;
+			u32_data_mem[i][u32RegIdx] = p_u32Value;
+			bolAddrValid = true;
+#ifdef MEM_CE_TESTING
+			MEM_CE_INFO *p_mce = &g_arrMemCE[i][u32RegIdx%8];
+			p_mce->u32Data = p_u32Value;
+			p_mce->u32Addr = ExtractBinStr(u32PAddr, 3, 15);
+			p_mce->bolNotCE = true;
+#endif
+			break;
+		}
+	} //for (i = 0; i < 6; i++)
+	
+	if (bolAddrValid)
+	{
+		// 以全局地址方式触发断点
+		PAddrToGAddr(u32PAddr, u32r_CoreID, u32GAddr);
+		TriggerWP(u32GAddr, true);
+	}
+	else
+	{
+		PrintToCerr("WriteCoreDataMem: address is invalid\n");
+	}
+
+	return  bolAddrValid;
+}
+bool sc_iss::CheckAddrValid_DC4(DSPU32 p_u32MemAddr, bool p_bolIsRead)
+{
+	DSPU32 u32PAddr;
+	if ( ToCurrentCorePAddr(p_u32MemAddr, u32PAddr) == false ) {
+		return false;
+	}
+	if (m_bolABIChkEn) {
+		DSPU32 ValU8 = u32ro_U[8];
+		if(PIPE_EX.DC4_AC.m_right.arrBPValid[0][8]) { 
+			ValU8 = PIPE_EX.DC4_AC.m_right.arrBPValue[0][8];
+		}
+		if(PIPE_EX.DC3_DC4.m_right.arrBPValid[0][8]) { 
+			ValU8 = PIPE_EX.DC3_DC4.m_right.arrBPValue[0][8];
+		}
+		// 开全局中断的条件下才需要检查
+//		if((m_u32ABIMask & CALL_STACK_CHK) && GIsBitSet(u32ro_CGCR, 0))
+		if (m_u32ABIMask & CALL_STACK_CHK) {
+			// 读操作在DC4级发生，可能需要前推
+			// U8指向内存位置不能读
+			if (u32PAddr >= m_u32ABITop && u32PAddr <= ValU8) {
+				FILE *fp = NULL;
+
+//				sprintf(g_arrFileName, "%s/ABI_CHECK.txt", g_arrIOPath);
+				if (!m_bolABIChkFromECS)
+					sprintf(g_arrFileName, "./ABI_CHECK.txt");
+				else
+					sprintf(g_arrFileName, "%s/ABI_CHECK.txt", g_arrABIPath);
+				if ((fp = fopen(g_arrFileName, "a+")) == NULL) {
+					PrintToCerr("Error occured when open ABI_CHECK.txt\n");
+					return false;
+				}
+			
+				fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+				fprintf(fp, "ABI_CHECK failed: illegal %s address %#x\n", p_bolIsRead ? "read" : "write", u32PAddr);
+				fprintf(fp, "TOP of stack is %#x, U8 is %#x\n", m_u32ABITop, ValU8);
+				fclose(fp);
+			} // if u32PAddr	
+		} // if (m_u32ABIMask & CALL_STACK_CHK)
+	}
+	return true;
+
+}
+#if 0
+//-----------------------------------------------------------------------------------------------
+// 是否为核外数据存储空间
+bool sc_iss::IsOutMemAddr(DSPU32 p_u32MemAddr)
+{
+	bool bolValid = false;
+
+/*
+	if ( (p_u32MemAddr >= BLK0_LOW_ADDR) && (p_u32MemAddr <= BLK0_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+	else if ( (p_u32MemAddr >= BLK1_LOW_ADDR) && (p_u32MemAddr <= BLK1_HIGH_ADDR) )
+	{
+		bolValid = true;
+	}
+*/
+
+	return bolValid;
+}
+
+
+//-----------------------------------------------------------------------------------------------
+// Return value:
+// 1 means memory access using U address register;
+// 2 means memory access using V address register;
+// 3 means memory access using W address register;
+//
+// 20130523: 调用关系待调整
+//
+int sc_iss::GetSlotAddrUnit(DSPU32 p_u32SlotIdx)
+{
+	DSPU32 u32SLKIdx = 0;
+
+	if (p_u32SlotIdx > 15)
+	{
+		PrintToCerr("GetSlotAddrUnit: Invalid parameter.\n");
+		return -1;
+	}
+
+	u32SLKIdx = m_arrSLKIdx_AC[p_u32SlotIdx];
+	if ( (u32SLKIdx == 0) || (u32SLKIdx >= RES_SLK_SIZE) )
+	{
+		PrintToCerr("GetSlotAddrUnit: Invalid parameter.\n");
+		return -1;
+	}
+
+	if ( m_arrResSLK[u32SLKIdx].slot_res_used.bolMemAcs == false )
+	{
+		PrintToCerr("GetSlotAddrUnit: Not memory access instruction.\n");
+		return -1;
+	}
+
+	if ( m_arrResSLK[u32SLKIdx].slot_res_used.u32SrcU != 0 )
+	{
+		return 0;
+	}
+
+	if ( m_arrResSLK[u32SLKIdx].slot_res_used.u32SrcV != 0 )
+	{
+		return 1;
+	}
+
+	if ( m_arrResSLK[u32SLKIdx].slot_res_used.u32SrcW != 0 )
+	{
+		return 2;
+	}
+
+	PrintToCerr("GetSlotAddrUnit: Invalid address unit index.\n");
+	return -1;
+}
+
+//-----------------------------------------------------------------------------------------------
+// 在指定的block和bank上,取具有指定slot序号的写访存请求。
+// BWDSP100规则: 优先服务具有最小宏索引的请求。
+// 新规则: 优先服务具有最小地址的请求。
+bool sc_iss::GetWrReqElemIdx(DSPU32 p_u32Block, DSPU32 p_u32Bank, DSPU32 *p_pu32ElemIdx, DSPU32 p_u32CurrSlot)
+{
+	DSPU32 u32MemAddr, u32ElemIdx, u32PAddr;
+	bool bolFound = false;
+
+	if (m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].u32ElemNum == 0)
+	{
+		return false;
+	}
+	
+	u32MemAddr = 0xFFFFFFFF;
+	// on current bank, select the element with minimum memory address to serve
+	for (u32ElemIdx = 0; u32ElemIdx < 16; u32ElemIdx++) // 一个指令行上的写访存请求最多16个
+	{
+		if ( !m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[u32ElemIdx].bolInUse )
+		{
+			continue;
+		}		
+
+		// 是否当前请求属于指定的slot序号
+		if ( m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[u32ElemIdx].u32Slot == p_u32CurrSlot )
+		{
+			// 统一转变为核内似有地址比较
+			ToCurrentCorePAddr(m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[u32ElemIdx].u32MemAddr, u32PAddr);
+
+			// 是否当前请求的地址更小
+			if ( u32PAddr < u32MemAddr )
+			{
+				u32MemAddr = u32PAddr;
+				*p_pu32ElemIdx = u32ElemIdx;
+				bolFound = true;
+			}
+		}
+	}
+
+	return bolFound;
+}
+//-----------------------------------------------------------------------------------------------
+// 在指定的block和bank上,取具有指定slot序号的读访存请求。
+// BWDSP100规则: 优先服务具有最小宏索引的请求。
+// 新规则: 优先服务具有最小地址的请求。
+bool sc_iss::GetRdReqElemIdx(DSPU32 p_u32Block, DSPU32 p_u32Bank, DSPU32 *p_pu32ElemIdx, DSPU32 p_u32CurrSlot)
+{
+	DSPU32 u32MemAddr, u32ElemIdx, u32PAddr;
+	bool bolFound = false;
+
+	if (m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].u32ElemNum == 0)
+	{
+		return false;
+	}
+	
+	u32MemAddr = 0xFFFFFFFF;
+	// on current bank, select the element with minimum memory address to serve
+	for (u32ElemIdx = 0; u32ElemIdx < 16; u32ElemIdx++) // 一个指令行上的读访存请求最多16个
+	{
+		if ( !m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[u32ElemIdx].bolInUse )
+		{
+			continue;
+		}
+
+		// 是否当前请求属于指定的slot序号
+		if ( m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[u32ElemIdx].u32Slot == p_u32CurrSlot )
+		{
+			// 统一转变为核内似有地址比较
+			ToCurrentCorePAddr(m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[u32ElemIdx].u32MemAddr, u32PAddr);
+			
+			// 是否当前请求的地址更小
+			if ( u32PAddr < u32MemAddr )
+			{
+				u32MemAddr = u32PAddr;
+				*p_pu32ElemIdx = u32ElemIdx;
+				bolFound = true;
+			}
+		}
+	}
+
+	return bolFound;
+}
+
+
+
+//-----------------------------------------------------------------------------------------------
+// 找出当前block中需要被服务的读访存指令的slot序号(因为同一指令行中可能有两条读访存指令)
+// 原则: 找出当前具有最小slot序号的访存指令来服务
+bool sc_iss::GetRdReqCurrSlot(DSPU32 *p_pSlotNum, DSPU32 p_u32Block)
+{
+	DSPU32 u32Block, u32Bank, u32Elem;
+	DSPU32 u32Slot;
+	bool bolInUse;
+
+	*p_pSlotNum = 16;
+	if (!m_RdReq_DC4.bolInUse)
+	{
+		// 若p_INST_RD_REQ指向的结构体中无访存请求
+		return false;
+	}
+
+	if ( p_u32Block >= BLK_NUM_PERCORE + 1 ) // 需要支持虚拟block
+	{
+		return false;
+	}
+	
+	u32Block = p_u32Block;
+	if ( !m_RdReq_DC4.arrReqBlock[u32Block].bolInUse )
+	{
+		// 若指定block中无访存请求
+		return false;
+	}
+
+	// 遍历指定block的每个bank
+	for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+	{
+		if ( m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32ElemNum == 0 )
+		{
+			// 若当前bank上无访存请求
+			continue;
+		}
+
+		// 找出当前bank中尚未被服务的具有最小slot序号的访存请求
+		for (u32Elem = 0; u32Elem < 16; u32Elem++)
+		{
+			bolInUse = m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32Elem].bolInUse;
+			u32Slot = m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32Elem].u32Slot;
+
+			// select the minimum slot number to serve
+			if ( bolInUse && (u32Slot < *p_pSlotNum) )
+			{
+				*p_pSlotNum = u32Slot;				
+			}
+
+		} // for (u32Elem = 0; u32Elem < 8; u32Elem++)
+
+	} // for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+// 找出当前block中需要被服务的写访存指令的slot序号(因为同一指令行中可能有两条写访存指令)
+// 原则: 找出当前具有最小slot序号的写访存指令来服务(GRQ)
+// 不区分是否为原子操作
+bool sc_iss::GetWrReqCurrSlot(DSPU32 *p_pSlotNum, DSPU32 p_u32Block)
+{
+	DSPU32 u32Block, u32Bank, u32Elem;
+	DSPU32 u32Slot;
+	bool bolInUse;
+	WR_REQ_BANK *pWrReqBank = NULL;
+
+	*p_pSlotNum = 16;
+	if (!m_WrReq_DC4.bolInUse)
+	{
+		// 若p_INST_WR_REQ指向的结构体中无访存请求
+		return false;
+	}
+
+	if ( p_u32Block >= BLK_NUM_PERCORE + 1 ) // 需要支持虚拟block
+	{
+		return false;
+	}
+	
+	u32Block = p_u32Block;
+	if ( !m_WrReq_DC4.arrReqBlock[u32Block].bolInUse )
+	{
+		// 若指定block中无访存请求
+		return false;
+	}
+
+	// 遍历指定block的每个bank
+	for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+	{
+		pWrReqBank = &(m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank]);
+		if ( pWrReqBank->u32ElemNum == 0 )
+		{
+			// 若当前bank上无访存请求
+			continue;
+		}
+
+		// 找出当前bank中尚未被服务的具有最小slot序号的访存请求
+		for (u32Elem = 0; u32Elem < 16; u32Elem++)
+		{
+			bolInUse = pWrReqBank->arrReqElem[u32Elem].bolInUse;
+			u32Slot = pWrReqBank->arrReqElem[u32Elem].u32Slot;
+
+			// select the minimum slot number to serve
+			if ( bolInUse && (u32Slot < *p_pSlotNum) )
+			{
+				*p_pSlotNum = u32Slot;
+			}
+
+		} // for (u32Elem = 0; u32Elem < 8; u32Elem++)
+
+	} // for (u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::DelWrReq(DSPU32 p_u32Block, DSPU32 p_u32Bank, DSPU32 p_u32ElemIdx)
+{
+	bool bolBlkEmpty = true;
+	bool bolAllBlkEmpty = true;
+
+	if (m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[p_u32ElemIdx].bolInUse == false)
+	{
+		// nothing need to be done
+		return true;
+	}
+
+	m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[p_u32ElemIdx].bolInUse = false;
+	m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].u32ElemNum--;
+	for (int i = 0; i < BANK_NUM_PERBLK; i++)
+	{
+		if (m_WrReq_DC4.arrReqBlock[p_u32Block].arrReqBank[i].u32ElemNum != 0)
+		{
+			bolBlkEmpty = false;
+		}
+	}
+
+	if (bolBlkEmpty)
+	{
+		m_WrReq_DC4.arrReqBlock[p_u32Block].bolInUse = false;
+		m_WrReq_DC4.u32BlkMask = GClrBit(m_WrReq_DC4.u32BlkMask, p_u32Block);
+	}
+
+	for (int i = 0; i < BLK_NUM_PERCORE + 1; i++) // 需要支持虚拟block
+	{
+		if (m_WrReq_DC4.arrReqBlock[i].bolInUse == true)
+		{
+			bolAllBlkEmpty = false;
+		}
+	}
+
+	if (bolAllBlkEmpty)
+	{
+		m_WrReq_DC4.bolInUse = false;
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+// 仅支持访问核内存储空间
+// p_bolAddrIllegal: 当访存指令访存地址不合法时，不产生实际的访存功能，但影响访存时序。
+//
+bool sc_iss::PutWrReq(DSPU32 p_u32MemAddr, DSPU32 p_u32Value, DSPU32 p_u32RegUnit, DSPU32 p_u32RegIdx, DSPU32 p_u32Slot, bool p_bolAtom, bool p_bolAddrIllegal, DSPU32 p_u32BlkIdx, bool p_bolSpecWr, DSPU32 p_u32PageIdx)
+{
+	DSPU32 u32Block, u32Bank, u32ElemNum, u32MaskTemp;
+
+	if ( p_u32BlkIdx > BLK_NUM_PERCORE ) // 6个物理block和1个虚拟block
+	{
+		printf("PutWrReq: invalid block index\n");
+		return false;
+	}
+
+	// get block index of this address
+	u32Block = p_u32BlkIdx;
+	
+	// get bank index of this address
+	u32Bank = p_u32MemAddr % 8;
+	
+	// get current request number in this bank
+	u32ElemNum = m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32ElemNum;
+	
+	// put current request
+	m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32MemAddr = p_u32MemAddr;
+	if(p_bolSpecWr)
+	{
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32Value= p_u32Value;
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32SpecWrMask = 
+			GSetBit(m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32SpecWrMask, u32ElemNum);
+	}
+	else
+	{
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32RegUnit = p_u32RegUnit;
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32RegIdx = p_u32RegIdx;
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32PageIdx = p_u32PageIdx;		
+	}
+	if(u32Block == BLK_NUM_PERCORE)
+	{		
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32Slot = MAX_INUM_LINE;
+	}
+	else
+	{	
+		m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].u32Slot = p_u32Slot;
+	}
+	m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].bolIllegal = p_bolAddrIllegal;
+	m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemNum].bolInUse = true;
+	m_WrReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32ElemNum++;
+	m_WrReq_DC4.arrReqBlock[u32Block].bolInUse = true;
+	m_WrReq_DC4.bolInUse = true;
+	
+	m_WrReq_DC4.u32BlksInUseOrig = GSetBit(m_WrReq_DC4.u32BlksInUseOrig, u32Block);
+	if (p_bolAtom)
+	{
+		m_WrReq_DC4.bolAtom = true;
+	}
+
+	m_WrReq_DC4.u32BlkMask = GSetBit(m_WrReq_DC4.u32BlkMask, u32Block);
+	return true;
+
+}
+
+//-----------------------------------------------------------------------------------------------
+bool sc_iss::DelRdReq(DSPU32 p_u32Block, DSPU32 p_u32Bank, DSPU32 p_u32ElemIdx)
+{
+	bool bolBlkEmpty = true;
+	bool bolAllBlkEmpty = true;
+
+	if (m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[p_u32ElemIdx].bolInUse == false)
+	{
+		// nothing need to be done
+		return true;
+	}
+
+	m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].arrReqElem[p_u32ElemIdx].bolInUse = false;
+	m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[p_u32Bank].u32ElemNum--;
+	for (int i = 0; i < BANK_NUM_PERBLK; i++)
+	{
+		if (m_RdReq_DC4.arrReqBlock[p_u32Block].arrReqBank[i].u32ElemNum != 0)
+		{
+			bolBlkEmpty = false;
+		}
+	}
+
+	if (bolBlkEmpty)
+	{
+		m_RdReq_DC4.arrReqBlock[p_u32Block].bolInUse = false;
+		m_RdReq_DC4.u32BlkMask = GClrBit(m_RdReq_DC4.u32BlkMask, p_u32Block);
+	}
+
+	for (int i = 0; i < BLK_NUM_PERCORE + 1; i++) // 需要支持虚拟block
+	{
+		if (m_RdReq_DC4.arrReqBlock[i].bolInUse == true)
+		{
+			bolAllBlkEmpty = false;
+		}
+	}
+
+	if (bolAllBlkEmpty)
+	{
+		m_RdReq_DC4.bolInUse = false;
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------------------
+// 仅支持访问核内存储空间
+// p_bolAddrIllegal: 当访存指令访存地址不合法时，不产生实际的访存功能，但影响访存时序。
+//
+bool sc_iss::PutRdReq(DSPU32 p_u32MemAddr, DSPU32 p_u32Slot, bool p_bolAtom, bool p_bolAddrIllegal, DSPU32 p_u32BlkIdx)
+{
+	DSPU32 u32Block, u32Bank, u32ElemIdx, u32MaskTemp;
+
+	if ( p_u32BlkIdx > BLK_NUM_PERCORE ) // 6个物理block和1个虚拟block
+	{
+		printf("PutRdReq: invalid block index\n");
+		return false;
+	}
+
+	// get block index of this address
+	u32Block = p_u32BlkIdx;
+	
+	// get bank index of this address
+	u32Bank = p_u32MemAddr % 8;
+	
+	// get current request number in this bank
+	u32ElemIdx = m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32ElemNum;
+	
+	// put current request
+	m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemIdx].u32MemAddr = p_u32MemAddr;
+	if(u32Block == BLK_NUM_PERCORE)
+	{
+		m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemIdx].u32Slot = MAX_INUM_LINE;
+	}
+	else
+	{
+		m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemIdx].u32Slot = p_u32Slot;	
+	}
+	m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemIdx].bolIllegal = p_bolAddrIllegal;
+	m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].arrReqElem[u32ElemIdx].bolInUse = true;
+	m_RdReq_DC4.arrReqBlock[u32Block].arrReqBank[u32Bank].u32ElemNum++;
+	m_RdReq_DC4.arrReqBlock[u32Block].bolInUse = true;
+	m_RdReq_DC4.bolInUse = true;
+	
+	m_RdReq_DC4.u32BlksInUseOrig = GSetBit(m_RdReq_DC4.u32BlksInUseOrig, u32Block);
+	if (p_bolAtom)
+	{
+		m_RdReq_DC4.bolAtom = true;
+	}
+
+	m_RdReq_DC4.u32BlkMask = GSetBit(m_RdReq_DC4.u32BlkMask, u32Block);
+	return true;
+}
+
+#endif
+

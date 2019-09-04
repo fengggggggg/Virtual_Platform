@@ -1,0 +1,206 @@
+ 
+#include "sc_iss.h"
+
+//----------------------------------------------------------------------
+void sc_iss::SelfInitIRQParas()
+{
+     int i;
+
+     for (i = 0; i < 32; i++)
+     {
+         g_arrIRQParas[i].u32BitMask = 0;
+     }
+
+/*
+     g_arrIRQParas[0].u32BitMask = 0x4000000;    // TILR1 and TIHR1
+     g_arrIRQParas[0].u32MinCycle = 5;
+     g_arrIRQParas[0].u32MaxCycle = 20;
+     g_arrIRQParas[0].u32Offset = 0;
+     g_arrIRQParas[0].u32BeginLvl = 0;
+     g_arrIRQParas[0].u32MaxCycleIRQ = 3;
+*/     
+/*
+     g_arrIRQParas[1].u32BitMask = 0x8000000;    // TILR0 and TIHR0
+*/
+     
+
+     g_arrIRQParas[2].u32BitMask = 0x40;         // DMAIR11
+     g_arrIRQParas[2].u32MinCycle = 10;
+     g_arrIRQParas[2].u32MaxCycle = 30;
+     g_arrIRQParas[2].u32Offset = 0;
+     g_arrIRQParas[2].u32BeginLvl = 1;
+     g_arrIRQParas[2].u32MaxCycleIRQ = 3;
+     
+/*
+     g_arrIRQParas[3].u32BitMask = 0x80;         // DMAIR10
+     g_arrIRQParas[4].u32BitMask = 0x100;        // DMAIR9
+     g_arrIRQParas[5].u32BitMask = 0x200;        // DMAIR8
+     g_arrIRQParas[6].u32BitMask = 0x400;        // DMAIR7
+     g_arrIRQParas[7].u32BitMask = 0x800;        // DMAIR6
+     g_arrIRQParas[8].u32BitMask = 0x1000;       // DMAIR5
+     g_arrIRQParas[9].u32BitMask = 0x2000;       // DMAIR4
+     g_arrIRQParas[10].u32BitMask = 0x4000;      // DMAIR3
+     g_arrIRQParas[11].u32BitMask = 0x8000;      // DMAIR2
+     g_arrIRQParas[12].u32BitMask = 0x10000;     // DMAIR1
+     g_arrIRQParas[13].u32BitMask = 0x20000;     // DMAIR0
+     g_arrIRQParas[14].u32BitMask = 0x40000;     // INTR3
+     g_arrIRQParas[15].u32BitMask = 0x80000;     // INTR2
+     //g_arrIRQParas[16].u32BitMask = 0x100000;    // INTR1    // reserved for testbench use
+     g_arrIRQParas[17].u32BitMask = 0x200000;    // INTR0
+*/
+}
+
+//----------------------------------------------------------------------------------------------------
+unsigned int sc_iss::GenRandNum(unsigned int p_u32Min, unsigned int p_u32Max)
+{
+     int intTemp;
+     unsigned int u32Rtn;
+
+     if (p_u32Max > p_u32Min)
+     {
+         intTemp = rand();
+         u32Rtn = p_u32Min + (intTemp % (p_u32Max - p_u32Min + 1));
+     }
+     else
+     {
+        u32Rtn = p_u32Min;
+     }
+
+     //cout << "GenRandNum: return value is " << u32Rtn << endl;
+     return u32Rtn;
+}
+
+//----------------------------------------------------------------------------------------------------
+/*
+unsigned int GenCustomIRQLvl(unsigned int p_u32CurrCycle)
+{
+     int intElemIdx;
+     unsigned int u32BitMask, u32Min, u32Max, u32BeginLvl, u32MaxCycleIRQ;
+     unsigned int u32SpecificBits, u32Temp;
+
+	// generate IRQ levle for current cycle
+    u32SpecificBits = 0;
+    for (intElemIdx = 0; intElemIdx < 32; intElemIdx++)
+    {
+        u32BitMask = g_arrIRQParas[intElemIdx].u32BitMask;
+        u32Max = g_arrIRQParas[intElemIdx].u32MaxCycle;
+        u32Min = g_arrIRQParas[intElemIdx].u32MinCycle;
+        u32BeginLvl = g_arrIRQParas[intElemIdx].u32BeginLvl;
+        u32MaxCycleIRQ = g_arrIRQParas[intElemIdx].u32MaxCycleIRQ;
+            
+        if (u32BitMask != 0)
+        {                                 
+            if (g_arrLvlChgInfo[intElemIdx].u32CurrentLvl == 0)
+            {
+                u32SpecificBits &= ~u32BitMask;
+            }
+            else
+            {
+                u32SpecificBits |= u32BitMask;
+            }
+                                  
+            if (p_u32CurrCycle == g_arrLvlChgInfo[intElemIdx].u32NextChgCycle)
+            {               
+               if (g_arrLvlChgInfo[intElemIdx].u32CurrentLvl == u32BeginLvl)
+               {
+                   u32Temp = GenRandNum(1, u32MaxCycleIRQ);        
+                   //cout << "GenRandNum: return value is " << u32Temp << endl;
+                   g_arrLvlChgInfo[intElemIdx].u32NextChgCycle += u32Temp;
+               }
+               else
+               {
+                   u32Temp = GenRandNum(u32Min, u32Max);        
+                   //cout << "GenRandNum: return value is " << u32Temp << endl; 
+                   g_arrLvlChgInfo[intElemIdx].u32NextChgCycle += u32Temp;
+               }                         
+                   
+               u32Temp = g_arrLvlChgInfo[intElemIdx].u32CurrentLvl;
+               g_arrLvlChgInfo[intElemIdx].u32CurrentLvl = (~u32Temp) & 0x1;
+            }
+        }
+    } // for (intElemIdx = 0; intElemIdx < 32; intElemIdx++)
+
+
+	return u32SpecificBits;
+}
+*/
+//----------------------------------------------------------------------------------------------------
+/*
+void InitIRQLvl()
+{
+    int intElemIdx;
+
+	for (intElemIdx = 0; intElemIdx < 32; intElemIdx++)  // init g_arrLvlChgInfo[]
+	{
+        if (g_arrIRQParas[intElemIdx].u32BitMask != 0)
+        {
+            g_arrLvlChgInfo[intElemIdx].u32NextChgCycle = g_arrIRQParas[intElemIdx].u32Offset + GenRandNum(g_arrIRQParas[intElemIdx].u32MinCycle, g_arrIRQParas[intElemIdx].u32MaxCycle);
+            g_arrLvlChgInfo[intElemIdx].u32CurrentLvl = g_arrIRQParas[intElemIdx].u32BeginLvl;
+        }
+    }
+}
+*/
+//----------------------------------------------------------------------------------------------------
+/*
+void InitCustomINT()
+{
+	DSPU32 u32Seed;
+
+	// init parameters
+	SelfInitIRQParas();
+
+	// set random seed
+    u32Seed = 0x4859ee5d;
+    srand(u32Seed);
+
+	// init global variable
+	InitIRQLvl();	
+}
+*/
+//----------------------------------------------------------------------------------------------------
+/*
+void AppInitCustomINT(IRQ_PARA *p_pIRQParas, DSPU32 p_u32Seed)
+{
+	int i;	
+
+	// init parameters
+	for (i = 0; i < 32; i++)
+	{
+        g_arrIRQParas[i] = *p_pIRQParas;
+		p_pIRQParas++;
+	}
+
+	// set random seed
+    srand(p_u32Seed);
+
+	// init global variable
+	InitIRQLvl();
+
+	// set flag to use Custom INT
+	bolr_UseCustomINT = true;
+}
+*/
+//--------------------------------------------------------------------------
+void sc_iss::TestRand()
+{
+     unsigned int u32Seed, u32Value;
+     int i;
+
+     // set random seed
+    u32Seed = 0x4859ee5d;
+    printf("seed is 0x%08x\n", u32Seed);
+    srand(u32Seed);
+    for (i = 0; i < 1024; i++)
+    {
+        u32Value = rand();
+        printf("0x%08x\n", u32Value);
+    }
+}
+
+
+
+
+
+
+
+

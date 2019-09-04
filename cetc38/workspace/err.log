@@ -1,0 +1,122 @@
+In file included from main.cpp:12:0:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h: In constructor ‘dsp_top::dsp_top(sc_core::sc_module_name)’:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:209:54: error: no match for call to ‘(tlm::tlm_initiator_socket<256u, mydma_protocol_types>) (tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>&)’
+   dmac_ptr[0]->init_socket2ddr(router->targ_socket[0]);
+                                                      ^
+In file included from /opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_sockets.h:23:0,
+                 from /opt/systemc-2.3.1/include/tlm:30,
+                 from /opt/systemc-2.3.1/include/tlm.h:22,
+                 from /home/cloudyang/cetc38/workspace/include/sc_iss.h:17,
+                 from /home/cloudyang/cetc38/workspace/include/dsp_top.h:15,
+                 from main.cpp:12:
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:209:7: note: candidates are:
+ class tlm_initiator_socket :
+       ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type = tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_target_socket_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_target_socket_type& {aka tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type = tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_type& {aka tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type = tlm::tlm_bw_transport_if<mydma_protocol_types>]
+   void operator() (bw_interface_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::bw_interface_type& {aka tlm::tlm_bw_transport_if<mydma_protocol_types>&}’
+In file included from main.cpp:12:0:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:210:54: error: no match for call to ‘(tlm::tlm_initiator_socket<256u, mydma_protocol_types>) (tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>&)’
+   dmac_ptr[1]->init_socket2ddr(router->targ_socket[1]);
+                                                      ^
+In file included from /opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_sockets.h:23:0,
+                 from /opt/systemc-2.3.1/include/tlm:30,
+                 from /opt/systemc-2.3.1/include/tlm.h:22,
+                 from /home/cloudyang/cetc38/workspace/include/sc_iss.h:17,
+                 from /home/cloudyang/cetc38/workspace/include/dsp_top.h:15,
+                 from main.cpp:12:
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:209:7: note: candidates are:
+ class tlm_initiator_socket :
+       ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type = tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_target_socket_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_target_socket_type& {aka tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type = tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_type& {aka tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type = tlm::tlm_bw_transport_if<mydma_protocol_types>]
+   void operator() (bw_interface_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::bw_interface_type& {aka tlm::tlm_bw_transport_if<mydma_protocol_types>&}’
+In file included from main.cpp:12:0:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:211:57: error: no match for call to ‘(tlm::tlm_initiator_socket<256u, mydma_protocol_types>) (tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>&)’
+   m_pDDRMODULE->init_socket2dmac0(router->targ_socket[2]);
+                                                         ^
+In file included from /opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_sockets.h:23:0,
+                 from /opt/systemc-2.3.1/include/tlm:30,
+                 from /opt/systemc-2.3.1/include/tlm.h:22,
+                 from /home/cloudyang/cetc38/workspace/include/sc_iss.h:17,
+                 from /home/cloudyang/cetc38/workspace/include/dsp_top.h:15,
+                 from main.cpp:12:
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:209:7: note: candidates are:
+ class tlm_initiator_socket :
+       ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type = tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_target_socket_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_target_socket_type& {aka tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type = tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_type& {aka tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type = tlm::tlm_bw_transport_if<mydma_protocol_types>]
+   void operator() (bw_interface_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::bw_interface_type& {aka tlm::tlm_bw_transport_if<mydma_protocol_types>&}’
+In file included from main.cpp:12:0:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:212:57: error: no match for call to ‘(tlm::tlm_initiator_socket<256u, mydma_protocol_types>) (tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>&)’
+   m_pDDRMODULE->init_socket2dmac1(router->targ_socket[3]);
+                                                         ^
+In file included from /opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_sockets.h:23:0,
+                 from /opt/systemc-2.3.1/include/tlm:30,
+                 from /opt/systemc-2.3.1/include/tlm.h:22,
+                 from /home/cloudyang/cetc38/workspace/include/sc_iss.h:17,
+                 from /home/cloudyang/cetc38/workspace/include/dsp_top.h:15,
+                 from main.cpp:12:
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:209:7: note: candidates are:
+ class tlm_initiator_socket :
+       ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_target_socket_type = tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_target_socket_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:138:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_target_socket_type& {aka tlm::tlm_base_target_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::base_type = tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >]
+   void operator() (base_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:155:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::base_type& {aka tlm::tlm_base_initiator_socket_b<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types> >&}’
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note: void tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::operator()(tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type&) [with unsigned int BUSWIDTH = 256u; FW_IF = tlm::tlm_fw_transport_if<mydma_protocol_types>; BW_IF = tlm::tlm_bw_transport_if<mydma_protocol_types>; int N = 1; sc_core::sc_port_policy POL = (sc_core::sc_port_policy)0u; tlm::tlm_base_initiator_socket<BUSWIDTH, FW_IF, BW_IF, N, POL>::bw_interface_type = tlm::tlm_bw_transport_if<mydma_protocol_types>]
+   void operator() (bw_interface_type& s)
+        ^
+/opt/systemc-2.3.1/include/tlm_core/tlm_2/tlm_sockets/tlm_initiator_socket.h:169:8: note:   no known conversion for argument 1 from ‘tlm_utils::simple_target_socket<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>’ to ‘tlm::tlm_base_initiator_socket<256u, tlm::tlm_fw_transport_if<mydma_protocol_types>, tlm::tlm_bw_transport_if<mydma_protocol_types>, 1, (sc_core::sc_port_policy)0u>::bw_interface_type& {aka tlm::tlm_bw_transport_if<mydma_protocol_types>&}’
+In file included from main.cpp:12:0:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:214:56: error: expression cannot be used as a function
+   (router->init_socket[0])(dmac_ptr[0]->targ_socket2ddr);
+                                                        ^
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:215:56: error: expression cannot be used as a function
+   (router->init_socket[1])(dmac_ptr[1]->targ_socket2ddr);
+                                                        ^
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:216:59: error: expression cannot be used as a function
+   (router->init_socket[2])(m_pDDRMODULE->targ_socket2dmac0);
+                                                           ^
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:217:59: error: expression cannot be used as a function
+   (router->init_socket[3])(m_pDDRMODULE->targ_socket2dmac1);
+                                                           ^
+In file included from /home/cloudyang/cetc38/workspace/include/dsp_top.h:29:0,
+                 from main.cpp:12:
+/home/cloudyang/cetc38/workspace/include/router.h: In instantiation of ‘Router<N_INIT, N_TARG>::Router(sc_core::sc_module_name) [with unsigned int N_INIT = 4u; unsigned int N_TARG = 4u]’:
+/home/cloudyang/cetc38/workspace/include/dsp_top.h:207:71:   required from here
+/home/cloudyang/cetc38/workspace/include/router.h:50:19: error: cannot convert ‘tlm_utils::simple_initiator_socket_tagged<Router<4u, 4u>, 32u, tlm::tlm_base_protocol_types>*’ to ‘tlm_utils::simple_initiator_socket_tagged<Router<4u, 4u>, 256u, tlm::tlm_base_protocol_types>*’ in assignment
+    init_socket[i] = new simple_initiator_socket_tagged<Router>(socket_name);
+                   ^
+make: *** [test] Error 1

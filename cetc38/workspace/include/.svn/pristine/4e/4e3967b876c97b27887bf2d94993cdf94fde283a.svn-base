@@ -1,0 +1,5357 @@
+  //-------------------------------------------------------------------------------------------------------------------------------
+
+#include "sc_iss.h"
+//-----------------------------------------------------------------------------------
+inline DSP_BIT80 BIT128ToBIT80(DSP_BIT128 p_u128Src)
+{
+	DSP_BIT80  xu80Rtn;
+	DSPU64 u64Temp;
+
+	xu80Rtn.u16High = p_u128Src.u32LH & 0xFFFF;
+	u64Temp = (DSPU64)p_u128Src.u32HL << 32;     
+	xu80Rtn.u64Low = u64Temp | p_u128Src.u32LL;
+	
+	return  xu80Rtn;
+}
+//-----------------------------------------------------------------------------------
+inline void BIT80ToBIT128(DSP_BIT80 p_u80Src, DSP_BIT128 &p_u128Src)
+{
+	p_u128Src.u32LL = p_u80Src.u64Low & 0xFFFFFFFF;
+	p_u128Src.u32HL = p_u80Src.u64Low >> 32;
+	p_u128Src.u32LH = (p_u128Src.u32LH)&0xffff0000;
+	p_u128Src.u32LH = (	p_u128Src.u32LH)|p_u80Src.u16High;
+
+}
+
+/*---------------------------------------------------MUL Operations---------------------------------------------------*/
+
+bool sc_iss::like_mul_32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("like_mul_32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("like_mul_32_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32DestIdx;
+		union INSTR_WORD
+			{
+				DSPU32  u32Value;
+		    	struct  SPLIT_VALUE
+		    	{
+		    		DSPU32    	u6SrcN: 6;
+			    	DSPU32    	u6SrcM: 6;
+					DSPU32    	u6Dest: 6;
+					DSPU32    	u8Opcode: 8;
+					DSPU32      u1MultiWord: 1;
+					DSPU32      u4Units: 4;
+		 		   	DSPU32      u1Line: 1;
+				} details;
+			} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		// Which macros(units) will be used?
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		// this instruction just need 1 MUL
+		m_arrDCResNeeded[p_u32Slot].i32MULNum = 1;
+        // Don't need to use specific MUL, such as mul_2.
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = false;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{				
+				// log info necessary for data forward of general purpose register.
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+				{
+					// data forward to get the value of R[u32SrcMIdx] of current macro
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+				}
+				else
+				{
+					// read the value of R[u32SrcMIdx] from register heap directly
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+				// get the value of R[u32SrcNIdx] of current macro
+				// data forward or directly
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdx) )
+				{
+					m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = u32Result;
+				}
+				else
+				{
+					m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = rd_u32r_R_new(i, u32SrcNIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{				
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status, u32SrcA, u32SrcB;
+		DSPU32 u32MULIdx, u32Result, u32GenResultIdx, u32MULCR;
+		DSP_CFix16 CFix16Src1, CFix16Src2, CFix16Dest;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{		
+				// get the index of the first MUL allocated for this instruction in current macro
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+				u32SrcB = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0];
+
+				u32Status = 0;
+				switch (p_u32Opcode)
+        		{
+					case op_mul_32_c:  // Rs=Rm*Rn
+						// set bit[0] of MULCR indicate this is signed operation
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	u32Result = Mul32(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR);
+                   		break;
+					case op_mul_32_u_c:  //Rs=Rm*Rn(U)
+                    	u32Result = Mul32(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR);
+                   		break;
+					case op_mul_16_c:  //HRs=HRm*HRn
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	u32Result = MulD16(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR);
+                   		break;
+					case op_mul_16_u_c:  //HRs=HRm*HRn(U)
+                    	u32Result = MulD16(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR);
+                   		break;
+					case op_mul_flo32_c:  //FRs=FRm*FRn
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	u32Result = MulF32(u32SrcA, u32SrcB, &u32Status, u32MULCR);
+                   		break;
+					case op_mul_s16_ll_c:  // opcode 117 Rs=LHRm*LHRn
+						u32MULCR = GSetBit(u32MULCR, 0);
+						u32Result = MulS16(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR, 0);
+                   		break;
+					case op_mul_s16_HH_c:  // opcode 118 Rs=HHRm*HHRn
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	u32Result = MulS16(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR, 1);
+                   		break;
+					case op_mul_s16_lH_c:  // opcode 119 Rs=LHRm*HHRn
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	u32Result = MulS16(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR, 2);
+                   		break;
+					case op_mul_c16_h16_c:  // opcode 120
+						u32MULCR = GSetBit(u32MULCR, 0);
+						CFix16Src1.u32Value = u32SrcA;
+						CFix16Src2.split.u16Imag = 0;
+						CFix16Src2.split.u16Real = u32SrcB >> 16;
+						CFix16Dest = MulC16(CFix16Src1, CFix16Src2, &u32Status, u32MULCR, u32MULCUTR);
+     					u32Result = CFix16Dest.u32Value;              		
+					break;
+					case op_mul_c16_l16_c:  // opcode 121
+						u32MULCR = GSetBit(u32MULCR, 0);
+						CFix16Src1.u32Value = u32SrcA;
+						CFix16Src2.split.u16Imag = 0;
+						CFix16Src2.split.u16Real = u32SrcB & 0xFFFF;
+						CFix16Dest = MulC16(CFix16Src1, CFix16Src2, &u32Status, u32MULCR, u32MULCUTR);
+                    	u32Result = CFix16Dest.u32Value;
+                   		break;
+					case op_mul_c16_c:  // opcode 122
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	CFix16Src1.u32Value = u32SrcA;
+						CFix16Src2.u32Value = u32SrcB;
+						CFix16Dest = MulC16(CFix16Src1, CFix16Src2, &u32Status, u32MULCR, u32MULCUTR);
+						u32Result = CFix16Dest.u32Value;
+                   		break;
+					case op_mul_c16_conj_c:  // opcode 123
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	CFix16Src1.u32Value = u32SrcA;
+						CFix16Src2.u32Value = u32SrcB;
+						CFix16Dest = MulC16Conj(CFix16Src1, CFix16Src2, &u32Status, u32MULCR, u32MULCUTR);
+						u32Result = CFix16Dest.u32Value;
+                   		break;
+					case op_mul_c16conj_c:  // opcode 124
+						u32MULCR = GSetBit(u32MULCR, 0);
+                    	CFix16Src1.u32Value = u32SrcA;
+						CFix16Src2.u32Value = u32SrcB;
+						CFix16Dest = MulC16DConj(CFix16Src1, CFix16Src2, &u32Status, u32MULCR, u32MULCUTR);
+						u32Result = CFix16Dest.u32Value;
+                   		break;
+               		default:
+						PrintToCerr("like_mul_32_cores: opcode not found\n");
+                    	u32Result = 0;
+        		}
+				
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32Status);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+
+				// Log info for data forward
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32Result);
+				u32GenResultIdx++;
+		
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::like_square_hl16_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("like_square_hl16_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("like_square_hl16_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32DestIdx;
+		union INSTR_WORD
+			{
+				DSPU32  u32Value;
+		    	struct  SPLIT_VALUE
+		    	{
+					DSPU32    	u5Rev0: 5;
+					DSPU32    	u1Sign: 1;
+			    	DSPU32    	u6SrcM: 6;
+					DSPU32    	u6Dest: 6;
+					DSPU32    	u8Opcode: 8;
+					DSPU32      u1MultiWord: 1;
+					DSPU32      u4Units: 4;
+		 		   	DSPU32      u1Line: 1;
+				} details;
+			} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u1Sign;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		// Which macros(units) will be used?
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		// this instruction just need 1 MUL
+		m_arrDCResNeeded[p_u32Slot].i32MULNum = 1;
+        // Don't need to use specific MUL, such as mul_2.
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = false;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{				
+				// log info necessary for data forward of general purpose register.
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32Result;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+				{
+					// data forward to get the value of R[u32SrcMIdx] of current macro
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+				}
+				else
+				{
+					// read the value of R[u32SrcMIdx] from register heap directly
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{				
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status, u32SrcA, u32Sign;
+		DSPU32 u32MULIdx, u32Result, u32GenResultIdx, u32MULCR;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Sign = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{			
+				// get the index of the first MUL allocated for this instruction in current macro
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+
+				if (u32Sign == 1)
+				{
+					u32MULCR = GSetBit(u32MULCR, 0);
+				}
+
+				u32Status = 0;				
+                u32Result = MULSqrAdd16(u32SrcA, &u32Status, u32MULCR, u32MULCUTR);
+				
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32Status);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+
+				// Log info for data forward
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32Result);
+				u32GenResultIdx++;
+		
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::like_mul_c32_32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("like_mul_c32_32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("like_mul_c32_32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32DestIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		// this instruction just need 1 MUL
+		m_arrDCResNeeded[p_u32Slot].i32MULNum = 2;
+        // Don't need to use specific MUL, such as mul_2.
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = false;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 2; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx + k) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdx + k, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdx) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status, u32SrcA, u32SrcB;
+		DSPU32 u32MULIdx, u32Result, u32GenResultIdx, u32MULCR;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 2; k++)
+				{
+					u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], (k + 1));
+					u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];
+					u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];
+					u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];
+					u32SrcB = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];
+
+					u32Status = 0;
+					switch (p_u32Opcode)
+	        		{						
+						case op_mul_c32_32_c:  // opcode 126
+							// set bit[0] of MULCR indicate this is signed operation
+							u32MULCR = GSetBit(u32MULCR, 0);
+							u32Result = Mul32(u32SrcA, u32SrcB, &u32Status, u32MULCR, u32MULCUTR);
+       	            		break;
+						case op_mul_cflo32_flo32_c:  // opcode 127
+							// set bit[0] of ALUCR indicate this is signed operation
+							u32MULCR = GSetBit(u32MULCR, 0);
+							u32Result = MulF32(u32SrcA, u32SrcB, &u32Status, u32MULCR);
+       	            		break;
+						default:
+							PrintToCerr("like_mul_c32_32_cores: opcode not found\n");
+ 		                   	u32Result = 0;
+					}
+										
+					wr_u32r_R_new(i, u32DestIdx + k, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+					u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32Status);
+					u32ri_MULFR[i][u32MULIdx] = u32Flag;
+
+					SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx + k, u32Result);
+					u32GenResultIdx++;
+
+				} // for (int k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_c32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_c32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_c32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32DestIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					// read MULCUTR
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+					
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status, u32MulIdx;
+		DSPU32 u32Result, u32GenResultIdx;
+		DSPU32 arrMUlsInput[4][4];
+		DSPU32 u32Temp; 
+		DSPI32 *pi32Temp;
+		DSP_BIT80 u80MACC;
+
+		pi32Temp = (DSPI32 *)&u32Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+
+				for (int k = 0; k < 4; k++)
+				{
+					arrMUlsInput[k][0] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					arrMUlsInput[k][0] = GSetBit(arrMUlsInput[k][0], 0);
+					arrMUlsInput[k][1]= m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					arrMUlsInput[k][2]= m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+					arrMUlsInput[k][3]= m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];      // MULCUTR
+				}
+				
+				u32Temp = arrMUlsInput[1][1];
+				*pi32Temp = (*pi32Temp) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				if ( arrMUlsInput[1][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}
+				else
+				{
+					MAC32(u32Temp, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}				
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[0][0], arrMUlsInput[0][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32Status);
+				u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx + 1, u32Result);
+				u32GenResultIdx++;
+				
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+1], u32Status);
+				u32ri_MULFR[i][u32MulIdx+1] = u32Flag;
+
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				MAC32(arrMUlsInput[2][1], arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[2][0], arrMUlsInput[2][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+2], u32Status);
+				u32ri_MULFR[i][u32MulIdx+2] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+							
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+3], u32Status);
+				u32ri_MULFR[i][u32MulIdx+3] = u32Flag;
+				
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32Result);
+				u32GenResultIdx++;
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	}	
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_c32_conj_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_c32_conj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_c32_conj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32DestIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+							
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status, u32MulIdx;
+		DSPU32 u32Result, u32GenResultIdx;
+		DSPU32 arrMUlsInput[4][4];
+		DSPU32 u32Temp;
+		DSPI32 *pi32Temp;
+		DSP_BIT80 u80MACC;
+
+		pi32Temp = (DSPI32 *)&u32Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++) // GRQ: number or MUL in one macro from 4 to 8 in BWDSP1042
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+
+				for (int k = 0; k < 4; k++)
+				{
+					arrMUlsInput[k][0] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					arrMUlsInput[k][0] = GSetBit(arrMUlsInput[k][0], 0);
+					arrMUlsInput[k][1] = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					arrMUlsInput[k][2] = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+					arrMUlsInput[k][3] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];      // MULCUTR
+				}
+
+				//MUL0
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				u32Status = 0;
+				MAC32(arrMUlsInput[1][1], arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[1][0], arrMUlsInput[1][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32Status);
+				u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				//MUL1
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+1], u32Status);
+				u32ri_MULFR[i][u32MulIdx+1] = u32Flag;
+				
+				//MUL2
+				u32Temp=arrMUlsInput[2][1];
+				*pi32Temp = (*pi32Temp) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				if ( arrMUlsInput[2][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(u32Temp, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}				
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[2][0], arrMUlsInput[2][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+2], u32Status);
+				u32ri_MULFR[i][u32MulIdx+2] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				//MUL3
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+3], u32Status);
+				u32ri_MULFR[i][u32MulIdx+3] = u32Flag;
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	}	
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_c32conj_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_c32conj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_c32conj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32DestIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+							
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status, u32MulIdx;
+		DSPU32 u32Result, u32GenResultIdx;
+		DSPU32 arrMUlsInput[4][4];
+		DSPU32 u32Temp0, u32Temp1;
+		DSPI32 *pi32Temp0, *pi32Temp1;
+		DSP_BIT80 u80MACC;
+
+		pi32Temp0 = (DSPI32 *)&u32Temp0;
+		pi32Temp1 = (DSPI32 *)&u32Temp1;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++) // GRQ: number or MUL in one macro from 4 to 8 in BWDSP1042
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+
+				for (int k = 0; k < 4; k++)
+				{
+					arrMUlsInput[k][0] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					arrMUlsInput[k][0] = GSetBit(arrMUlsInput[k][0], 0);
+					arrMUlsInput[k][1] = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					arrMUlsInput[k][2] = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+					arrMUlsInput[k][3] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];      // MULCUTR
+				}
+
+				//MUL0
+				u32Temp0 = arrMUlsInput[1][1];
+				*pi32Temp0 = (*pi32Temp0) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				if ( arrMUlsInput[1][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[1][1], arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+					MAC32(u32Temp0, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}				
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[0][0], arrMUlsInput[0][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32Status);
+				u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				//MUL1
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+1], u32Status);
+				u32ri_MULFR[i][u32MulIdx+1] = u32Flag;
+
+				//MUL2
+				u32Temp0 = arrMUlsInput[2][1];
+				*pi32Temp0 = (*pi32Temp0) * (-1);
+				u32Temp1 = arrMUlsInput[3][1];
+				*pi32Temp1 = (*pi32Temp1) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				if ( arrMUlsInput[2][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[2][1], arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(u32Temp0, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+
+				if ( arrMUlsInput[3][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(0x40000000, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(u32Temp1, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}				
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[2][0], arrMUlsInput[2][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+2], u32Status);
+				u32ri_MULFR[i][u32MulIdx+2] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				//MUL3
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+3], u32Status);
+				u32ri_MULFR[i][u32MulIdx+3] = u32Flag;
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	}	
+
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_cf32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_cf32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_cf32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u4Mode: 4;
+				DSPU32    	u2Rev0: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if (GIsBitSet(u32Units, i))
+			{
+				SetGenRegIdx(
+						u32SrcMIdx,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(
+						u32SrcMIdx + 1,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(
+						u32SrcNIdx,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(
+						u32SrcNIdx + 1,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+
+				SetGenRegIdx(
+						u32SrcMIdx,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(
+						u32SrcMIdx + 1,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(
+						u32SrcNIdx,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(
+						u32SrcNIdx + 1,
+						m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 3)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Flag, u32Status, u32SrcA, u32SrcB;
+		DSPU32 u32Result, u32GenResultIdx, u32MULCR, u32DestSel;
+		DSPU32 u32SrcMIdx, u32SrcNIdx;
+		DSPU32 u32MulIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+				{
+					u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], k + 1);
+					u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					u32MULCR = GSetBit(u32MULCR, 0);
+					u32SrcA= m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					u32SrcB= m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+
+					u32Status = 0;
+					u32Result = MulF32(u32SrcA, u32SrcB, &u32Status, u32MULCR);
+
+					if (k == 0)
+					{
+						u32DestSel = u32SrcMIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32DestSel = u32SrcNIdx + 1;
+					}
+					else if (k == 2)
+					{
+						u32DestSel = u32SrcNIdx;
+					}
+					else if (k == 3)
+					{
+						u32DestSel = u32SrcMIdx;
+					}
+
+					wr_u32r_R_new(i, u32DestSel, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+					u32Flag = SetMULCFlags(u32ri_MULFR[i][u32MulIdx], u32Status);
+					u32ri_MULFR[i][u32MulIdx] = u32Flag;
+
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_c32_dconj_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_c32_dconj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_c32_dconj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u4Mode: 4;
+				DSPU32    	u2Rev0: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Flag, u32Status, u32MulIdx;
+		DSPU32 u32Result, u32GenResultIdx;
+		DSPU32 u32SrcMIdx, u32SrcNIdx;
+		DSPU32 arrMUlsInput[4][4];
+		DSP_BIT80 u80MACC;
+		DSPU32 u32Temp; 
+		DSPI32 *pi32Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		
+		pi32Temp = (DSPI32 *)&u32Temp;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+
+				for (int k = 0; k < 4; k++)
+				{
+					arrMUlsInput[k][0] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					arrMUlsInput[k][0] = GSetBit(arrMUlsInput[k][0], 0);
+					arrMUlsInput[k][1] = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					arrMUlsInput[k][2] = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+					arrMUlsInput[k][3] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];      // MULCUTR
+				}
+
+				//MUL0
+				u32Temp = arrMUlsInput[1][1];
+				*pi32Temp = (*pi32Temp) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				if ( arrMUlsInput[1][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}
+				else
+				{
+					MAC32(u32Temp, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}				
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[0][0], arrMUlsInput[0][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32Status);
+				u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				wr_u32r_R_new(i, u32SrcMIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32SrcMIdx + 1, u32Result);
+				u32GenResultIdx++;
+
+				//MUL2
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+				MAC32(arrMUlsInput[2][1], arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[3][0], arrMUlsInput[3][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+2], u32Status);
+				u32ri_MULFR[i][u32MulIdx+2] = u32Flag;
+				wr_u32r_R_new(i, u32SrcMIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				//MUL1
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[1][1], arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[1][0], arrMUlsInput[1][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+1], u32Status);
+				u32ri_MULFR[i][u32MulIdx+1] = u32Flag;
+				wr_u32r_R_new(i, u32SrcNIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				
+
+				//MUL3
+				u32Temp = arrMUlsInput[3][1];
+				*pi32Temp = (*pi32Temp) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[2][1], arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				if ( arrMUlsInput[3][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(0x40000000, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				else
+				{
+					MAC32(u32Temp, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[2][0], arrMUlsInput[2][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+3], u32Status);
+				u32ri_MULFR[i][u32MulIdx+3] = u32Flag;
+				wr_u32r_R_new(i, u32SrcNIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);			
+			
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_conj_dconj_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_conj_dconj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_conj_dconj_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u4Mode: 4;
+				DSPU32    	u2Rev0: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Flag, u32Status, u32MulIdx;
+		DSPU32 u32Result, u32GenResultIdx;
+		DSPU32 u32SrcMIdx, u32SrcNIdx;
+		DSPU32 arrMUlsInput[4][4];
+		DSP_BIT80 u80MACC;
+		DSPU32 u32Temp0, u32Temp1;
+		DSPI32 *pi32Temp0, *pi32Temp1;
+		bool bolIsMacroInstr;
+		
+		pi32Temp0 = (DSPI32 *)&u32Temp0;
+		pi32Temp1 = (DSPI32 *)&u32Temp1;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+
+				for (int k = 0; k < 4; k++)
+				{
+					arrMUlsInput[k][0] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					arrMUlsInput[k][0] = GSetBit(arrMUlsInput[k][0], 0);
+					arrMUlsInput[k][1] = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					arrMUlsInput[k][2] = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+					arrMUlsInput[k][3] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];      // MULCUTR
+				}
+
+				//MUL0
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[1][1], arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[1][0], arrMUlsInput[1][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32Status);
+				u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				wr_u32r_R_new(i, u32SrcMIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				//MUL1
+				u32Temp0 = arrMUlsInput[1][1];
+				*pi32Temp0 = (*pi32Temp0) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				if ( arrMUlsInput[1][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+					MAC32(0x40000000, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[1][1], arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+					MAC32(u32Temp0, arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[0][0]);
+				}
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[0][0], arrMUlsInput[0][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+1], u32Status);
+				u32ri_MULFR[i][u32MulIdx+1] = u32Flag;
+				wr_u32r_R_new(i, u32SrcNIdx + 1, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+
+				//MUL2
+				u32Temp0 = arrMUlsInput[2][1];
+				*pi32Temp0 = (*pi32Temp0) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+				if ( arrMUlsInput[2][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[2][1], arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+					MAC32(u32Temp0, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[3][0]);
+				}			
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[3][0], arrMUlsInput[3][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+2], u32Status);
+				u32ri_MULFR[i][u32MulIdx+2] = u32Flag;
+				wr_u32r_R_new(i, u32SrcMIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				
+				//MUL3
+				u32Temp0 = arrMUlsInput[2][1];
+				*pi32Temp0 = (*pi32Temp0) * (-1);
+				u32Temp1 = arrMUlsInput[3][1];
+				*pi32Temp1 = (*pi32Temp1) * (-1);
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				if ( arrMUlsInput[2][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(0x40000000, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[2][1], arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(u32Temp0, arrMUlsInput[2][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				if ( arrMUlsInput[3][1] == 0x80000000 )
+				{
+					MAC32(0x40000000, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(0x40000000, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				else
+				{
+					//MAC32(arrMUlsInput[3][1], arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+					MAC32(u32Temp1, arrMUlsInput[3][2], &u80MACC, &u32Status, arrMUlsInput[2][0]);
+				}
+				u32Status = 0;
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[2][0], arrMUlsInput[2][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+3], u32Status);
+				u32ri_MULFR[i][u32MulIdx+3] = u32Flag;
+				wr_u32r_R_new(i, u32SrcNIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+			
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::macc_c32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("macc_c32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("macc_c32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32Units,u32Mode,MulIdx;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u4Mode: 4;
+				DSPU32    	u2Rev0: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		if(u32Mode == 9 || u32Mode == 11)
+		{
+			MulIdx = 4;
+		}
+		else
+		{
+			MulIdx = 0;
+		}
+		SetCalcResIdx(MulIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+1, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+2, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+3, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		//m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx + 1);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx + 2);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx + 3);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+		
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32Status, u32SrcA, u32SrcB;
+		DSPU32 u32MULCR, u32Mode, u32MulIdx;
+		DSPU32 u32SrcMIdx, u32SrcNIdx;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128  xu128Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+				{
+					u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], k+1);
+
+					u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					u32MULCR = GSetBit(u32MULCR, 0);
+					u32SrcA= m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					u32SrcB= m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+
+					xu128Temp = ReadMACC(i, u32MulIdx);
+
+					if (u32Mode == 8 || u32Mode == 9) // QMACC+=CRm+1:m*CRn+1:n
+					{
+						u80MACC = BIT128ToBIT80(xu128Temp);
+					}
+					else if (u32Mode == 10 || u32Mode == 11) // QMACC=CRm+1:m*CRn+1:n
+					{
+						u80MACC.u64Low = 0;
+						u80MACC.u16High = 0;
+					}
+					
+					u32Status = 0;	
+					MAC32(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+					u32r_MULFR_EX[i][u32MulIdx] = u32Status;
+					BIT80ToBIT128(u80MACC, xu128Temp);  // GRQ
+					WriteMACC(i, u32MulIdx, xu128Temp);
+				}
+
+			} //if ( GIsBitSet(u32Units, i) )
+		} //for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Flag,u32MulIdx;
+		
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+				{
+					u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], k+1);
+
+					u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32r_MULFR_EX[i][u32MulIdx]);
+					u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+		
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::macc_is_zero_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("macc_is_zero_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("macc_is_zero_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32MULs;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+				DSPU32      u4Mode: 4;
+				DSPU32      u4Rev0: 4;
+				DSPU32      u8M: 8;
+				DSPU32      u2Rev1: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u8M;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 3; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32MULs = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		m_arrDCResNeeded[p_u32Slot].u8MULs = u32MULs;           // GRQ: 4 MULs --> 8 MULs
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MaskTemp |= u32MULs << (i*8);
+			}
+		}
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32MULs, u32Mode;
+		DSP_BIT128 xu128Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32MULs = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		xu128Temp.u32HH=0;
+		xu128Temp.u32HL=0;
+		xu128Temp.u32LH=0;
+		xu128Temp.u32LL=0;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < MUL_NUM_OF_UNIT; k++)
+				{
+					if ( GIsBitSet(u32MULs, k) )
+					{
+						if(u32Mode==0)
+						{
+							WriteMACC(i, k, xu128Temp);
+						}
+					}
+				}
+
+			} //if ( GIsBitSet(u32Units, i) )
+		} //for (i = 0; i < NUM_OF_UNITS; i++)
+		
+	}
+
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32MULs, u32Flag, u32Mode;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32MULs = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < MUL_NUM_OF_UNIT; k++)
+				{
+					if ( GIsBitSet(u32MULs, k) )
+					{
+						if(u32Mode==0)
+						{
+							u32Flag = SetMULFlags(u32ri_MULFR[ i ][ k ], 0);
+							u32ri_MULFR[ i ][ k ] = u32Flag;
+						}
+						else // u32Mode == 1
+						{
+							u32Flag = 0;
+							u32ri_MULFR[ i ][ k ] = u32Flag;
+						}
+					}
+				}
+
+			} //if ( GIsBitSet(u32Units, i) )
+
+		} //for (i = 0; i < NUM_OF_UNITS; i++)
+		
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::like_mulacc_32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("like_mulacc_32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("like_mulacc_32_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32MULIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u6SrcN: 6;
+		    	DSPU32    	u6SrcM: 6;
+				DSPU32      u1Signed: 1;
+				DSPU32    	u2Mode: 2;
+				DSPU32    	u3MulIdx: 3;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u1Signed;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u2Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[5] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 6; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[5];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);  // GRQ
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + u32MULIdx);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+				{
+					// data forward to get the value of R[u32SrcMIdx] of current macro
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+				}
+				else
+				{
+					// read the value of R[u32SrcMIdx] from register heap directly
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+				// get the value of R[u32SrcNIdx] of current macro
+				// data forward or directly
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdx) )
+				{
+					m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = u32Result;
+				}
+				else
+				{
+					m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = rd_u32r_R_new(i, u32SrcNIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32MULIdx, u32Status, u32MULCR;
+		DSPU32 u32SrcA, u32SrcB, u32Sign, u32Mode;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128  xu128Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Sign = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+				u32SrcB = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0];
+				u32Status = 0;
+
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+
+				xu128Temp = ReadMACC(i, u32MULIdx);
+				
+				if (u32Sign == 1)
+				{
+					u32MULCR = GSetBit(u32MULCR, 0);
+				}
+				
+				if (p_u32Opcode == op_like_mulacc_32_c)
+				{
+					
+					if (u32Mode == 0) // MACCs=Rm*Rn(U)
+					{
+						MAC32(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else if (u32Mode == 1) // MACCs+=Rm*Rn(U)
+					{
+						u80MACC = BIT128ToBIT80(xu128Temp);
+						MAC32(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else if (u32Mode == 2) // MACCs-=Rm*Rn(U)
+					{
+						u80MACC = BIT128ToBIT80(xu128Temp);
+						MACNeg32(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else if(u32Mode == 3) //OMACCs=ORm*LHRn(U),OMACCs=ORm*LHRn
+					{
+						xu128Temp.u32HH=0;
+						xu128Temp.u32HL=0;
+						xu128Temp.u32LH=0;
+						xu128Temp.u32LL=0;
+						MACD8Mult16(xu128Temp, u32SrcA, u32SrcB, u32MULCR, &u32Status,false);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+				}
+				else if (p_u32Opcode == op_like_mulacc_16_c)
+				{
+					if(u32Mode == 0)  //OMACC=ORm*HHRn(U), OMACC=ORm*HHRn
+					{
+						xu128Temp.u32HH=0;
+						xu128Temp.u32HL=0;
+						xu128Temp.u32LH=0;
+						xu128Temp.u32LL=0;
+						MACD8Mult16(xu128Temp, u32SrcA, u32SrcB, u32MULCR, &u32Status, true);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else if (u32Mode == 1) // HMACCs=HRm*HRn(U)
+					{
+						MACD16(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else if (u32Mode == 2) // HMACCs+=HRm*HRn(U)
+					{
+						u80MACC = BIT128ToBIT80(xu128Temp);
+						MACD16(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else if (u32Mode == 3) // HMACCs-=HRm*HRn(U)
+					{
+						u80MACC = BIT128ToBIT80(xu128Temp);
+						MACNegD16(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+				}
+				else if(p_u32Opcode == op_mul_c8_16_c)
+				{
+					if (u32Mode == 0) //OMACC+=ORm*HHRn(U),OMACC+=ORm*HHRn
+					{
+						MACD8Mult16(xu128Temp, u32SrcA, u32SrcB, u32MULCR, &u32Status, false);
+					}
+					else if (u32Mode == 1) //OMACC+=ORm*LHRn(U),OMACC+=ORm*LHRn
+					{
+						MACD8Mult16(xu128Temp, u32SrcA, u32SrcB, u32MULCR, &u32Status, true);
+					}
+					else if (u32Mode == 2) //COMACC=CORm*CHRn
+					{	
+						xu128Temp.u32HH=0;
+						xu128Temp.u32HL=0;
+						xu128Temp.u32LH=0;
+						xu128Temp.u32LL=0;
+						MACDC8MultC16(xu128Temp,u32SrcA, u32SrcB, u32MULCR, &u32Status);
+					}
+					else  //u32Mode == 3
+					{
+						DSP_BIT40 u40AMACC;
+						u40AMACC.u32Low = 0;
+						u40AMACC.u8High = 0;
+						u32MULCR = GSetBit(u32MULCR, 0);
+						AMACCF32(u32SrcA,u32SrcB,&u40AMACC,&u32Status,u32MULCR);
+						xu128Temp.u32LL = u40AMACC.u32Low;
+						xu128Temp.u32HL = (xu128Temp.u32HL & 0xffffff00) | u40AMACC.u8High;
+					}
+
+					WriteMACC(i, u32MULIdx, xu128Temp);
+				}
+
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;				
+			}
+		}
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{				
+		DSPU32 u32Units, u32MULIdx, u32Flag;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+
+			}
+		}
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::mulacc_8_etc_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mulacc_8_etc_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mulacc_8_etc_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32MULIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u6SrcN: 6;
+		    	DSPU32    	u6SrcM: 6;
+				DSPU32    	u3Mode: 3;
+				DSPU32    	u3MulIdx: 3;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u3Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 5; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);  // GRQ
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + u32MULIdx);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+				{
+					// data forward to get the value of R[u32SrcMIdx] of current macro
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+				}
+				else
+				{
+					// read the value of R[u32SrcMIdx] from register heap directly
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+				// get the value of R[u32SrcNIdx] of current macro
+				// data forward or directly
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdx) )
+				{
+					m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = u32Result;
+				}
+				else
+				{
+					m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = rd_u32r_R_new(i, u32SrcNIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32MULIdx, u32Status, u32MULCR;
+		DSPU32 u32SrcA, u32SrcB, u32Mode;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128  xu128Temp;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+				u32SrcB = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0];
+				u32Status = 0;
+
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+
+				xu128Temp = ReadMACC(i, u32MULIdx);	
+				
+				if (p_u32Opcode == op_mulacc_8_etc_c)
+				{
+					if (u32Mode == 0) // OMACCs=ORm*ORn(U)
+					{
+						xu128Temp.u32LL=0;
+						xu128Temp.u32LH=0;
+						xu128Temp.u32HH=0;
+						xu128Temp.u32HL=0;
+						MACQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, true);
+					}
+					else if (u32Mode == 2) // OMACCs+=ORm*ORn(U)
+					{
+						MACQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, true);
+					}
+					else if (u32Mode == 4) // OMACCs-=ORm*ORn(U)
+					{
+						MACQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, false);
+					}
+					else if(u32Mode == 6) //COMACC+=CORm*CHRn
+					{
+						MACDC8MultC16(xu128Temp, u32SrcA, u32SrcB, u32MULCR, &u32Status);
+					}
+					else if (u32Mode == 1) // LLOMACCs=sigma(ORm*ORn(U))
+					{
+						MACSigmaQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, 0);
+					}
+					else if (u32Mode == 3) // HLOMACCs=sigma(ORm*ORn(U))
+					{
+						MACSigmaQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, 1);
+					}
+					else if (u32Mode == 5) // LLOMACCs+=sigma(ORm*ORn(U))
+					{
+						MACSigmaQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, 2);
+					}
+					else if (u32Mode == 7) // HLOMACCs+=sigma(ORm*ORn(U))
+					{
+						MACSigmaQ8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR, 3);
+					}
+
+					WriteMACC(i, u32MULIdx, xu128Temp);
+				}
+				else if (p_u32Opcode == op_macc_c16_etc_c)
+				{
+					u32MULCR = GSetBit(u32MULCR, 0);
+					if (u32Mode == 0) // CHMACCs=CHRm*CHRn
+					{
+						MACC16(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+					}
+					else if (u32Mode == 2) // CHMACCs+=CHRm*CHRn
+					{
+						u80MACC = BIT128ToBIT80(xu128Temp);
+						MACC16(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR);
+					}
+					else if (u32Mode == 1) // CHMACCs=CHRm*LLORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 0);
+					}
+					else if (u32Mode == 3) // CHMACCs=CHRm*HLORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 1);
+					}
+					else if (u32Mode == 5) // CHMACCs=CHRm*LHORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 2);
+					}
+					else if (u32Mode == 7) // CHMACCs=CHRm*HHORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 3);
+					}
+					else if(u32Mode == 4) //COMACCs=CORm*CORn
+					{
+						xu128Temp.u32LL=0;
+						xu128Temp.u32LH=0;
+						xu128Temp.u32HH=0;
+						xu128Temp.u32HL=0;
+						MACC8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR);
+					}
+					else if(u32Mode == 6) //COMACCs+=CORm*CORn
+					{
+						MACC8(u32SrcA, u32SrcB, &xu128Temp, &u32Status, u32MULCR);
+					}
+
+					if(u32Mode == 4 || u32Mode == 6)
+					{
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+					else
+					{
+						BIT80ToBIT128(u80MACC,xu128Temp);
+						WriteMACC(i, u32MULIdx, xu128Temp);
+					}
+				}
+				else if (p_u32Opcode == op_mac_c16_m_fix8_c)
+				{
+					u32MULCR = GSetBit(u32MULCR, 0);
+					u80MACC = BIT128ToBIT80(xu128Temp);
+					if (u32Mode == 0) // CHMACCs+=CHRm*LLORn
+					{						
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 0);
+					}
+					else if (u32Mode == 2) // CHMACCs+=CHRm*HLORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 1);
+					}
+					else if (u32Mode == 4) // CHMACCs+=CHRm*LHORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 2);
+					}
+					else if (u32Mode == 6) // CHMACCs+=CHRm*HHORn
+					{
+						MACC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 3);
+					}
+					else if (u32Mode == 1) // CHMACCs-=CHRm*LLORn
+					{
+						MACNegC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 0);
+					}
+					else if (u32Mode == 3) // CHMACCs-=CHRm*HLORn
+					{
+						MACNegC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 1);
+					}
+					else if (u32Mode == 5) // CHMACCs-=CHRm*LHORn
+					{
+						MACNegC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 2);
+					}
+					else if (u32Mode == 7) // CHMACCs-=CHRm*HHORn
+					{
+						MACNegC16MFix8(u32SrcA, u32SrcB, &u80MACC, &u32Status, u32MULCR, 3);
+					}
+					BIT80ToBIT128(u80MACC,xu128Temp);
+					WriteMACC(i, u32MULIdx, xu128Temp);
+				}
+
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;				
+			}
+		}
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{				
+		DSPU32 u32Units, u32MULIdx, u32Flag;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+
+			}
+		}
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::like_square_32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("like_square_32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("like_square_32_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32DestIdx;
+		union INSTR_WORD
+			{
+				DSPU32  u32Value;
+		    	struct  SPLIT_VALUE
+		    	{
+		    		DSPU32    	u6SrcN: 6;
+			    	DSPU32    	u6SrcM: 6;
+					DSPU32    	u6Dest: 6;
+					DSPU32    	u8Opcode: 8;
+					DSPU32      u1MultiWord: 1;
+					DSPU32      u4Units: 4;
+		 		   	DSPU32      u1Line: 1;
+				} details;
+			} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;  // GRQ
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		m_arrDCResNeeded[p_u32Slot].bolGrp2MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{				
+				// log info necessary for data forward of general purpose register.
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 2; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k] = u32r_MULCUTR[i];
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcMIdx;
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcNIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}			
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+							
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{				
+		DSPU32 u32Units, u32DestIdx, u32Flag, u32Status;
+		DSPU32 u32Result, u32GenResultIdx;
+		DSPU32 u32MULIdx1, u32MULIdx2;
+		DSP_BIT80 u80MACC;
+		DSPU32 arrMUlsInput[2][4];
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx1 = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULIdx2 = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 2);
+				
+				for (int k = 0; k < 2; k++)
+				{
+					arrMUlsInput[k][0] = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					if (p_u32Opcode == op_square_32_c)
+					{
+						arrMUlsInput[k][0] = GSetBit(arrMUlsInput[k][0], 0);
+					}
+					else if (p_u32Opcode == op_square_32_u_c)
+					{
+						arrMUlsInput[k][0] = GClrBit(arrMUlsInput[k][0], 0);
+					}
+
+					arrMUlsInput[k][1]= m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					arrMUlsInput[k][2]= m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+					arrMUlsInput[k][3]= m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][k];      // MULCUTR
+				}
+
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+				u32Status = 0;
+				MAC32(arrMUlsInput[0][1], arrMUlsInput[0][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				MAC32(arrMUlsInput[1][1], arrMUlsInput[1][2], &u80MACC, &u32Status, arrMUlsInput[1][0]);
+				u32Result = MACCTo32(u80MACC, &u32Status, arrMUlsInput[1][0], arrMUlsInput[1][3], 0, false);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx1], u32Status);
+				u32ri_MULFR[i][u32MULIdx1] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				u32Status = 0;
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx2], u32Status);
+				u32ri_MULFR[i][u32MULIdx2] = u32Flag;
+
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32Result);
+				u32GenResultIdx++;
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)		
+
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::reg_is_macc_etc_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("reg_is_macc_etc_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("reg_is_macc_etc_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32DestIdx, u32MULIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u3MulIdx: 3;
+				DSPU32    	u6CutPos: 6;
+				DSPU32    	u3Mode: 3;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6CutPos;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u3Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 5; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+			}
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32Mode, u32Status, u32MULCR, u32MULIdx;
+		DSPI32 intCutPos, intCusPosTemp;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128 xu128Temp;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		intCutPos = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];  // GRQ: u32 to i32
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];		
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];		
+
+				xu128Temp = ReadMACC(i, u32MULIdx);
+				u80MACC = BIT128ToBIT80(xu128Temp);
+				u32Status = 0;
+				if (p_u32Opcode == op_reg_is_macc_etc_c)
+				{
+					if ((u32Mode == 0) || (u32Mode == 2) || (u32Mode == 4))
+					{
+						//u32MULCR = GClrBit(u32MULCR, 0);
+					}
+					else
+					{
+						u32MULCR = GSetBit(u32MULCR, 0);
+					}
+
+					if(u32Mode>1)
+					{
+						//截位由6位改为5位
+						intCutPos = intCutPos & 0x1F; 
+					}
+
+					switch (u32Mode)
+	        		{
+						case 0: // Rs=MACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = MACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, intCutPos, true);
+    	               		break;
+						case 1: // Rs=MACCn(cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = MACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, intCutPos, true);
+    	               		break;
+						case 2: // HRs=HMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = MACCToD16(u80MACC, &u32Status, u32MULCR, u32MULCUTR, intCutPos, true);
+    	               		break;
+						case 3: // HRs=HMACCn(cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = MACCToD16(u80MACC, &u32Status, u32MULCR, u32MULCUTR, intCutPos, true);
+    	               		break;
+						case 4: // ORs=OMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = MACCToQ8(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, intCutPos, true);
+    	               		break;
+						case 5: // ORs=OMACCn(cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = MACCToQ8(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, intCutPos, true);
+    	               		break;
+					}
+				}
+				else if (p_u32Opcode == op_omacc_to_32_etc_c)
+				{
+					if( ((intCutPos>>5) & 0x1) == 1)
+					{
+						u32MULCR = GSetBit(u32MULCR, 0);
+					}
+					//截位由6位改为5位，最高位用于符号位
+					intCusPosTemp = intCutPos & 0x1F; 
+					switch (u32Mode)
+	        		{
+						case 0: // HRs=LOMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = OMACCToD16(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, false, intCusPosTemp, true);
+    	               		break;
+						case 1: // HRs=HOMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = OMACCToD16(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, true, intCusPosTemp, true);
+    	               		break;
+						case 2: // Rs=LLOMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 0, intCusPosTemp, true);
+    	               		break;
+						case 3: // Rs=HLOMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 1, intCusPosTemp, true);
+    	               		break;
+						case 4: // Rs=LHOMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 2, intCusPosTemp, true);
+    	               		break;
+						case 5: // Rs=HHOMACCn(U,cut=C)
+							u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 3, intCusPosTemp, true);
+    	               		break;
+					} // switch					
+
+				} // if (p_u32Opcode == op_reg_is_macc_etc_c)
+
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;
+			}
+		}
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32GenResultIdx, u32MULIdx, u32Flag, u32DestIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32r_MULA_EX[i][u32MULIdx], PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				// attention SetWBGenRegInfo()
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32r_MULA_EX[i][u32MULIdx]);
+				u32GenResultIdx++;
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < 4; i++)
+
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::hmacc_to_32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("hmacc_to_32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("hmacc_to_32_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32DestIdx, u32MULIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u3MulIdx: 3;
+				DSPU32    	u6CutPos: 6;
+				DSPU32		u1Rev: 1;
+				DSPU32    	u2Mode: 2;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6CutPos;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u2Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 5; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+			}
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32Mode, u32Status, u32MULCR, u32MULIdx;
+		DSPI32 intCutPos;
+		DSP_BIT80 u80MACC;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		intCutPos = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];  // GRQ: u32 to i32
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];
+
+				u80MACC = BIT128ToBIT80(ReadMACC(i, u32MULIdx));
+				u32Status = 0;
+				switch (u32Mode)
+        		{
+				
+					case 0: // Rs=LHMACCn(cut=C)
+						u32MULCR = GSetBit(u32MULCR, 0);
+						u32r_MULA_EX[i][u32MULIdx] = HMACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, false, intCutPos, true);
+   	               		break;
+					case 1: // Rs=HHMACCn(cut=C)
+						u32MULCR = GSetBit(u32MULCR, 0);
+						u32r_MULA_EX[i][u32MULIdx] = HMACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, true, intCutPos, true);
+   	               		break;
+					case 2: // Rs=LHMACCn(U,cut=C)
+						u32r_MULA_EX[i][u32MULIdx] = HMACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, false, intCutPos, true);
+   	               		break;
+					case 3: // Rs=HHMACCn(U,cut=C)
+						u32r_MULA_EX[i][u32MULIdx] = HMACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, true, intCutPos, true);
+   	               		break;
+				}
+				
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;
+			}
+		}
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32GenResultIdx, u32MULIdx, u32Flag, u32DestIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32r_MULA_EX[i][u32MULIdx], PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				// attention SetWBGenRegInfo()
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32r_MULA_EX[i][u32MULIdx]);
+				u32GenResultIdx++;
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < 4; i++)
+
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------------------------
+bool sc_iss::readmacc_to_reg_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("readmacc_to_reg_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("readmacc_to_reg_cores: parameter is invalid\n");
+		return false;
+	}	
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32DestIdx, u32MULIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u3MulIdx: 3;
+    			DSPU32      u1Sign: 1;
+    			DSPU32     u1Rev0: 1;
+    			DSPU32    	u4Mode: 4;
+    			DSPU32     u1Rev1: 1;
+    			DSPU32     u2Rev2: 2;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u1Sign;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 5; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// read MULCR and carry the value to next phase.
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);	
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];	
+
+			}
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32Mode, u32Status, u32MULCR, u32MULIdx, u32Sign;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128 xu128Temp;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Sign = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];  // GRQ: u32 to i32
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];	
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];	
+
+				if(u32Sign)
+				{
+					u32MULCR = GSetBit(u32MULCR, 0);
+				}
+				xu128Temp = ReadMACC(i, u32MULIdx);
+				u80MACC = BIT128ToBIT80(xu128Temp);
+				u32Status = 0;
+				switch (u32Mode)
+        		{
+					case 0: // Rs=MACCn(U), Rs=MACCn						
+						u32r_MULA_EX[i][u32MULIdx] = MACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, 0, false);
+   	               		break;
+					case 1: //HRs=HMACCn(U), HRs=HMACCn
+						u32r_MULA_EX[i][u32MULIdx] = MACCToD16(u80MACC, &u32Status, u32MULCR, u32MULCUTR, 0, false);
+   	               		break;
+					case 2: //ORs=OMACCn(U), ORs=OMACCn 
+						u32r_MULA_EX[i][u32MULIdx] = MACCToQ8(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 0, false);
+   	               		break;
+					case 3: // Rs=LHMACCn, Rs=LHMACCn(U)
+						u32r_MULA_EX[i][u32MULIdx] = HMACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, false, 0, false);
+   	               		break;
+   	               	case 4: //Rs=HHMACCn, Rs=HHMACCn(U)
+   	               		u32r_MULA_EX[i][u32MULIdx] = HMACCTo32(u80MACC, &u32Status, u32MULCR, u32MULCUTR, true, 0, false);
+   	               		break;
+   	               	case 5: //HRs=LOMACCn(U),HRs=LOMACCn
+   	               		u32r_MULA_EX[i][u32MULIdx] = OMACCToD16(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, false, 0, false);
+   	               		break;
+   	               	case 6: //HRs=HOMACCn(U),HRs=HOMACCn
+   	               		u32r_MULA_EX[i][u32MULIdx] = OMACCToD16(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, true, 0, false);
+   	               		break;
+   	               	case 7: //Rs=LLOMACCn(U),Rs=LLOMACCn
+   	               		u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 0, 0, false);
+   	               		break;
+   	               	case 8: //Rs=HLOMACCn(U),Rs=HLOMACCn
+   	               		u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 1, 0, false);
+   	               		break;
+   	               	case 9: //Rs=LHOMACCn(U),Rs=LHOMACCn
+   	               		u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 2, 0, false);
+   	               		break;
+   	               	case 10: //Rs=HHOMACCn(U),Rs=HHOMACCn
+   	               		u32r_MULA_EX[i][u32MULIdx] = OMACCTo32(xu128Temp, &u32Status, u32MULCR, u32MULCUTR, 3, 0, false);
+						break;
+				}
+				
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;
+			}
+		}
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32GenResultIdx, u32MULIdx, u32Flag, u32DestIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+				u32ri_MULFR[i][u32MULIdx] = u32Flag;
+				wr_u32r_R_new(i, u32DestIdx, u32r_MULA_EX[i][u32MULIdx], PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+				// attention SetWBGenRegInfo()
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32r_MULA_EX[i][u32MULIdx]);
+				u32GenResultIdx++;
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < 4; i++)
+
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::mac_is_reg_etc_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{    
+    if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+    {
+        PrintToCerr("mac_is_reg_etc_cores: parameter is invalid\n");
+        return false;
+    }
+
+    if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+    {
+        PrintToCerr("mac_is_reg_etc_cores: parameter is invalid\n");
+        return false;
+    }
+   
+    if (p_u32Phase == PHASE_DC2)
+    {
+        DSPU32 u32SrcMIdx, u32MulIdx, u32Units, u32Is64b;
+    
+        union INSTR_WORD
+        {
+            DSPU32 u32Value;
+            struct  SPLIT_VALUE
+            {
+                DSPU32      u6ImmC: 6;
+                DSPU32      u6SrcM: 6;
+                DSPU32      u1Is64b: 1;
+                DSPU32      u2Mode: 2;
+                DSPU32      u3MulIdx: 3;
+                DSPU32      u8Opcode: 8;
+                DSPU32      u1MultiWord: 1;
+                DSPU32      u4Units: 4;
+                DSPU32      u1Line: 1;
+            } details;
+        } instr_word;
+    
+        // Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+        if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+        {
+            // fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+            instr_word.u32Value = p_u32InstrWord;
+            g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;         
+            g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6ImmC;
+            g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+            g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u1Is64b;
+            g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u2Mode;
+            g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u3MulIdx;
+            g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[5] = instr_word.details.u4Units;
+        }
+
+        // read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+        for (int i = 0; i < 6; i++)
+        {
+            m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+        }
+
+        // use variable below is more readable
+        u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+        u32Is64b = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+        u32MulIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+        u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[5];
+                
+        m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+        SetCalcResIdx(u32MulIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+        m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		DSPU32 u32MaskTemp = 0U;
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+                if (u32Is64b == 1)
+                {
+                    SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+                }
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + u32MulIdx);
+            }
+        }
+
+        // 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+    }
+
+    else if (p_u32Phase == PHASE_AC_POST)
+    {
+        DSPU32 u32SrcMIdx, u32Units, u32Result, u32Is64b;
+    
+        u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		u32Is64b = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+    
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                // read MULCR and carry the value to next phase.
+                m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+                m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+                if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+                {
+                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+                }
+                else
+                {
+                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+                }
+                
+                if (u32Is64b == 1)
+                {
+                    if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx + 1) )
+                    {
+                        m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = u32Result;
+                    }
+                    else
+                    {
+                        m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0] = rd_u32r_R_new(i, u32SrcMIdx + 1, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+                    }
+                }
+
+            } // if ( GIsBitSet(u32Units, i) )
+        } // for (i = 0; i < NUM_OF_UNITS; i++)
+    }
+    else if (p_u32Phase == PHASE_EX)
+    {
+        DSPU32 u32ImmC, u32Is64b, u32Mode, u32Units, u32MULCR, u32Status;
+        DSPU32 u32SrcA, u32SrcB, u32MULIdx;
+        DSP_BIT64 u64Src;
+        DSP_BIT80 b80Temp;
+        DSP_BIT128 xu128Temp;
+        DSPU32 u32MULCUTR;
+    
+        u32ImmC = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+        u32Is64b = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+        u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+        
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+                u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+                u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];
+                u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+                u32SrcB = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0];
+
+                xu128Temp = ReadMACC(i, u32MULIdx);
+				u32Status = 0;
+
+                if(u32Mode==3)
+                {
+                	if (u32Is64b == 0) //HOMACCs=Rm(C,p)
+                	{
+                		LoadHOMACC(xu128Temp, u32SrcA, 0, u32MULCR, u32MULCUTR, &u32Status, u32ImmC, true, true);
+                	}
+                	else  //HOMACCs=Rm+1:m(C,p)
+                	{
+                		LoadHOMACC(xu128Temp, u32SrcA, u32SrcB, u32MULCR, u32MULCUTR, &u32Status, u32ImmC, false, true);
+                	}
+                	WriteMACC(i, u32MULIdx, xu128Temp);
+                }
+                else
+                {
+                	if (u32Is64b == 0)  // MACC = Rm
+	                {
+						b80Temp = BIT128ToBIT80(xu128Temp);
+	                    LoadMACC32(b80Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32ImmC, u32Mode, true);
+	                	BIT80ToBIT128(b80Temp, xu128Temp);
+	                    WriteMACC(i, u32MULIdx, xu128Temp);
+	                }
+	                else // MACC = Rm+1:m
+	                {
+	                    u64Src.u32Low = u32SrcA;
+	                    u64Src.u32High = u32SrcB;
+						b80Temp = BIT128ToBIT80(xu128Temp);
+	                    LoadMACC64(b80Temp, u64Src, &u32Status, u32MULCR, u32MULCUTR, u32ImmC, u32Mode, true);
+						
+	                    BIT80ToBIT128(b80Temp, xu128Temp);
+	                    WriteMACC(i, u32MULIdx, xu128Temp);
+	                }
+                }
+                u32r_MULFR_EX[i][u32MULIdx] = u32Status;
+
+            } //if ( GIsBitSet(u32Units, i) )
+        } //for (i = 0; i < NUM_OF_UNITS; i++)
+    }
+    else if (p_u32Phase == PHASE_WB)
+    {
+        DSPU32 u32Units, u32MULIdx, u32Flag;
+    
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+        
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+                u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+                u32ri_MULFR[i][u32MULIdx] = u32Flag;
+
+            } // if ( GIsBitSet(u32Units, i) )
+        } // for (i = 0; i < 4; i++)
+    } // else if (p_u32Phase == PHASE_WB)
+
+    return true;
+}
+
+//
+//-----------------------------------------------------------------------------------
+bool sc_iss::hmacc_is_reg_etc_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{    
+    if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+    {
+        PrintToCerr("hmacc_is_reg_etc_cores: parameter is invalid\n");
+        return false;
+    }
+
+    if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+    {
+        PrintToCerr("hmacc_is_reg_etc_cores: parameter is invalid\n");
+        return false;
+    }
+	
+	if(p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx,  u32MULIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u5ImmC: 5;
+				DSPU32		u1Rev0: 1;
+		    	DSPU32    	u6SrcM: 6;
+				DSPU32		u1Rev: 1;
+				DSPU32    	u2Mode: 2;
+				DSPU32    	u3MulIdx: 3;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u5ImmC;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u1Rev;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u2Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[5] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 6; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[5];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);  // GRQ
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + u32MULIdx);
+			}
+		}
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+		
+	}
+	else if(p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32SrcMIdx, u32Units, u32Result;
+    
+        u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+    
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                // read MULCR and carry the value to next phase.
+                m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+                m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+                if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+                {
+                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+                }
+                else
+                {
+                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+                }
+            } // if ( GIsBitSet(u32Units, i) )
+        } // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if(p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32MULIdx, u32Status, u32MULCR;
+		DSPU32 u32SrcA, u32Imm, u32Mode, u1Rev;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128  xu128Temp;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Imm = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u1Rev = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+				u32Status = 0;
+
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+
+				xu128Temp = ReadMACC(i, u32MULIdx);
+
+
+				if(u1Rev==0 && u32Mode==0) //HMACCs=DRm(c, z)
+				{
+					LoadMACCD32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, true);
+				}
+				else if(u1Rev==0 && u32Mode==1) //HMACCs=DRm(c, s)
+				{
+					LoadMACCD32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, true);
+				}
+				else if(u1Rev==0 && u32Mode==2) //HMACCs=DRm(c, p)
+				{
+					u80MACC = BIT128ToBIT80(xu128Temp);
+					LoadMACCD32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, true);
+				}
+				else if(u1Rev==1 && u32Mode==0) //HMACCs=HRm(c, z)
+				{
+					LoadMACCD16(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, true);
+				}
+				else if(u1Rev==1 && u32Mode==1) //HMACCs=HRm(c, s)
+				{
+					LoadMACCD16(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, true);
+				}
+				else if(u1Rev==1 && u32Mode==2) //HMACCs=HRm(c, p)
+				{
+					u80MACC = BIT128ToBIT80(xu128Temp);
+					LoadMACCD16(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, true);
+				}
+				
+				
+				BIT80ToBIT128(u80MACC, xu128Temp);
+				WriteMACC(i, u32MULIdx, xu128Temp);
+                
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;	
+			}//end if
+		}//end for
+	}
+	else if(p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32MULIdx, u32Flag;
+    
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+        
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+                u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+                u32ri_MULFR[i][u32MULIdx] = u32Flag;
+            } // if ( GIsBitSet(u32Units, i) )
+        } // for (i = 0; i < 4; i++)
+	}
+	return true;
+}
+
+
+//add by zhaoxiang 2013-09-24-----------------------------------------------------------------------------------
+bool sc_iss::writemacc_etc_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{    
+    if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+    {
+        PrintToCerr("writemacc_etc_cores: parameter is invalid\n");
+        return false;
+    }
+
+    if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+    {
+        PrintToCerr("writemacc_etc_cores: parameter is invalid\n");
+        return false;
+    }
+	
+	if(p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx,  u32MULIdx, u32Flag, u32Mode;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+    		{
+    			DSPU32    	u5Num0: 5;
+    			DSPU32     u1Rev0: 1;
+		    	DSPU32    	u6SrcM: 6;
+				DSPU32		u1Flag: 1;
+				DSPU32    	u2Num1: 2;
+				DSPU32    	u3MulIdx: 3;
+				DSPU32    	u8Opcode: 8;
+				DSPU32   	u1MultiWord: 1;
+				DSPU32   	u4Units: 4;
+ 			   	DSPU32   	u1Line: 1;
+			} details;
+		} instr_word;
+		
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;			
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u5Num0;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u1Flag;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u2Num1;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[4] = instr_word.details.u3MulIdx;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[5] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 6; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32MULIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[4];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[5];
+		u32Flag = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		SetCalcResIdx(u32MULIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);  // GRQ
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				//MACCs=Rm+1:m(z), MACCs=Rm+1:m(s), MACCs=Rm+1:m(p),HOMACCs=Rm+1:m(p)
+				if( (u32Flag == 1 && u32Mode == 9) ||  
+				   (u32Flag == 1 && u32Mode == 10) ||  
+				   (u32Flag == 1 && u32Mode == 11) ||  
+				   (u32Flag == 1 && u32Mode == 16)  ) 
+				{
+					SetGenRegIdx(u32SrcMIdx+1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				}
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + u32MULIdx);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+	}
+	else if(p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32SrcMIdx, u32Units, u32Result, u32Flag, u32Mode;
+    
+        u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+        u32Flag = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+    
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                // read MULCR and carry the value to next phase.
+                m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0] = ReadMULCR(i);
+				m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0] = u32r_MULCUTR[i];
+
+                if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+                {
+                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+                }
+                else
+                {
+                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+                }
+
+				//MACCs=Rm+1:m(z), MACCs=Rm+1:m(s), MACCs=Rm+1:m(p),HOMACCs=Rm+1:m(p)
+                if( (u32Flag == 1 && u32Mode == 9) || 
+				   (u32Flag == 1 && u32Mode == 10) || 
+				   (u32Flag == 1 && u32Mode == 11) ||  
+				   (u32Flag == 1 && u32Mode == 16) ) 
+                {
+                	if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx+1) )
+	                {
+	                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1] = u32Result;
+	                }
+	                else
+	                {
+	                    m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1] = rd_u32r_R_new(i, u32SrcMIdx+1, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+	                }
+                }
+            } // if ( GIsBitSet(u32Units, i) )
+        } // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if(p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32MULIdx, u32Status, u32MULCR;
+		DSPU32 u32SrcA, u32Imm, u32Mode0, u32Mode1,  u32Flag;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128  xu128Temp;
+		DSP_BIT64 u64Src;
+		DSPU32 u32MULCUTR;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Imm = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Flag = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Mode0 = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Mode1 = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];
+				u32MULCUTR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord1[i][0];
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+				u32Status = 0;
+
+				u80MACC.u64Low = 0;
+				u80MACC.u16High = 0;
+
+				xu128Temp = ReadMACC(i, u32MULIdx);
+				u80MACC = BIT128ToBIT80(xu128Temp);
+
+				if(u32Flag == 0)
+				{
+					if(u32Mode0==0)  //OMACCs=ORm(c, z, u)
+					{
+						LoadMACCQ8(xu128Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, true);
+					}
+					else if(u32Mode0==1) //OMACCs=ORm(c, s, u)
+					{
+						LoadMACCQ8(xu128Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, true);
+					}
+					else if(u32Mode0==2) //OMACCs=ORm(c, p, u)
+					{
+						LoadMACCQ8(xu128Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, true);
+					}
+				}
+				else 
+				{
+					u32Imm = 0;
+					switch (u32Mode1)
+					{
+						case 0: //MACCs=Rm(z)
+							LoadMACC32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 1: //MACCs=Rm(s)
+							LoadMACC32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 2: //MACCs=Rm(p)
+							LoadMACC32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 3: //HMACCs=DRm(z)
+							LoadMACCD32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 4: //HMACCs=DRm(s)
+							LoadMACCD32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 5: //HMACCs=DRm(p)
+							LoadMACCD32(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 6: //HMACCs=HRm(z)
+							LoadMACCD16(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 7: //HMACCs=HRm(s)
+							LoadMACCD16(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 8: //HMACCs=HRm(p)
+							LoadMACCD16(u80MACC, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 9: //MACCs=Rm+1:m(z)
+							u64Src.u32High = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1];
+							u64Src.u32Low = u32SrcA;
+							LoadMACC64(u80MACC, u64Src, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 10: //MACCs=Rm+1:m(s)
+							u64Src.u32High = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1];
+							u64Src.u32Low = u32SrcA;
+							LoadMACC64(u80MACC, u64Src, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 11: //MACCs=Rm+1:m(p)
+							u64Src.u32High = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1];
+							u64Src.u32Low = u32SrcA;
+							LoadMACC64(u80MACC, u64Src, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, false);
+							BIT80ToBIT128(u80MACC, xu128Temp);
+							break;
+						case 12: //OMACCs=ORm(z)
+							LoadMACCQ8(xu128Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 0, false);
+							break;
+						case 13: //OMACCs=ORm(s)
+							LoadMACCQ8(xu128Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 1, false);
+							break;
+						case 14: //OMACCs=ORm(p)
+							LoadMACCQ8(xu128Temp, u32SrcA, &u32Status, u32MULCR, u32MULCUTR, u32Imm, 2, false);
+							break;
+						case 15: //HOMACCs=Rm(p)
+							LoadHOMACC(xu128Temp, u32SrcA, 0,u32MULCR, u32MULCUTR, &u32Status,u32Imm,true,false);
+							break;
+						default: //HOMACCs=Rm+1:m(p)
+							LoadHOMACC(xu128Temp, u32SrcA, m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1],u32MULCR, u32MULCUTR, &u32Status,u32Imm,false,false);
+					}
+					
+				} 
+				
+				WriteMACC(i, u32MULIdx, xu128Temp);
+
+				u32r_MULFR_EX[i][u32MULIdx] = u32Status;	
+			}//end if
+		}//end for
+	}
+	else if(p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32MULIdx, u32Flag;
+    
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+        
+        for (int i = 0; i < NUM_OF_UNITS; i++)
+        {
+            if ( GIsBitSet(u32Units, i) )
+            {
+                u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+                u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx], u32r_MULFR_EX[i][u32MULIdx]);
+                u32ri_MULFR[i][u32MULIdx] = u32Flag;
+            } // if ( GIsBitSet(u32Units, i) )
+        } // for (i = 0; i < 4; i++)
+	}
+	return true;
+}
+
+//-------------------------------------------------------------------------------------------------------
+bool sc_iss::QMacc_DF32_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("QMacc_DF32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("QMacc_DF32_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32Units,u32Mode,MulIdx;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u4Mode: 4;
+				DSPU32    	u2Rev0: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		//模式12使用0，1，2，3乘法器
+		//模式13使用4，5，6，7乘法器
+		if(u32Mode == 12)
+		{
+			MulIdx = 0;
+		}
+		else
+		{
+			MulIdx = 4;
+		}
+		SetCalcResIdx(MulIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+1, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+2, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+3, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		//m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		DSPU32 u32MaskTemp = 0U;
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx + 1);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx + 2);
+				u32MaskTemp = GSetBit(u32MaskTemp,i*8 + MulIdx + 3);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+		m_arrResSLK[p_u32SLKIdx].slot_res_used.u32WrAMACCMask = u32MaskTemp;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 4; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32Status;
+		DSPU32 u32MULCR, u32MulIdx;
+		DSP_BIT80 u80MACC;
+		DSP_BIT128  xu128Temp;
+		DSP_BIT64 u64Src1;
+		DSP_BIT64 u64Src2;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				//Rm
+				u64Src1.u32Low = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][1]; 
+				//Rm+1
+				u64Src1.u32High = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0]; 
+				//Rn
+				u64Src2.u32Low = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][1]; 
+				//Rn+1
+				u64Src2.u32High = m_arrResSLK[p_u32SLKIdx].arrSrcB[i][0]; 
+
+
+				for (int k = 0; k < 4; k++)
+				{
+					u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], k+1);
+
+					u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					u32MULCR = GSetBit(u32MULCR, 0);
+					u32Status = 0;	
+
+					if(k < 3)
+					{
+						MulDF64(u80MACC, u64Src1, u64Src2, k, &u32Status, u32MULCR);
+						u32r_MULFR_EX[i][u32MulIdx] = u32Status;
+						xu128Temp = ReadMACC(i, u32MulIdx);
+                		BIT80ToBIT128(u80MACC, xu128Temp);
+						WriteMACC(i, u32MulIdx, xu128Temp);
+					}
+					else
+					{
+						u32r_MULFR_EX[i][u32MulIdx] = u32Status;
+					}
+				}
+
+			} //if ( GIsBitSet(u32Units, i) )
+		} //for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Flag,u32MulIdx;
+		
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+				{
+					u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], k+1);
+
+					u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32r_MULFR_EX[i][u32MulIdx]);
+					u32ri_MULFR[i][u32MulIdx] = u32Flag;
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+		
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+
+
+//add by zhaoxiang 2013-09-24-----------------------------------------------------------------------------------
+bool sc_iss::QMacc_To_DF64_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("QMacc_To_DF64_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("QMacc_To_DF64_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Dest, u32Units,u32Mode,MulIdx;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6Dest: 6;
+				DSPU32    	u6Rev0: 6;
+				DSPU32    	u4Mode: 4;
+				DSPU32    	u2Rev1: 2;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u4Mode;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32Dest = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		//m_arrDCResNeeded[p_u32Slot].i32MULNum = 4;
+		//模式14使用0，1，2，3乘法器
+		//模式15使用4，5，6，7乘法器
+		if(u32Mode == 14)
+		{
+			MulIdx = 0;
+		}
+		else
+		{
+			MulIdx = 4;
+		}
+		SetCalcResIdx(MulIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+1, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+2, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		SetCalcResIdx(MulIdx+3, m_arrDCResNeeded[p_u32Slot].u8MULs);
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		//m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32Dest, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32Dest + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);	
+					
+                } // for (k = 0; k < 4; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		DSPU32 u32Units, u32Mode, u32Status0, u32Status1, u32Status2, u32Status3;
+		DSPU32 u32MULCR, u32MulIdx;
+		DSP_BIT80  u80MACC0,u80MACC1,u80MACC2,u80MACC3;
+		DSP_BIT64 u64Res;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		u32Mode = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][0];  // MULCR
+				u32MULCR = GSetBit(u32MULCR, 0);
+				u32Status0 = 0;	
+				u32Status1 = 0;	
+				u32Status2 = 0;	
+				u32Status3 = 0;	
+				
+				if(u32Mode==14)
+				{
+					u80MACC0 = BIT128ToBIT80(ReadMACC(i, 0));
+					u80MACC1 = BIT128ToBIT80(ReadMACC(i, 1));
+					u80MACC2 = BIT128ToBIT80(ReadMACC(i, 2));
+					u80MACC3 = BIT128ToBIT80(ReadMACC(i, 3));
+				}
+				else
+				{
+					u80MACC0 = BIT128ToBIT80(ReadMACC(i, 4));
+					u80MACC1 = BIT128ToBIT80(ReadMACC(i, 5));
+					u80MACC2 = BIT128ToBIT80(ReadMACC(i, 6));
+					u80MACC3 = BIT128ToBIT80(ReadMACC(i, 7));
+				}
+
+				QMACCToDF64(u64Res,u80MACC0,u80MACC1,u80MACC2,u80MACC3,&u32Status0,&u32Status1,&u32Status2,&u32Status3,u32MULCR);
+				u32r_MULFR_EX[i][u32MulIdx] = u32Status0;
+				u32r_MULFR_EX[i][u32MulIdx+1] = u32Status1;
+				u32r_MULFR_EX[i][u32MulIdx+2] = u32Status2;
+				u32r_MULFR_EX[i][u32MulIdx+3] = u32Status3;
+				m_arrResSLK[p_u32SLKIdx].arrDestL[i][0] = u64Res.u32Low; //Rs
+				m_arrResSLK[p_u32SLKIdx].arrDestL[i][1] = u64Res.u32High; //Rs+1
+
+			} //if ( GIsBitSet(u32Units, i) )
+		} //for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Dest, u32Flag,u32MulIdx;
+
+		u32Dest = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MulIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx], u32r_MULFR_EX[i][u32MulIdx]);
+				u32ri_MULFR[i][u32MulIdx] = u32Flag;
+
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+1], u32r_MULFR_EX[i][u32MulIdx+1]);
+				u32ri_MULFR[i][u32MulIdx+1] = u32Flag;
+
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+2], u32r_MULFR_EX[i][u32MulIdx+2]);
+				u32ri_MULFR[i][u32MulIdx+2] = u32Flag;
+
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32MulIdx+3], u32r_MULFR_EX[i][u32MulIdx+3]);
+				u32ri_MULFR[i][u32MulIdx+3] = u32Flag;
+
+
+				//写Rs
+				wr_u32r_R_new(i, u32Dest, m_arrResSLK[p_u32SLKIdx].arrDestL[i][0], PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				//写Rs+1
+				wr_u32r_R_new(i, u32Dest+1, m_arrResSLK[p_u32SLKIdx].arrDestL[i][1], PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+		
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+
+
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::mul_cfloat_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("mul_cfloat_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("mul_cfloat_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32SrcMIdx, u32SrcNIdx, u32DestIdx, u32Units;
+
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+ 		   		DSPU32    	u6SrcN: 6;
+				DSPU32    	u6SrcM: 6;
+				DSPU32    	u6Dest: 6;
+				DSPU32    	u8Opcode: 8;
+				DSPU32      u1MultiWord: 1;
+				DSPU32      u4Units: 4;
+	 		   	DSPU32      u1Line: 1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+			instr_word.u32Value = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcN;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u6SrcM;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u6Dest;
+			g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[3] = instr_word.details.u4Units;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried 
+        // accross pipe phases.
+		for (int i = 0; i < 4; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable		
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[3];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		m_arrDCResNeeded[p_u32Slot].bolGrp4MUL = true;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcMIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+				SetGenRegIdx(u32SrcNIdx + 1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx+1, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx+2, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+				SetGenRegIdx(u32DestIdx+3, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32SrcNIdx, u32Result;
+		DSPU32 u32SrcMIdxSel, u32SrcNIdxSel;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				for (int k = 0; k < 4; k++)
+                {
+					// read MULCR and carry the value to next phase.
+					m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k] = ReadMULCR(i);
+
+					if (k == 0)
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx + 1;
+					}
+					else if (k == 1)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+					else if (k == 2)
+					{
+						u32SrcMIdxSel = u32SrcMIdx;
+						u32SrcNIdxSel = u32SrcNIdx + 1;									
+					}
+					else
+					{
+						u32SrcMIdxSel = u32SrcMIdx + 1;
+						u32SrcNIdxSel = u32SrcNIdx;									
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k] = rd_u32r_R_new(i, u32SrcMIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+
+					if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcNIdxSel) )
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = u32Result;
+					}
+					else
+					{
+						m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k] = rd_u32r_R_new(i, u32SrcNIdxSel, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+					}
+					
+                } // for (k = 0; k < 2; k++)
+
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32Flag, u32Status, u32SrcA, u32SrcB;
+		DSPU32 u32Result, u32GenResultIdx, u32MULCR, u32DestSel;
+		DSPU32 u32SrcMIdx, u32SrcNIdx;
+		DSPU32 u32Dest;
+		DSPU32 u32MULIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcNIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		u32GenResultIdx = 0;
+		u32Dest = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32MULIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				for (int k = 0; k < 4; k++)
+				{
+					u32MULCR = m_arrResSLK[p_u32SLKIdx].arrCtrlWord[i][k];  // MULCR
+					u32MULCR = GSetBit(u32MULCR, 0);
+					u32SrcA= m_arrResSLK[p_u32SLKIdx].arrSrcA[i][k];      // SrcA
+					u32SrcB= m_arrResSLK[p_u32SLKIdx].arrSrcB[i][k];      // SrcB
+
+					u32Status = 0;
+					u32Result = MulF32(u32SrcA, u32SrcB, &u32Status, u32MULCR);
+
+					if (k == 0)
+					{
+						u32DestSel = u32Dest + 3;
+					}
+					else if (k == 2)
+					{
+						u32DestSel = u32Dest + 1;
+					}
+					else if (k == 1)
+					{
+						u32DestSel = u32Dest;
+					}
+					else if (k == 3)
+					{
+						u32DestSel = u32Dest + 2;
+					}
+
+					wr_u32r_R_new(i, u32DestSel, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+					u32Flag = SetMULFlags(u32ri_MULFR[i][u32MULIdx + k], u32Status);
+					u32ri_MULFR[i][u32MULIdx + k] = u32Flag;                   
+
+					SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestSel, u32Result);
+					u32GenResultIdx++;
+
+				}				
+			
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < 4; i++)
+	} // if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+//--------------------------------------------------------------------------------------------------------------
+bool sc_iss::wr_mulfr_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("wr_mulfr_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("wr_mulfr_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32CalcResIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+				DSPU32 u6SrcM :6;
+				DSPU32 u12Addr :12;
+				DSPU32 u8Opcode :8;
+				DSPU32 u1MultiWord :1;
+				DSPU32 u4Units :4;
+				DSPU32 u1Line :1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+
+				instr_word.u32Value = p_u32InstrWord;
+				g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+				g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6SrcM;
+				g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u4Units;
+				g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u12Addr - SPEC_ADDR_MULFR;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried
+        // accross pipe phases.
+		for (int i = 0; i < 3; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32CalcResIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		SetCalcResIdx(u32CalcResIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// log info necessary for data forward of general purpose register.
+				SetGenRegIdx(u32SrcMIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrSrcGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_AC_POST)
+	{
+		DSPU32 u32Units, u32SrcMIdx, u32Result;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32SrcMIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+
+				if ( GenRegForward(u32Result, p_u32SLKIdx, i, u32SrcMIdx) )
+				{
+					// data forward to get the value of R[u32SrcMIdx] of current macro
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = u32Result;
+				}
+				else
+				{
+					// read the value of R[u32SrcMIdx] from register heap directly
+					m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0] = rd_u32r_R_new(i, u32SrcMIdx, PIPE_EX.AC_EX.m_left.arrSrcPageIdx[i]);
+				}
+
+			} // if ( GIsBitSet(u32Units, i) )
+		} // for (i = 0; i < NUM_OF_UNITS; i++)
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32SrcA, u32CalcResIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32SrcA = m_arrResSLK[p_u32SLKIdx].arrSrcA[i][0];
+				u32CalcResIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32ri_MULFR[i][u32CalcResIdx] = u32SrcA & 0x7F7F;
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < 4; i++)
+
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+bool sc_iss::rd_mulfr_cores(DSPU32 p_u32InstrWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx, DSPU32 p_u32Opcode)
+{
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("rd_mulfr_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if ( (p_u32Slot >= MAX_INUM_LINE) || (p_u32Phase >= PHASE_MAX) )
+	{
+		PrintToCerr("rd_mulfr_cores: parameter is invalid\n");
+		return false;
+	}
+
+	if (p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32Units, u32DestIdx, u32CalcResIdx;
+		union INSTR_WORD
+		{
+			DSPU32 u32Value;
+    		struct  SPLIT_VALUE
+	    	{
+				DSPU32 u12Addr :12;
+				DSPU32 u6Dest  :6;
+				DSPU32 u8Opcode :8;
+				DSPU32 u1MultiWord :1;
+				DSPU32 u4Units :4;
+				DSPU32 u1Line :1;
+			} details;
+		} instr_word;
+
+		// Whether content of g_arrJITCache[ p_u32JITIdx ] is the decode info of p_u32InstrWord?
+		if (g_arrJITCache[ p_u32JITIdx ].u32Inst0 != p_u32InstrWord)
+		{
+			// fill decode info which is necessary to g_arrJITCache[ p_u32JITIdx ]
+
+				instr_word.u32Value = p_u32InstrWord;
+				g_arrJITCache[ p_u32JITIdx ].u32Inst0 = p_u32InstrWord;
+				g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[0] = instr_word.details.u6Dest;
+				g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[1] = instr_word.details.u4Units;
+				g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[2] = instr_word.details.u12Addr - SPEC_ADDR_MULFR;
+		}
+
+		// read decode info from JIT cache to m_arrResSLK[p_u32SLKIdx] which will be carried
+        // accross pipe phases.
+		for (int i = 0; i < 3; i++)
+		{
+			m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[i] = g_arrJITCache[ p_u32JITIdx ].u32DecodeInfo[i];
+		}
+
+		// use variable below is more readable
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32Units = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[1];
+		u32CalcResIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[2];
+
+		m_arrDCResNeeded[p_u32Slot].u8UnitsUseCalc = u32Units;
+		m_arrDCResNeeded[p_u32Slot].bolUseSpecCalc = true;
+		SetCalcResIdx(u32CalcResIdx, m_arrDCResNeeded[p_u32Slot].u8MULs);
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			// whether current macro(unit) is used.
+			if ( GIsBitSet(u32Units, i) )
+			{
+				// log info necessary for data forward of general purpose register.
+				SetGenRegIdx(u32DestIdx, m_arrResSLK[p_u32SLKIdx].slot_res_used.arrDestGenRegs[i]);
+			}
+		}
+
+		// 当前指令是宏内指令，用于支持条件执行
+		m_arrResSLK[p_u32SLKIdx].bolIsMacroInstr = true;
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		DSPU32 u32Units, u32DestIdx, u32CalcResIdx, u32Flag, u32Result, u32GenResultIdx;
+
+		// read decode info from m_arrResSLK[ ] which is carried accross pipe phases.
+		u32Units = m_arrResSLK[p_u32SLKIdx].cond_do_info.u32UnitMask;
+		u32DestIdx = m_arrResSLK[p_u32SLKIdx].u32DecodeInfo[0];
+		u32GenResultIdx = 0;
+
+		for (int i = 0; i < NUM_OF_UNITS; i++)
+		{
+			if ( GIsBitSet(u32Units, i) )
+			{
+				u32CalcResIdx = GetMULIdx(m_arrResSLK[p_u32SLKIdx].slot_res_used.u8MULs[i], 1);
+				u32Flag = SetMULFlags(u32ri_MULFR[i][u32CalcResIdx], 0);
+				u32ri_MULFR[i][u32CalcResIdx] = u32Flag;
+				u32Result = u32ro_MULFR[i][u32CalcResIdx];
+
+				wr_u32r_R_new(i, u32DestIdx, u32Result, PIPE_EX.EX_WB.m_right.arrDestPageIdx[i]);
+				SetWBGenRegInfo(p_u32Slot, u32GenResultIdx, i, u32DestIdx, u32Result);
+				u32GenResultIdx++;
+			} // if ( GIsBitSet(u32Units, i) )
+
+		} // for (i = 0; i < 4; i++)
+
+	} // else if (p_u32Phase == PHASE_WB)
+
+	return true;
+}
+

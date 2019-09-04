@@ -1,0 +1,972 @@
+#include "../src/AlgoriLib/dsptypes.h"
+
+#ifdef DSP_WIN32
+#include <windows.h>
+#else
+#include <bfd.h>
+#endif
+
+//#ifdef DSP_WIN32
+//#include <winsock2.h>
+//#pragma comment(lib,"ws2_32.lib")
+//#else
+//#include <sys/socket.h>
+//#include <arpa/inet.h>
+//#endif
+
+#include "jtag.h"
+#include <sstream>
+#include <string.h>
+#include "LoadELFFile.h"
+#include "../dsp_top.h"
+#include "IOServer.hpp"
+#include <boost/shared_ptr.hpp>
+
+using namespace std;
+using namespace boost;
+
+typedef void JTAGBFD;
+typedef void JTAGSECTION;
+
+
+#ifdef DSP_WIN32
+typedef void * (* tbfd_openr)(char *pFileName, char *target);
+typedef char * (*  tbfd_get_section_by_name)(void *p,char *pSectionName);
+typedef int (* tbfd_section_size)(void *p, void *psec);
+typedef int (* tbfd_get_section_contents)(void *p,void *psec,char *pBuf,int offset, int size);
+typedef int (* tbfd_get_maximum_length)(void *p);
+typedef void (* tbfd_get_symbol_table)(void *p,void *ret);
+typedef int (* tbfd_get_symtab_number)(void *p);
+typedef int (* tbfd_close)(void *p);
+typedef char *(* tbfd_section_name)(void *p, void *ps);
+typedef unsigned int (* tbfd_get_section_flags)(void *p,void *ps);
+typedef unsigned int (* tbfd_section_lma)(void *p, void *ps);
+typedef void * ( *tBFDGetSection)(void *p);
+typedef void *( *tBFDGetNextSection)(void *ps);
+typedef void * (* tbfd_entry)(char *pFileName, unsigned int *entry);
+
+HINSTANCE hInst=NULL;
+
+tbfd_openr BFDOpen;
+tbfd_get_section_contents BFDGetSectionContent;
+tbfd_section_size BFDGetSectionSize;
+tbfd_get_section_by_name BFDGetSectionByName;
+tbfd_get_maximum_length BFDGetMaximumLen;
+tbfd_get_symbol_table BFDGetSymbolTable;
+tbfd_get_symtab_number BFDGetSymbolNum;
+tbfd_close BFDClose;
+tbfd_section_name BFDGetSectionName;
+tbfd_get_section_flags BFDGetSectionFlag;
+tbfd_section_lma BFDGetSectionLma;
+tBFDGetSection BFDGetSection;
+tBFDGetNextSection BFDGetNextSection;
+tbfd_entry bfd_entry;
+#endif
+
+typedef struct tag_symbol
+{
+	unsigned int addr;
+	string name;
+}Symbol;
+
+typedef struct tag_Symbol
+{
+	char *pName;
+	unsigned int uValue;
+	unsigned int flag;
+	char type;
+}CSymbol;
+
+
+vector<Symbol> SymbolList;
+
+vector<string> vArgs;
+
+vector<string> vArgs0;
+vector<string> vArgs1;
+
+
+int GetSymbolAdr(string sName, unsigned int &uAdr)
+{
+	uAdr=0;
+	vector<Symbol>::iterator it=SymbolList.begin();
+	for(;it!=SymbolList.end();it++)
+	{
+		if(it->name==sName)
+		{
+			uAdr=it->addr;
+			return 0;
+		}
+	}
+	return 1;
+}
+
+
+
+int filbuf(sc_iss *pmodel, unsigned int start_addr, const char *str, int max_len)
+{
+	unsigned int c;
+	unsigned int i;
+
+	//extend and replicate string to shared memory,  1byte-->1word(4bytes)
+	i=0;
+	while((str[i]!='\0') &&(i<max_len-1)){
+		c = (unsigned long)str[i];
+		pmodel->WriteMem(start_addr+i, c);
+		i++;
+	}
+	c='\0';
+	pmodel->WriteMem(start_addr+i, c);
+	return i+1;
+}
+
+
+/******************************************************************************
+*函数名称:				InitJtagLog
+*功能					设置日志文件
+*修改者                修改时间                		说明
+*林广栋                2014年5月30日         	修改确认
+******************************************************************************/
+void InitJtagLog()
+{
+	//创建目标机信息查询器
+	char pDir[1024];
+#ifdef DSP_WIN32
+	unsigned int uDirLen=::GetModuleFileNameA(NULL,pDir,1024);
+
+	string sDir(pDir);
+	unsigned int pos=sDir.find_last_of('\\');
+	sDir=sDir.substr(0,pos+1);
+
+	sDir+="..\\log";
+	JTAGSetLogFileDir(sDir.c_str());
+#else
+	unsigned int uDirLen=readlink("/proc/self/exe",pDir,1024);
+	string sDir(pDir);
+	unsigned int pos=sDir.find_last_of('/');
+	sDir=sDir.substr(0,pos+1);
+
+	sDir+="../log";
+	JTAGSetLogFileDir(sDir.c_str());
+#endif
+	JTAGOpenLogFile();
+}
+
+
+int ExtractAppPara(int argc, char ** argv, vector<string> &vFile)
+{
+	vArgs.clear();
+	int coreidx;
+	for(coreidx=0;coreidx<ISS_NUM_DEF;coreidx++)
+	{
+		string sFakeName="";
+		vFile.push_back(sFakeName);
+	}
+
+	if(argc<2)
+	{
+		return 1;
+	}
+
+	string filename=argv[1];
+	vFile[0]=filename;//在此可修改编译器测试时默认加载到的核号
+
+#ifdef TWO_CORE_LOAD_FILE
+	//给操作系统开发者使用,以给两个核加载不同的文件
+	vArgs0.push_back(filename);
+	if(argc==3)
+	{
+		filename=argv[2];
+		vFile[1]=filename;
+		vArgs1.push_back(filename);
+	}
+#else
+	//给编译器开发者使用,以接收main函数的参数
+	for (int i=1;i<argc;i++)
+	{
+		string sArg=argv[i];
+		vArgs0.push_back(sArg);
+	}
+#endif
+}
+
+/**************************************************************
+作者					修改日期					注释
+林广栋					2016-8-15					判断参数中是否有某个参数，若有，则把其从参数列表中
+													删除
+***************************************************************/
+int OptionArg(vector<string> &vArgs, const string &one_arg)
+{
+	vector<string >::iterator pos;
+
+	if((pos=find(vArgs.begin(),vArgs.end(),one_arg))!=vArgs.end())
+	{
+		vArgs.erase(pos);
+		return 1;
+	}
+	return 0;
+}
+
+
+/**************************************************************
+作者					修改日期					注释
+林广栋					2017-7-26					判断参数中是否有某个参数，若有，
+													获取该参数之后的参数，并将这两个参数都删除
+													返回0,表示找到参数;
+													返回1,表示参数格式错误;
+													返回2,表示没有找到参数;
+***************************************************************/
+int ExtractArg(vector<string> &vArgs, const string &one_arg,string &out_arg)
+{
+	vector<string>::iterator itPara,itParaValue;
+	itPara=find(vArgs.begin(),vArgs.end(),one_arg);
+	if (itPara!=vArgs.end())
+	{
+		itParaValue=itPara+1;
+		if (itParaValue!=vArgs.end())
+		{
+			out_arg=*itParaValue;
+
+			vArgs.erase(itParaValue);
+			vArgs.erase(itPara);
+			return 0;
+		}
+		return 1;
+	}
+	return 2;
+}
+
+
+/******************************************************************************
+*函数名称:				ExtractPara
+*功能					解析字符串
+*修改者                修改时间                		说明
+*林广栋                2014年5月30日         	修改确认
+******************************************************************************/
+int ExtractPara(int argc, char **argv, vector<string> &vFile)
+{
+	InitJtagLog();
+	vector<string> vPara;
+	vector<string>::iterator itPara;
+	int ret=0;
+	for (int i=0;i<argc;i++)
+	{
+		JTAGLog(0,"%s\n",argv[i]);
+		vPara.push_back(string(argv[i]));
+	}
+	if (OptionArg(vPara,"-t"))
+	{
+		bTerminateSelf=true;
+	}
+	if((ret=ExtractArg(vPara,"-c",CodeCoverDir))==1)
+	{
+		return 1;
+	}
+	if((ret=ExtractArg(vPara,"-abi",ABICheckDir))==1)
+	{
+		return 1;
+	}
+	if (ret == 0)
+	{
+		bCodeCoverTest=true;
+	}
+
+	for ( int i=0;i<ISS_NUM_DEF;i++)
+	{
+		string coreExe="";
+		stringstream ss;
+		string strCore;
+		ss<<i;
+		ss>>strCore;
+		if(ret=ExtractArg(vPara,strCore,coreExe)==1)
+		{
+			return 1;
+		}
+		vFile.push_back(coreExe);
+	}
+	
+
+	string sPort;
+	if(ret=ExtractArg(vPara,"-p",sPort)==1)
+	{
+		return 1;
+	}
+	if (ret == 0)
+	{
+		stringstream ssPort;
+		ssPort<<sPort;
+		ssPort>>jtagPort;
+	}
+
+	if(ret=ExtractArg(vPara,"-ip",jtagIPAdr)==1)
+	{
+		return 1;
+	}
+	if (vPara.size()!=1)
+	{
+		return 1;
+	}
+	return 0;
+}
+
+/******************************************************************************
+*函数名称:				InitDLL
+*功能					加载BFD库
+*修改者                修改时间                		说明
+*林广栋                2014年5月30日         	修改确认
+******************************************************************************/
+#ifdef DSP_WIN32
+bool InitDLL()
+{
+
+	hInst=::LoadLibraryA(("MCCD_BFD_DLL.dll"));
+
+	if(!hInst)
+	{
+		JTAGLog(0,"Get BFD Library handle failed, 0x%x\n",hInst);
+		return false;
+	}
+
+	BFDOpen=(tbfd_openr)GetProcAddress(hInst,"BFDOpen");
+	if(BFDOpen==NULL)
+	{
+		JTAGLog(0,"get BFDOpen error, 0x%x\n",BFDOpen);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSectionContent=(tbfd_get_section_contents)
+		GetProcAddress(hInst,"BFDGetSectionContents");
+	if(BFDGetSectionContent==NULL)
+	{
+		JTAGLog(0,"get BFDGetSectionContent error, 0x%x\n",BFDGetSectionContent);
+		::FreeLibrary(hInst);
+		return false;
+	}
+	BFDGetSectionSize=(tbfd_section_size)GetProcAddress(hInst,"BFDSectionSize");
+	if(BFDGetSectionSize==NULL)
+	{
+		JTAGLog(0,"get BFDGetSectionSize error, 0x%x\n",BFDGetSectionSize);
+		::FreeLibrary(hInst);
+		return false;
+	}
+	BFDGetSectionByName=(tbfd_get_section_by_name)GetProcAddress(hInst,"BFDGetSectionByName");
+	if(BFDGetSectionByName==NULL)
+	{
+		JTAGLog(0,"get BFDGetSectionByName error, 0x%x\n",BFDGetSectionByName);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetMaximumLen=(tbfd_get_maximum_length)GetProcAddress(hInst,"BFDGetSymbolMaxLen");
+	if(BFDGetMaximumLen==NULL)
+	{
+		JTAGLog(0,"get BFDGetMaximumLen error, 0x%x\n",BFDGetMaximumLen);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSymbolTable=(tbfd_get_symbol_table)GetProcAddress(hInst,"BFDGetSymbolTable");
+	if(BFDGetSymbolTable==NULL)
+	{
+		JTAGLog(0,"get BFDGetSymbolTable error, 0x%x\n",BFDGetSymbolTable);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSymbolNum=(tbfd_get_symtab_number)GetProcAddress(hInst,"BFDGetSymtabNum");
+	if(BFDGetSymbolNum==NULL)
+	{
+		JTAGLog(0,"get BFDGetSymbolNum error, 0x%x\n",BFDGetSymbolNum);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSection=(tBFDGetSection)GetProcAddress(hInst,"BFDGetSection");
+	if(BFDGetSection==NULL)
+	{
+		JTAGLog(0,"get BFDGetSection error, 0x%x\n",BFDGetSection);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetNextSection=(tBFDGetNextSection)GetProcAddress(hInst,"BFDGetNextSection");
+	if(BFDGetNextSection==NULL)
+	{
+		JTAGLog(0,"get BFDGetNextSection error, 0x%x\n",BFDGetNextSection);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDClose=(tbfd_close)GetProcAddress(hInst,"BFDClose");
+	if(BFDClose==NULL)
+	{
+		JTAGLog(0,"get BFDClose error, 0x%x\n",BFDClose);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSectionFlag=(tbfd_get_section_flags)GetProcAddress(hInst,"BFDSectionFlag");
+	if(BFDGetSectionFlag==NULL)
+	{
+		JTAGLog(0,"get BFDGetSectionFlag error, 0x%x\n",BFDGetSectionFlag);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSectionName=(tbfd_section_name)GetProcAddress(hInst,"BFDSectionName");
+	if(BFDGetSectionName==NULL)
+	{
+		JTAGLog(0,"get BFDGetSectionName error, 0x%x\n",BFDGetSectionName);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	BFDGetSectionLma=(tbfd_section_lma)GetProcAddress(hInst,"BFDSectionLma");
+	if(BFDGetSectionLma==NULL)
+	{
+		JTAGLog(0,"get BFDGetSectionLma error, 0x%x\n",BFDGetSectionLma);
+		::FreeLibrary(hInst);
+		return false;
+	}
+
+	//bfd_entry=(tbfd_entry)GetProcAddress(hInst,"bfd_entry");
+	//if(bfd_entry==NULL)
+	//{
+	//	JTAGLog(0,"get bfd_entry error, 0x%x\n",bfd_entry);
+	//	::FreeLibrary(hInst);
+	//	return false;
+	//}
+	return true;
+}
+#endif
+
+/******************************************************************************
+*函数名称:				LoadFile
+*功能					加载ELF文件到内核中
+*修改者                修改时间                		说明
+*林广栋                2014年5月30日         	修改确认
+******************************************************************************/
+int LoadFile(vector<string> &vFile, void *pTop)
+{
+
+	//windows系统下使用socket准备工作
+#ifdef DSP_WIN32
+	WSADATA wsaData;
+	if(WSAStartup(MAKEWORD(2, 2), &wsaData) == SOCKET_ERROR)
+	{
+		//cout<<"        TCP stratup error."<<endl;
+		return 1;
+	}
+
+	if(LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2)
+	{
+		//cout<<"        TCP Version error."<<endl;
+		WSACleanup( );
+		return 1;
+	}
+#endif
+	dsp_top *pdsp_top=(dsp_top *)pTop;
+	pmem *pmLoad=pdsp_top->GetPMemHandle();
+	share_sram *psramLoad=pdsp_top->GetShareSRAMHandle();
+	ddr *ddr0=pdsp_top->GetDDR0Handle();
+	ddr *ddr1=pdsp_top->GetDDR1Handle();
+	int coreidx=0;
+
+	sc_iss *p_iss[ISS_NUM_DEF]={};
+	SystemConfigReg *psysreg=NULL;
+	for(coreidx=0;coreidx<ISS_NUM_DEF;coreidx++)
+	{
+		p_iss[coreidx]=pdsp_top->GetCoreHandle(coreidx);
+		p_iss[coreidx]->Reset();
+	}
+	psysreg=pdsp_top->GetSysCfgRegHandle();
+#ifndef DSP_WIN32
+
+	bfd_init();
+
+	for(coreidx=0;coreidx<ISS_NUM_DEF;coreidx++)
+	{
+		if(vFile[coreidx]!="")
+		{
+			if(coreidx==0)
+			{
+				vArgs=vArgs0;
+			}
+			else
+			{
+				vArgs=vArgs1;
+			}
+
+			char **ppcMatching;
+			bfd *pbfd=0;
+
+			pbfd=bfd_openr(vFile[coreidx].c_str(),0);
+
+			if(!pbfd)
+			{
+				JTAGLog(0,"simulator: cannot find file %s\n",vFile[coreidx].c_str());
+				JTAGLog(0,"BFD open file error\n",0);
+				return 1;
+			}
+			if (!bfd_check_format_matches(pbfd, bfd_object, &ppcMatching))
+			{
+				JTAGLog(0,"BFD check format error\n",0);
+				return 1;
+			}
+
+
+			SymbolList.clear();
+			int iSymSize=bfd_get_symtab_upper_bound(pbfd);
+
+			if(iSymSize>0)
+			{
+				asymbol ** symbols=(asymbol **)malloc(iSymSize);
+				int iSymbolNum=bfd_canonicalize_symtab(pbfd,symbols);
+
+				if(iSymbolNum>0)
+				{
+					for(int i=0;i<iSymbolNum;i++)
+					{
+						if(!(symbols[i]->section))
+						{
+							continue;
+						}
+						symbol_info si;
+						bfd_symbol_info(symbols[i],&si);
+						Symbol cs;
+						cs.addr=si.value;
+						cs.name=si.name;
+						SymbolList.push_back(cs);
+					}
+				}
+				free(symbols);
+			}
+
+			asection *psection=pbfd->sections;
+
+			if(!psection)
+			{
+				JTAGLog(0,"BFD get section error\n",0);
+				return 1;
+			}
+
+			while(psection)
+			{
+				unsigned int flag=bfd_get_section_flags(pbfd,psection);
+
+				if((flag>>1)&1)
+				{
+					unsigned int loadAdr=bfd_section_lma(pbfd,psection);
+					unsigned int size=bfd_section_size(pbfd,psection);
+					if(size%4)
+					{
+						JTAGLog(0,"Load section size is not mod 4\n",0);
+						return 1;
+					}
+					unsigned int ldSize=size/4;
+					unsigned int *pBuf=new unsigned int[ldSize];
+					if(bfd_get_section_contents(pbfd,psection,(char *)pBuf,0,size))
+					{
+						unsigned int pAdr=0;
+						if(ldSize>0x200000)
+						{
+							JTAGLog(0,"simulator: .text section too large, cannot exceed 0x800000Byte\n",0);
+							return 1;
+						}
+
+						for(pAdr=0;pAdr<ldSize;pAdr++)
+						{
+							unsigned int loadAddr=loadAdr+pAdr;
+							if((loadAddr>=0xb000000)&&(loadAddr<=0xb1fffff))
+							{
+								if(!(pmLoad->write_word(loadAddr,pBuf[pAdr])))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAdr+pAdr,pBuf[pAdr]);
+									return 1;
+								}
+							}
+							else if((loadAddr>=0)&&(loadAddr<0x18000))
+							{
+								if(!(psramLoad->write_word(loadAddr,pBuf[pAdr])))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAdr+pAdr,pBuf[pAdr]);
+									return 1;
+								}
+							}
+							else if((loadAddr>=0x80000000)&&(loadAddr<0xc0000000))
+							{
+								if(!(ddr0->write_word(loadAddr,pBuf[pAdr])))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAdr+pAdr,pBuf[pAdr]);
+									return 1;
+								}
+							}
+							else if((loadAddr>=0xc0000000)&&(loadAddr<=0xffffffff))
+							{
+								if(!(ddr1->write_word(loadAddr,pBuf[pAdr])))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAdr+pAdr,pBuf[pAdr]);
+									return 1;
+								}
+							}
+							else
+							{
+								if(!(p_iss[coreidx]->WriteMem(loadAddr,pBuf[pAdr])))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAdr+pAdr,pBuf[pAdr]);
+									return 1;
+								}
+							}
+						}
+
+					}
+					else
+					{
+						delete [] pBuf;
+						JTAGLog(0,"Get load section content error\n",0);
+						return 1;
+					}
+					delete [] pBuf;
+				}
+				psection=psection->next;
+			}
+
+			if(pbfd)
+			{
+				bfd_close(pbfd);
+			}
+
+
+			unsigned int start_addr=0;
+			if(GetSymbolAdr("_entry_point", start_addr)==0)
+			{
+                unsigned int start_addr=0;
+			    unsigned int boot_addr=0x9028010+coreidx;
+			    if(GetSymbolAdr("_entry_point", start_addr)==0)
+			    {
+				    psysreg->write_reg(boot_addr,start_addr);
+                    sc_start(sc_time(10,SC_NS));
+			    	p_iss[coreidx]->Reset();
+			    }
+
+				//p_iss[coreidx]->SetStartPC(start_addr);
+			}
+			//在此添加设置__iobuffer观察点的语句，2014-7-15
+#ifdef BWSIM_SUPPORT_IO
+			unsigned int argc_addr;
+			GetSymbolAdr("_ARGC", argc_addr);
+			unsigned int argv_addr;
+			GetSymbolAdr("_ARGVS", argv_addr);
+			const int MAX_ARGV_LEN = 16;
+			const int MAX_ARGV_NUM = 8;
+
+			unsigned int argc=vArgs.size();
+
+			if(argc_addr)
+			{
+				p_iss[coreidx]->WriteMem(argc_addr,(unsigned int)((argc)<MAX_ARGV_NUM?argc:MAX_ARGV_NUM));
+			}
+			JTAGLog(0,"argc_addr %x, argv_addr %x, Application parameters: \n",argc_addr,argv_addr);
+
+			if(argv_addr)
+			{
+				int i = 0;
+				while((i<argc)&&(i<MAX_ARGV_NUM))
+				{
+					JTAGLog(0,"%s\n",vArgs[i].c_str());
+					filbuf(p_iss[coreidx], argv_addr+i*MAX_ARGV_LEN, vArgs[i].c_str(), MAX_ARGV_LEN);
+					i++;
+				}
+			}
+
+			unsigned int iobuf_addr=0;
+			unsigned int flag_addr=0;
+			unsigned int debugdata_addr=0;
+			GetSymbolAdr("___iobuffer", iobuf_addr);
+			if(coreidx==0)
+			{
+				iobuf_addr=iobuf_addr+0x1000000;
+			}
+			else
+			{
+				iobuf_addr=iobuf_addr+0x2000000;
+			}
+
+			flag_addr = iobuf_addr;
+						
+			JTAGLog(0,"___iobuffer address %x\n",flag_addr);
+
+			if(flag_addr!=0)
+			{
+				p_iss[coreidx]->ioserver=new IOHostServer(p_iss[coreidx],0,0);
+
+				IOHostServer *pioserver=p_iss[coreidx]->ioserver;
+
+				pioserver->setbufaddr(iobuf_addr+1);
+				pioserver->setflagaddr(flag_addr);
+				//pioserver->set_path("c:\\DSPLog", "c:\\DSPLog\\stdintemp.log", "c:\\DSPLog\\stdouttemp.log");
+
+				p_iss[coreidx]->InsertWatchpoint(flag_addr,flag_addr,0,2);
+			}
+#endif
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[coreidx]->bDSPEnable=true;
+				p_iss[coreidx]->bDSPRunning=true;
+			}
+		}
+	}
+
+
+#else
+
+	if(!InitDLL())
+	{
+		JTAGLog(0,"load bfd dll error.\n",0);
+		return 1;
+	}
+
+	for(coreidx=0;coreidx<ISS_NUM_DEF;coreidx++)
+	{
+		if(vFile[coreidx]!="")
+		{
+			if(coreidx==0)
+			{
+				vArgs=vArgs0;
+			}
+			else
+			{
+				vArgs=vArgs1;
+			}
+
+			string sFile=vFile[coreidx];
+			JTAGBFD *pbfd=NULL;
+
+			pbfd=BFDOpen((char *)(sFile.c_str()),NULL);
+			if(!pbfd)
+			{
+				JTAGLog(0,"simulator: cannot find file %s\n",vFile[coreidx].c_str());
+				JTAGLog(0,"open %s error.\n",sFile.c_str());
+				return 1;
+			}
+
+
+			int iSymSize=BFDGetSymbolNum(pbfd);
+			if(iSymSize<0)
+			{
+				return 1;
+			}
+
+			JTAGLog(0,"\n\n\n\n\n=======================symbols=======================\n\n",0);
+
+			SymbolList.clear();
+			if(iSymSize>0)
+			{
+				unsigned int uMaxLen=BFDGetMaximumLen(pbfd);
+				CSymbol *pSymBuf=new CSymbol[iSymSize];
+
+				for(int i=0;i<iSymSize;i++)
+				{
+					pSymBuf[i].pName=new char[uMaxLen+1];
+				}
+
+				BFDGetSymbolTable(pbfd,pSymBuf);
+
+				for(int i=1;i<iSymSize;i++)
+				{
+					Symbol sb;
+					sb.name=pSymBuf[i].pName;
+					sb.addr=pSymBuf[i].uValue;
+
+					SymbolList.push_back(sb);
+
+					delete [] (pSymBuf[i].pName);
+
+					JTAGLog(0,"symbols %s, value %x\n",sb.name.c_str(),sb.addr);
+				}
+
+				delete [](pSymBuf[0].pName);
+
+				delete [] pSymBuf;
+			}
+
+			/////////////////以上为得到符号表的代码///////////////////////////
+			unsigned int start_addr=0;
+			unsigned int boot_addr=0x9028010+coreidx;
+			if(GetSymbolAdr("_entry_point", start_addr)==0)
+			{
+				psysreg->write_reg(boot_addr,start_addr);
+				sc_start(10);
+				p_iss[coreidx]->Reset();
+			}
+
+			JTAGSECTION *psection=NULL;
+
+			psection=BFDGetSection(pbfd);
+			if(!psection)
+			{
+				JTAGLog(0,"open %s , get section error.\n",sFile.c_str());
+				return 1;
+			}
+
+			while(psection)
+			{
+				string sName=BFDGetSectionName(pbfd,psection);
+				unsigned int uSize=BFDGetSectionSize(pbfd,psection);
+				unsigned int flag=BFDGetSectionFlag(pbfd,psection);
+				unsigned int lma=BFDGetSectionLma(pbfd,psection);
+
+				if((flag>>1)&1)
+				{
+					if((uSize>0)&&((uSize%4)==0))
+					{
+						boost::shared_ptr<char> spBuf(new char[uSize]);
+
+						if(!BFDGetSectionContent(pbfd,psection,spBuf.get(),0,uSize))
+						{
+							JTAGLog(0,"get %s section content error.\n",sName.c_str());
+							return 1;
+						}
+						else
+						{
+							JTAGLog(0,"get %s section content successfully.\n",sName.c_str());
+						}
+
+						int uWordSize=uSize/4;
+						unsigned int loadAddr=lma;
+						unsigned int *pWord=(unsigned int *)(spBuf.get());
+						unsigned int loaded_word=0;
+						for (unsigned int i=0;i<uWordSize;i++)
+						{
+							loaded_word=*pWord;
+							if((loadAddr>=0xb000000)&&(loadAddr<=0xb1fffff))
+							{
+								if(!(pmLoad->write_word(loadAddr,loaded_word)))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAddr,*pWord);
+									return 1;
+								}
+							}
+							else if((loadAddr>=0)&&(loadAddr<0x18000))
+							{
+								if(!(psramLoad->write_word(loadAddr,loaded_word)))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAddr,loaded_word);
+									return 1;
+								}
+							}
+							else if((loadAddr>=0x80000000)&&(loadAddr<0xc0000000))
+							{
+								if(!(ddr0->write_word(loadAddr,loaded_word)))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAddr,loaded_word);
+									return 1;
+								}
+							}
+							else if((loadAddr>=0xc0000000)&&(loadAddr<=0xffffffff))
+							{
+								if(!(ddr1->write_word(loadAddr,loaded_word)))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAddr,loaded_word);
+									return 1;
+								}
+							}
+							else
+							{
+								if(!(p_iss[coreidx]->WriteMem(loadAddr,loaded_word)))
+								{
+									JTAGLog(0,"core %d write to memory %x value %x error.\n",coreidx,loadAddr,loaded_word);
+									return 1;
+								}
+							}
+							loadAddr++;
+							pWord++;
+						}
+					}
+					else
+					{
+						JTAGLog(0,"section %s content size is 0 or cannot be mod by 4.\n",sName.c_str());
+					}
+				}
+
+				psection=BFDGetNextSection(psection);
+			}
+
+			
+			//在此添加设置__iobuffer观察点的语句，2014-7-15
+#ifdef BWSIM_SUPPORT_IO
+
+			unsigned int argc_addr;
+			GetSymbolAdr("_ARGC", argc_addr);
+			unsigned int argv_addr;
+			GetSymbolAdr("_ARGVS", argv_addr);
+			const int MAX_ARGV_LEN = 16;
+			const int MAX_ARGV_NUM = 8;
+
+			unsigned int argc=vArgs.size();
+
+			if(argc_addr)
+			{
+				p_iss[coreidx]->WriteMem(argc_addr,(unsigned int)((argc)<MAX_ARGV_NUM?argc:MAX_ARGV_NUM));
+			}
+			JTAGLog(0,"argc_addr %x, argv_addr %x, Application parameters: \n",argc_addr,argv_addr);
+			if(argv_addr)
+			{
+				int i = 0;
+				while((i<argc)&&(i<MAX_ARGV_NUM))
+				{
+					JTAGLog(0,"%s\n",vArgs[i].c_str());
+					filbuf(p_iss[coreidx], argv_addr+i*MAX_ARGV_LEN, vArgs[i].c_str(), MAX_ARGV_LEN);
+					i++;
+				}
+			}
+
+			unsigned int iobuf_addr=0;
+			unsigned int flag_addr=0;
+			unsigned int debugdata_addr=0;
+			GetSymbolAdr("___iobuffer", iobuf_addr);
+			if(coreidx==0)
+			{
+				iobuf_addr=iobuf_addr+0x1000000;
+			}
+			else
+			{
+				iobuf_addr=iobuf_addr+0x2000000;
+			}
+
+			flag_addr = iobuf_addr;
+
+			JTAGLog(0,"___iobuffer address %x\n",flag_addr);
+
+			if(flag_addr!=0)
+			{
+				p_iss[coreidx]->ioserver=new IOHostServer(p_iss[coreidx],0,0);
+
+				IOHostServer *pioserver=p_iss[coreidx]->ioserver;
+
+				pioserver->setbufaddr(iobuf_addr+1);
+				pioserver->setflagaddr(flag_addr);
+				//pioserver->set_path("c:\\DSPLog", "c:\\DSPLog\\stdintemp.log", "c:\\DSPLog\\stdouttemp.log");
+
+				p_iss[coreidx]->InsertWatchpoint(flag_addr,flag_addr,0,2);
+			}
+#endif
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[coreidx]->bDSPEnable=true;
+				p_iss[coreidx]->bDSPRunning=true;
+			}
+
+			BFDClose(pbfd);
+		}
+	}
+
+	if(hInst)
+	{
+		::FreeLibrary(hInst);
+		hInst=NULL;
+	}
+#endif
+	return 0;
+}

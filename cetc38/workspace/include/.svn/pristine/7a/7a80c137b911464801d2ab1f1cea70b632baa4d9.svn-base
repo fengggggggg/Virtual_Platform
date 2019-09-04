@@ -1,0 +1,3853 @@
+
+#include "sc_iss.h"
+
+#ifdef DSP_WIN32
+    #pragma warning( disable : 4244 )
+#endif
+
+/*------------------------------------------ typedef ------------------------------------------*/
+typedef struct
+{
+	// the address of the instruction line
+	DSPU32  u32PC;
+	
+	// instruction words
+	DSPU32  u32InstrSlots[16];
+
+} PIPELINE_REGS;
+
+//DSPU64 g_arrNewIRQs[2048];  // New INT signals
+//char g_arrLisaMsg[100];
+
+
+//-----------------------------------------------------------------------------------
+void sc_iss::ResetSignals()
+{
+	m_bolUpdateBPB = false;
+	m_u32BPBIdx = 0U;
+
+#ifdef ECS_RES_STAT
+	m_u32RdMemCnt = 0;
+	m_u32WrMemCnt = 0;
+#endif
+#ifdef LOG_PXP
+	m_u64ARegWMask = 0ULL;
+#endif
+	m_bolWrEn = false;
+
+	m_bolIsFE2FrmL2 = false;
+	m_bolEXIsIRET = false;
+	m_bolEXIsExcp = false;
+
+	m_u32BPTrigReg = 0U;
+	m_u32WPTrigReg = 0U;
+
+	m_bolLogBankConf = false;
+	
+	m_bolAbandon_AC = false;
+	m_u32MPReqIdx = 0;
+	m_bolHit = false;
+	m_bolWrSTDR = false;
+	m_bolSetCGCRBit12 = false;	
+	m_EX_bolMeetNest = false;
+	m_AC_bolMeetNest = false;
+	
+	// about IAB ctrl
+	m_PEX_bolStallIABP0 = false;		
+	m_PEX_bolStallIABP1 = false;	
+	
+	m_u32ExcpMask_AC = 0;
+	m_u32ExcpMask_EX = 0;
+
+	//m_u32ExcpMask_WB = 0;
+	//m_u32ExcpMaskHigh_WB = 0;
+
+	// AC级生成的flush信号
+	m_AC_bolFlush_ACEX = false;
+	m_AC_bolFlush_DC4AC = false;
+	m_AC_bolFlush_DC3DC4 = false;
+	m_AC_bolFlush_DC2DC3 = false;
+	m_AC_bolFlush_DC1DC2 = false;
+	m_AC_bolFlush_EMITDC1 = false;
+	m_AC_bolFlushIABP0 = false;
+	m_AC_bolFlushIABP1 = false;
+
+	// EX级生成的flush信号
+	m_EX_bolFlush_ACEX = false;
+	m_EX_bolFlush_DC4AC = false;
+	m_EX_bolFlush_DC3DC4 = false;
+	m_EX_bolFlush_DC2DC3 = false;
+	m_EX_bolFlush_DC1DC2 = false;
+	m_EX_bolFlush_EMITDC1 = false;
+	m_EX_bolFlushIABP0 = false;
+	m_EX_bolFlushIABP1 = false;
+
+	// 由于中断生成的flush信号
+	m_INT_bolFlush_DC3DC4 = false;
+	m_INT_bolFlush_DC2DC3 = false;
+	m_INT_bolFlush_DC1DC2 = false;
+	m_INT_bolFlush_EMITDC1 = false;
+	m_INT_bolFlushIABP0 = false;
+	m_INT_bolFlushIABP1 = false;
+
+	// 由于Us=Um CB Un生成的flush信号
+	m_CB_bolFlush_DC2DC3 = false;
+	m_CB_bolFlush_DC1DC2 = false;
+	m_CB_bolFlush_EMITDC1 = false;
+	m_CB_bolFlushIABP1 = false;
+	m_CB_bolFlushIABP0 = false;
+
+	// 流水线各级最终的flush信号
+	m_bolFlush_ACEX = false;
+	m_bolFlush_DC4AC = false;
+	m_bolFlush_DC3DC4 = false;
+	m_bolFlush_DC2DC3 = false;
+	m_bolFlush_DC1DC2 = false;
+	m_bolFlush_EMITDC1 = false;
+	m_bolFlushIABP0 = false;
+	m_bolFlushIABP1 = false;
+	
+	m_u32INTLvlToCache = 0;
+
+	m_DC2_bolStall_DC2DC3 = false;
+	m_DC4_bolMemStall_DC4AC = false;
+	m_DC4_bolISRStall_DC4AC = false;
+	m_DC4_bolCPredStall_DC4AC = false;
+	m_DC4_bolIRETStall_DC4AC = false;
+	m_AC_bolHazardStall_ACEX = false;
+	m_AC_bolInsnOutMemStall_ACEX = false;
+	m_AC_bolICMAStall_ACEX = false;
+	m_AC_bolDMACStall_ACEX = false;
+
+	// 流水线各级最终的stall信号
+	m_bolStall_EXWB = false;
+	m_bolStall_ACEX = false;
+	m_bolStall_DC4AC = false;
+	m_bolStall_DC3DC4 = false;
+	m_bolStall_DC2DC3 = false;
+	m_bolStall_DC1DC2 = false;
+	m_bolStall_EMITDC1 = false;
+	m_bolStallIABP0 = false;
+	m_bolStallIABP1 = false;
+
+	// about SLK resource release	
+	m_WB_bolFreeWBInRes = false;
+
+	m_bolFPCUsed = false;
+	m_bolIABCanBeUpdate = true;
+
+	// about branch signal
+	m_bolFE2BraTaken = false;
+	m_bolCondBraTaken = false;
+	m_bolACBraTaken = false;
+	m_bolEXBraTaken = false;
+	m_u32FE2TgtAddr = 0xFFFFFFFFU;
+	m_u32ACTgtAddr = 0xFFFFFFFFU;
+	m_u32EXTgtAddr = 0xFFFFFFFFU;
+	m_u32FE2INTLvl = 0U;
+
+	// about phase done
+	m_bolEMITDone = false;
+	m_bolDC2Done = false;
+	m_bolDC3Done = false;
+	m_bolDC4Done = false;
+	m_bolACDone = false;
+	m_bolACPostDone = false;
+	m_bolEXDone = false;
+	m_bolWBDone = false;
+
+#ifdef INTERRUPT_TESTING
+	m_u32WBPC = 0;
+	m_u32WBNestLvl = 0;
+
+	m_u32ACPostPC = 0;
+	m_u32ACPostNestLvl = 0;
+#endif
+
+	// about interrupt
+//	m_bolINTOccur = false;
+//	m_u32INTLvl = 0xFFFFFFFF;
+	m_u64PMASKSet = 0;
+	m_u64PMASKClr = 0;
+
+	m_u64SameINTClr = 0ULL;
+	m_u64SameINTSet = 0ULL;
+	
+	// for BCond in EX use
+	m_bolEX_BCond = false;
+	m_u32EX_BCondAddr = 0;
+
+	// variable for PIPE_EX.EMIT use
+	m_u32SlotNum_EMIT = 0;
+	for (int i = 0; i < 16; i++)
+	{
+		m_u32slot_EMIT[i] = 0;
+	}
+	
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		m_arrChgBKF[i] = false;  // reset block floating point signals
+		for (int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			m_arrALU_BKFlag[ i ][ j ] = 0;
+		}
+
+		m_arrChgBKF_SHF[i] = false;  // reset block floating point signals
+		for (int j = 0; j < SHF_NUM_OF_UNIT; j++)
+		{
+			m_arrSHF_BKFlag[ i ][ j ] = 0;
+		}
+	}
+
+	// clear gen_reg forward structure
+	RstWBRegResult();
+
+	// clear DSP resource allocate info
+	RstResTbl();
+
+	// reset memory read/write port resource
+	RstBlkPortMask();
+
+	memset(g_arrMemCE, 0, sizeof(g_arrMemCE));
+	memset(m_arrFWDValid, 0, sizeof(m_arrFWDValid));
+	memset(m_arrFWDValue, 0, sizeof(m_arrFWDValue));
+
+	m_bolStepInsn = false;
+	for(int i = 0; i < MAX_EVT_NUM; i++) {
+		TrigEvent(i, false);
+	}
+	
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::RstGenRegs()
+{
+	memset(u32ri_R, 0, GP_REG_NUM * 4);
+	memset(u32ro_R, 0, GP_REG_NUM * 4);
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::RstAddrRegs()
+{
+    for (int i = 0; i < REG_NUM_OF_ADDRUNIT; i++)
+    {
+			u32ri_U[ i ] = 0;
+			u32ro_U[ i ] = 0;
+			u32ri_V[ i ] = 0;
+			u32ro_V[ i ] = 0;
+			u32ri_W[ i ] = 0;
+			u32ro_W[ i ] = 0;
+   	}
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::RstALURegs()
+{
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+    {
+		for (int j = 0; j < ALU_NUM_OF_UNIT; j++)
+		{
+			//u32r_ALUA_AC[i][j].SetValue(0);
+			//u32r_ALUB_AC[i][j].SetValue(0);
+			//u32r_ALUCR_AC[i][j].SetValue(0);
+			u32r_ALUCON_AC[ i ][ j ].SetValue(0);
+			u32r_ALUA_EX[i][j].SetValue(0);
+			u32r_ALUB_EX[i][j].SetValue(0);
+			u32r_ALUCR_EX[i][j].SetValue(0);
+			u32r_ALUFR_EX[ i ][ j ].SetValue(0);
+
+			u32ri_ALUFR[ i ][ j ] = 0;
+			u32ro_ALUFR[ i ][ j ] = 0;
+			u40ri_ALU_ACC[ i ][ j ].u32Low = 0;
+			u40ri_ALU_ACC[ i ][ j ].u8High = 0;
+			u40ro_ALU_ACC[ i ][ j ].u32Low = 0;
+			u40ro_ALU_ACC[ i ][ j ].u8High = 0;
+			u8ri_ALU_EXP[i][j] = 0;
+			u8ro_ALU_EXP[i][j] = 0;
+			u32r_ALU_ACF[i][j] = 0;
+			u32ri_ALU_CON[i][j] = 0;
+			u32ro_ALU_CON[i][j] = 0;
+			u32ri_ALU_CA[i][j] = 0;
+			u32ro_ALU_CA[i][j] = 0;
+			u32ri_ALU_DFER[i][j] = 0;
+			u32ro_ALU_DFER[i][j] = 0;
+			u64ri_ALU_DFMR[i][j].u32Low = 0;
+			u64ri_ALU_DFMR[i][j].u32High = 0;
+			u64ro_ALU_DFMR[i][j].u32Low = 0;
+			u64ro_ALU_DFMR[i][j].u32High = 0;
+			u64ri_ALU_DFIRR[i][j].u32Low = 0;
+			u64ri_ALU_DFIRR[i][j].u32High = 0;
+			u64ro_ALU_DFIRR[i][j].u32Low = 0;
+			u64ro_ALU_DFIRR[i][j].u32High = 0;
+		}
+
+		WriteALUCR(i, 0x2, true);
+		u32r_ALU_BKFlag[i].SetValue(0);
+		u32r_ALUFAR[i].SetValue(0);
+		u32r_ALUFOR[i].SetValue(0);
+
+   	} //for (i = 0; i < NUM_OF_UNITS; i++)
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::RstMULRegs()
+{
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+    {
+		for (int j = 0; j < MUL_NUM_OF_UNIT; j++)
+		{
+			//u32r_MULA_AC[i][j].SetValue(0);
+			//u32r_MULB_AC[i][j].SetValue(0);
+			//u32r_MULCR_AC[i][j].SetValue(0);
+			u32r_MULA_EX[i][j].SetValue(0);
+			u32r_MULB_EX[i][j].SetValue(0);
+			u32r_MULCR_EX[i][j].SetValue(0);
+			u32r_MULFR_EX[ i ][ j ].SetValue(0);
+			u32ri_MULFR[ i ][ j ] = 0;
+			u32ro_MULFR[ i ][ j ] = 0;
+			u80ri_MUL_MACC[ i ][ j ].u32Low = 0;
+			u80ri_MUL_MACC[ i ][ j ].u32Mid = 0;
+			u80ri_MUL_MACC[ i ][ j ].u16High = 0;
+			u80ro_MUL_MACC[ i ][ j ].u32Low = 0;
+			u80ro_MUL_MACC[ i ][ j ].u32Mid = 0;
+			u80ro_MUL_MACC[ i ][ j ].u16High = 0;
+			u128ri_MUL_MACC[i][j].u32HH = 0;
+			u128ri_MUL_MACC[i][j].u32LH = 0;
+			u128ri_MUL_MACC[i][j].u32HL = 0;
+			u128ri_MUL_MACC[i][j].u32LL = 0;
+			u128ro_MUL_MACC[i][j].u32HH = 0;
+			u128ro_MUL_MACC[i][j].u32LH = 0;
+			u128ro_MUL_MACC[i][j].u32HL = 0;
+			u128ro_MUL_MACC[i][j].u32LL = 0;
+		}
+
+		WriteMULCR(i, 0x2, true);
+		u32r_MULFAR[i].SetValue(0);
+		u32r_MULFOR[i].SetValue(0);
+		u32r_MULCUTR[i].SetValue(0);
+
+   	} //for (i = 0; i < NUM_OF_UNITS; i++)
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::RstSHFRegs()
+{
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+    {
+		for (int j = 0; j < SHF_NUM_OF_UNIT; j++)
+		{
+			u32r_SHFA_AC[i][j].SetValue(0);
+			u32r_SHFB_AC[i][j].SetValue(0);
+			u32r_SHFCR_AC[i][j].SetValue(0);
+			u32r_SHFA_EX[i][j].SetValue(0);
+			u32r_SHFB_EX[i][j].SetValue(0);
+			u32r_SHFCR_EX[i][j].SetValue(0);
+			u32ri_SHFFR[ i ][ j ] = 0;
+			u32ro_SHFFR[ i ][ j ] = 0;
+			u64ri_SHF_SACC[i][j].u32Low= 0;
+			u64ri_SHF_SACC[i][j].u32High= 0;
+			u64ro_SHF_SACC[i][j].u32Low= 0;
+			u64ro_SHF_SACC[i][j].u32High= 0;
+			u32_SHF_SCF[i][j].SetValue(0);
+			u32r_SHF_SLTAR[i][j].SetValue(0);
+			u32r_SHFER[i][j].SetValue(0);
+#ifndef BWSIM_PUB_MODE
+			/*for (int m=0;m<4;m++)
+			{
+				for (int n=0;n<256;n++)
+				{
+					u32_SHF_TAB[i][j].arrElem[m][n]=0x8423ffa7U;
+				}
+			}*/
+			ResetSHFTab();
+#else
+			{
+				for (int m=0;m<4;m++)
+				{
+					for (int n=0;n<256;n++)
+					{
+						u32_SHF_TAB[i][j].arrElem[m][n]=0U;
+					}
+				}
+			}
+#endif
+		}
+
+		WriteSHFCR(i, 0x2, true);
+		WriteGPLYR(i,0,true);
+		u32r_SHF_BKFlag[i].SetValue(0);
+		u32r_SHFFAR[i].SetValue(0);
+		u32r_SHFFOR[i].SetValue(0);
+		u32r_SHFCUTR[i].SetValue(0);
+		
+
+   	} //for (i = 0; i < NUM_OF_UNITS; i++)
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::RstSPURegs()
+{
+	for (int i = 0; i < NUM_OF_UNITS; i++)
+    {
+		u32r_SPUA_AC[i].SetValue(0);
+		u32r_SPUB_AC[i].SetValue(0);
+		u32r_SPUCR_AC[i].SetValue(0);
+		u32r_SPUA_EX[i].SetValue(0);
+		u32r_SPUB_EX[i].SetValue(0);
+		u32r_SPUCR_EX[i].SetValue(0);
+
+		WriteSPUCR(i, 0x2, true);
+		u32ri_SPUFR[ i ] = 0;
+		u32ro_SPUFR[ i ] = 0;
+		
+		u32ri_CPredReg[i] = 0;
+		u32ro_CPredReg[i] = 0;
+
+   	} //for (i = 0; i < NUM_OF_UNITS; i++)
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ResetRegs()
+{
+	int i, j;
+	DSPU32 u32ChipID;
+
+	for (i = 0; i < 3; i++)
+	{
+		for ( j = 0; j < 9; j++)
+		{
+			u32r_DMRWCFR_ACEX[ i ][ j ] = 0;
+			u32r_DMRWCFR_EXWB[ i ][ j ] = 0;
+		}
+	}
+
+	u32r_SavedBranchPC = 0;
+	u32r_SavedBranchINTLvl = 0;
+	bolr_SavedBranchValid = false;
+
+	u32r_CacheBusySavedPC = 0;
+	bolr_FpcUsedISRFlushed = false;
+	bolr_CacheBusyISRFlushed = false;
+	bolr_ISRFlushedOnce = false;
+	
+	u32r_NestLvlAftIRET_AC_EX = 0;
+	u32r_REGFS = 0;
+	u32r_CIDR = 0;
+	//u32r_CINF.SetValue(0);	//初始值应为？
+
+	RstGenRegs();
+	RstAddrRegs();
+	
+	// Processor mode; Enable HW INT; Disable HW INT nesting.
+	u32ri_GCSR = 0;
+	u32ro_GCSR = 0;
+	
+	RstALURegs();
+	RstMULRegs();
+	RstSHFRegs();
+	RstSPURegs();
+
+	RstSeqCounter();
+
+	// Set program counter to the program entry point
+	u32r_FPC.SetValue(DSP_PROG_ENTRY);
+	u32r_EPC.SetValue(DSP_PROG_ENTRY);
+
+	//u32r_FPC =  DSP_PROG_ENTRY;
+	//u32r_EPC = DSP_PROG_ENTRY;
+	//u32r_FPC =  LISA_PROGRAM_COUNTER;			// address of label "_main" or "_start" in assembly file 
+	//u32r_EPC = LISA_PROGRAM_COUNTER;
+	
+	// zero-overhead loop counter register
+	for (i = 0; i < 4; i++)
+	{
+		u32ri_LC[i] = 0;
+		u32ro_LC[i] = 0;
+	}
+
+	// for interrupt
+	u32ri_CGCR = 0x5000;
+	u32ro_CGCR = 0x5000;
+	u64ri_ILAT = 0;
+	u64ro_ILAT = 0;
+	u64ri_IMASK = 0;
+	u64ro_IMASK = 0;
+	u64r_PMASK.SetValue(0);
+	u64ri_ICTLR = 0;
+	u64ro_ICTLR = 0;
+
+	u32ri_ITMRl = u32ro_ITMRl = 0;
+	u32ri_ITMRh = u32ro_ITMRh = 0;
+	memset(u32ri_INTSrc, 0, sizeof(u32ri_INTSrc));
+	memset(u32ro_INTSrc, 0, sizeof(u32ro_INTSrc));
+	
+	u32r_EX_NPC.SetValue(0);
+	for (i = 0; i <= MAX_INT_LVL; i++)
+	{
+		u32ri_IVT[i] = 0;
+		u32ro_IVT[i] = 0;
+		u32ri_IRA[i] = 0;
+		u32ro_IRA[i] = 0;
+	}
+	u32ri_ExcpPC = 0;
+	u32ro_ExcpPC = 0;
+	u32ri_ExcpCode = 0;
+	u32ro_ExcpCode = 0;
+	u32ri_IINT_TxEN = 0;
+	u32ro_IINT_TxEN = 0;
+	u32ri_IINTN_Tx = 0;
+	u32ro_IINTN_Tx = 0;
+	for (i = 0; i <= 7; i++)
+	{
+		u32ri_IINTN_Rx[i] = 0;
+		u32ro_IINTN_Rx[i] = 0;
+	}
+
+	u32ri_IRET_ADDR_ACEX = 0;
+	u32ro_IRET_ADDR_ACEX = 0;
+
+    u32r_CyclesL.SetValue(0);
+	u32r_CyclesH.SetValue(0);
+
+	u32ri_BAR = 0;
+	u32ro_BAR = 0;
+	u32ri_SRP = 0;
+	u32ro_SRP = 0;
+	bolr_TestEnd = false;
+
+	u64r_SameINT = 0ULL;
+	
+	u32ri_CJMP = 0;
+	u32ro_CJMP = 0;
+
+	memset(u32ri_IRA, 0, (MAX_INT_LVL + 1) * sizeof(unsigned int));
+	memset(u32ro_IRA, 0, (MAX_INT_LVL + 1) * sizeof(unsigned int));
+
+	bolro_Idle = false;
+	bolri_Idle = false;
+
+	bolri_INTOccur = false;
+	bolro_INTOccur = false;
+	i32ri_INTLvl = -1;
+	i32ro_INTLvl = -1;	
+
+
+	bolr_UseCustomINT.SetValue(false);
+	bolr_UseRealINT.SetValue(false);
+	
+	u32r_IMAFR.SetValue(0);   //地址空间中定义默认值为0
+	u32r_IMACR.SetValue(0x2); //地址空间中定义默认值为0x2
+
+	u32r_SITR.SetValue(0);
+
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::RstSeqCounter()
+{
+	u32r_SeqCounter_EMIT.SetValue(0);
+	u32r_SeqCounter_DC1.SetValue(0);
+	u32r_SeqCounter_DC2.SetValue(0);
+	u32r_SeqCounter_DC3.SetValue(0);
+	u32r_SeqCounter_DC4.SetValue(0);
+	u32r_SeqCounter_AC.SetValue(0);
+	u32r_SeqCounter_EX.SetValue(0);
+	u32r_SeqCounter_WB.SetValue(0);
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::GSignExtend(DSPU32 p_u32Src, int p_intSrcLen)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+	DSPU32 u32Temp;
+
+	if (p_intSrcLen < 2 || p_intSrcLen > 32)
+	{
+		return u32Rtn;
+	}
+
+	u32Temp = (p_u32Src >> (p_intSrcLen - 1)) & 0x1;
+	if ( u32Temp == 0 )
+	{
+		u32Rtn = ~(u32Rtn << p_intSrcLen);
+		u32Rtn = u32Rtn & p_u32Src;
+	}
+	else
+	{
+		u32Rtn = (u32Rtn << p_intSrcLen) | p_u32Src;
+	}
+	
+	return u32Rtn;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::ClrINTReq(DSPU32 p_u32INTLvl)
+{
+	DSPU64 u64Temp = 1;
+
+	if (p_u32INTLvl > MAX_INT_LVL)
+	{
+		return false;
+	}
+
+	m_u64ILATClr = m_u64ILATClr | (u64Temp << p_u32INTLvl);
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+// 根据中断级别清PMASK中的相应位
+// p_u32INTLvl: 0 ~ 63
+//
+bool sc_iss::ClrPMASKBit(DSPU32 p_u32INTLvl)
+{
+	DSPU64 u64Temp = 1;
+
+	if (p_u32INTLvl > MAX_INT_LVL)
+	{
+		return false;
+	}
+
+	m_u64PMASKClr = m_u64PMASKClr | (u64Temp << p_u32INTLvl);
+
+	// i32ri_INTLvl始终存放流水线能够接受的最高优先级中断，不会小于当前服务的中断级别。
+	// 如果当前服务的中断为最高级别中断，那么在该中断返回时需要将i32ri_INTLvl置位，
+	// 否则低优先级中断不能进入流水线。
+	//
+	if(i32ri_INTLvl == p_u32INTLvl)
+	{
+		i32ri_INTLvl = -1;
+	}					
+
+	// 由于置位操作是在TrigINT中，清零操作优先级高
+	// 所以这里不需要判断: GIsBitSet64( (DSPU64)u64r_SameINT, (u32NestLvl - 1) )
+	if( p_u32INTLvl >= 0 )
+	{
+		m_u64SameINTClr = GSetBit64(m_u64SameINTClr, p_u32INTLvl);
+	}
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+// p_u32INTLvl: 中断级别，0 ~ 63
+//
+DSPU32 sc_iss::GetNestLvlAftIRET(DSPU64 p_u64PMASK, DSPU32 p_u32INTLvl)
+{
+	DSPU64 u64Temp = 0;
+
+	if (p_u32INTLvl > MAX_INT_LVL)
+	{
+		return 0U;
+	}
+
+	u64Temp = ~u64Temp;                  // 0xFFFFFFFFFFFFFFFF
+	u64Temp = (u64Temp << p_u32INTLvl);
+	p_u64PMASK = p_u64PMASK & (~u64Temp); // 清u63PMASK中p_u32INTLvl对应的位以及更高位
+  
+  return GetNestLvl(p_u64PMASK);  // 返回中断嵌套级别 （0 ~ 64）
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::SetIVT(DSPU32 p_u32ISRAddr, DSPU32 p_u32INTLvl)
+{
+	if (p_u32INTLvl > MAX_INT_LVL)
+	{
+		return false;
+	}
+
+	wr_u32r_IVT(p_u32INTLvl, p_u32ISRAddr, false);
+	return true;
+}
+//-----------------------------------------------------------------------------------
+// 置位ILAT中的相应位。p_u32INTLvl必须对应合法中断。
+// To trigger HW interrupt. Exception should be triggered using trap instruction.
+//
+bool sc_iss::TrigINT(DSPU32 p_u32INTLvl)
+{
+	DSPU64 u64Temp = 0x1ULL;
+	DSPU64 u64PMASK = (DSPU64)u64r_PMASK;
+
+	// p_u32INTLvl合法性检查
+	if (  (p_u32INTLvl > MAX_INT_LVL) || (p_u32INTLvl == EXCP_INT_LVL) ) // exclude exception
+	{
+		sprintf(g_arrLisaMsg, "TrigINT: %d is Invalid INT level.\n", (int)p_u32INTLvl);
+		PrintToCerr(g_arrLisaMsg);
+		return false;
+	}
+
+	if ( !GIsBitSet64(GenILATMask(), p_u32INTLvl) )
+	{
+		sprintf(g_arrLisaMsg, "TrigINT: %d is Invalid INT level.\n", (int)p_u32INTLvl);
+		PrintToCerr(g_arrLisaMsg);
+		return false;
+	}
+
+	u64Temp = u64Temp << p_u32INTLvl;
+
+	m_u64ILATSet |= u64Temp;
+	if((u64Temp & u64ro_ILAT) == 0ULL && (u64Temp & u64PMASK) != 0ULL)
+	{
+		m_u64SameINTSet |= u64Temp;
+	}
+	m_u64SameINTSet |= (m_u64ILATSet & m_u64ILATClr);
+
+	//printf("TrigINT: INT Level 0x%x was triggered.\n", (unsigned int)p_u32INTLvl);  // only for debug
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+// 置位ILAT中的相应位。p_u32INTLvl必须对应合法中断(包括由strap引起的软件中断)。
+//
+bool sc_iss::SetILAT(DSPU32 p_u32INTLvl)
+{
+	DSPU64 u64Temp = 0x1;
+	DSPU64 u64PMASK = (DSPU64)u64r_PMASK;
+
+	// p_u32INTLvl合法性检查
+	if (  (p_u32INTLvl > MAX_INT_LVL) )
+	{
+		sprintf(g_arrLisaMsg, "SetILAT: %d is Invalid INT level.\n", (int)p_u32INTLvl);
+		PrintToCerr(g_arrLisaMsg);
+		return false;
+	}
+/*
+	if ( !GIsBitSet64(GenILATMask(), p_u32INTLvl) )
+	{
+		sprintf(g_arrLisaMsg, "SetILAT: %d is Invalid INT level.\n", (int)p_u32INTLvl);
+		PrintToCerr(g_arrLisaMsg);
+		return false;
+	}
+*/
+	u64Temp = u64Temp << p_u32INTLvl;
+	m_u64ILATSet |= u64Temp;
+	if((u64Temp & u64ro_ILAT) == 0ULL && (u64Temp & u64PMASK) != 0ULL)
+	{
+		m_u64SameINTSet |= u64Temp;
+	}
+	m_u64SameINTSet |= (m_u64ILATSet & m_u64ILATClr);
+
+	return true;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::UpdateINTReg()
+{
+	DSPU64 u64PMASK;
+
+	if ( (m_u64PMASKClr | m_u64PMASKSet) != 0 )
+	{
+		u64PMASK = u64r_PMASK;
+		u64PMASK = u64PMASK & (~m_u64PMASKClr);
+		u64PMASK = u64PMASK | m_u64PMASKSet;
+		u64r_PMASK = u64PMASK;
+	}	
+}
+
+void sc_iss::UpdateILAT()
+{
+	DSPU64 u64ILAT;
+	// for bit in ILAT, if clear and set occur at the same cycle, setting has higher prioity.
+	if ( (m_u64ILATClr | m_u64ILATSet) != 0 )
+	{
+		u64ILAT = u64ro_ILAT;
+		u64ILAT = u64ILAT & (~m_u64ILATClr);
+		u64ILAT = u64ILAT | m_u64ILATSet;
+		u64ri_ILAT = u64ILAT;
+	}
+	m_u64ILATClr = m_u64ILATSet = 0ULL;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ResetIABP0()
+{		
+	for (int i = 0; i < IAB_WIDTH; i++)
+	{
+		m_arrIABP0Out[i] = 0;
+		m_arrIABP0In[i] = 0;
+	}
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ResetIABP1()
+{		
+	for (int i = 0; i < IAB_WIDTH; i++)
+	{
+		m_arrIABP1Out[i] = 0;
+		m_arrIABP1In[i] = 0;
+	}
+}
+//-----------------------------------------------------------------------------------
+void  sc_iss::UseCustomINT()
+{
+	DSPU64  u64TriggeredINTs = 0;
+	DSPU64  u64ValidPins;
+	DSPU64  u64Temp, u64HwINTMask;
+	DSPU32 u32Temp;
+
+	// 仅包括定时器低优先级中断和外部端口中断
+	// 定时器高优先级中断与低优先级中断复用u64ValidPins中相同位
+	// u64ValidPins = GenDSPU64(0x0000FF00, 0x00000F00);	
+	// u64Temp = g_arrNewIRQs[ u32r_CyclesL & 0x7FF ] & u64ValidPins;
+//	u64ValidPins = 0x2C7FFF4FFFE33F28ULL;
+	u64ValidPins = 0xffffffffffffffffULL;
+	
+	u64Temp = (g_arrNewIRQs[m_u32CustomINTIdx & 0x7ff] & u64ValidPins);
+	
+	u64r_INTReg0 = u64Temp; // 施加中断信号给第一级中断信号寄存器
+	if( m_u32CustomINTIdx < 10000 )
+	{
+		if( (m_u32CustomINTIdx % 100) < 10 )
+		{
+			m_bolShutINT = false;
+		}
+		else
+		{
+			m_bolShutINT = true;
+		}
+	}
+	else if(m_u32CustomINTIdx == 10000)
+	{
+		bolr_UseCustomINT = false;
+		m_u32CustomINTIdx = 0;
+		return;
+	}
+	if(m_bolShutINT)
+	{
+		u64r_INTReg0 = 0ULL;
+	}
+	m_u32CustomINTIdx++;
+	for(int i = 0; i < 64; i++)
+	{
+		if ( GIsBitSet64(u64r_INTReg0, i) && !GIsBitSet64(u64r_INTReg1, i) )
+		{
+			TrigINT(i);
+			u64TriggeredINTs = GSetBit64(u64TriggeredINTs, i);
+		}
+	}
+	// exit idle state below.
+	u64HwINTMask = GenDSPU64(0x0A7FFF4F, 0xFFE33F28); // 仅不包括软件异常
+	
+	if ( GIsBitSet(u32ro_CGCR, 12) )
+	{
+		// CGCR[12]为1, IDLE的解除条件是由中断产生，不管中断是否被屏蔽
+		if(GIsSomeBitSet64(u64HwINTMask, u64TriggeredINTs))
+		{
+			if ( !m_bolSetCGCRBit12 )
+			{
+				u32ri_CGCR = GClrBit(u32ri_CGCR, 12);
+			//	u32ro_CGCR = GClrBit(u32ro_CGCR, 12);
+			}
+			
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+				//bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	}
+	else
+	{
+		// CGCR[12]为0, IDLE的解除条件是有中断产生，并且中断未被屏蔽
+		
+		if ( GIsBitSet(u32ro_CGCR, 0) && GIsSomeBitSet64(u64ro_IMASK, u64TriggeredINTs) )  // this HW interrupt should be enabled.
+		{
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+				//bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	}
+#if 0	
+	u32Temp = m_u32TestMode;
+	if ( u32Temp == 1 )
+	{
+		// 当测试模式为1时，在10000个cycle后关闭中断输入
+		if (u32r_CyclesL == (unsigned int)10000)
+		{
+			m_bolShutINT = true;
+		}
+
+		if (m_bolShutINT)
+		{
+			// 关闭给第一级中断信号寄存器的中断信号输入
+			u64r_INTReg0 = GenDSPU64(0xFFFFFFFF, 0xFFFFFFFF);
+		}
+
+	}
+	else if ( u32Temp == 4 )
+	{
+		// 当测试模式为4时，在5000个cycle后关闭中断输入
+	
+		if (u32r_CyclesL < (unsigned int)5000)
+		{
+			if (u32r_CyclesL % 10 == 0)
+			{
+				// 当cycle值为10的整数倍时，关闭中断信号输入
+				m_bolShutINT = true;
+			}
+
+			if (u32r_CyclesL % 100 == 0)
+			{
+				// 当cycle值为100的整数倍时，开放中断信号输入
+				m_bolShutINT = false;
+			}
+		}
+		else if  (u32r_CyclesL == (unsigned int)5000)
+		{
+			m_bolShutINT = true;
+		}
+
+		if (m_bolShutINT)
+		{
+			// 关闭给第一级中断信号寄存器的中断信号输入
+			u64r_INTReg0 = GenDSPU64(0, 0);
+		}
+	}
+	else if ( u32Temp == 5 )
+	{
+		// 当测试模式为5时，在m_u32GateCycles个cycle后关闭中断输入
+		if (u32r_CyclesL == m_u32GateCycles)
+		{
+			m_bolShutINT = true;
+		}
+
+		if (m_bolShutINT)
+		{
+			u64r_INTReg0 = GenDSPU64(0, 0);
+		}
+	}
+
+	for (i = 0; i < 64; i++)
+	{
+		// 检查u64ValidPins中定义的每一位
+		if ( GIsBitSet64(u64ValidPins, i) )
+		{
+			// 若u64ValidPins中的某一位有效
+			if ( GIsBitSet64(u64r_INTReg0, i) && (!GIsBitSet64(u64r_INTReg1, i)) )
+			{
+				// 且相应于该位检测到了中断信号的上升沿
+
+				//printf("INT detected here\n");
+				
+				TrigINT(i); // 置位ILAT中的相应位
+				u64TriggeredINTs = GSetBit64(u64TriggeredINTs, i);
+				// 若为定时器中断，同时触发定时器高优先级中断
+				if (i == 2)
+				{
+					TrigINT(55);                       // trigger TIMER4LI and TIMER4HI at the same time.
+					u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 55);
+				}
+
+				if (i == 3)
+				{
+					TrigINT(56);                       // trigger TIMER3LI and TIMER3HI at the same time.
+					u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 56);
+				}
+
+				if (i == 4)
+				{
+					TrigINT(57);                       // trigger TIMER2LI and TIMER2HI at the same time.
+					u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 57);
+				}
+
+				if (i == 5)
+				{
+					TrigINT(58);                       // trigger TIMER1LI and TIMER1HI at the same time.
+					u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 58);
+				}
+
+				if (i == 6)
+				{
+					TrigINT(59);                       // trigger TIMER0LI and TIMER0HI at the same time.
+					u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 59);
+				}
+			} // if INT occur
+
+
+		} // if ( GIsBitSet64(u64ValidPins, i) )
+
+	} // for (i = 0; i < 64; i++)
+
+	// exit idle state below.
+	u64HwINTMask = GenDSPU64(0x0A7FFF4F, 0xFFE33F28); // 仅不包括软件异常
+	
+	if ( GIsBitSet(u32ro_CGCR, 12) )
+	{
+		// CGCR[12]为1, IDLE的解除条件是由中断产生，不管中断是否被屏蔽
+		
+		bolCond0 = GIsBitSet(u32ro_CGCR, 0) && GIsSomeBitSet64(u64ro_IMASK, u64TriggeredINTs);
+		bolCond1 = GIsSomeBitSet64(u64HwINTMask, u64TriggeredINTs);
+		if ( bolCond0 || bolCond1 )
+		{
+			if ( !m_bolSetCGCRBit12 )
+			{
+				if (bolCond1)
+				{
+					u32ri_CGCR = GClrBit(u32ri_CGCR, 12);
+					u32ro_CGCR = GClrBit(u32ro_CGCR, 12);
+				}				
+			}
+			
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+				bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		} // if ( bolCond0 || bolCond1 )
+
+	}
+	else
+	{
+		// CGCR[12]为0, IDLE的解除条件是有中断产生，并且中断未被屏蔽
+		
+		if ( GIsBitSet(u32ro_CGCR, 0) && GIsSomeBitSet64(u64ro_IMASK, u64TriggeredINTs) )  // this HW interrupt should be enabled.
+		{
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+				bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	}
+#endif
+}
+//-----------------------------------------------------------------------------------
+void  sc_iss::UseRealINT()
+{
+	DSPU64 u64INT = 0ULL;
+	DSPU64 u64HwINTMask;
+	DSPU64 u64TriggeredINTs = 0ULL;
+	DSPU32 u32TINTMask = m_pTIMER->GetTINTMask();
+	if(u32TINTMask != 0)
+	{
+		u64INT = GSetBit64(u64INT, 53);
+	}
+	u64r_INTReg0 = u64INT;
+	for(int i = 0; i < 64; i++)
+	{
+		if ( GIsBitSet64(u64r_INTReg0, i) && !GIsBitSet64(u64r_INTReg1, i) )
+		{
+			TrigINT(i);
+			u64TriggeredINTs = GSetBit64(u64TriggeredINTs, i);
+		}
+	}
+
+		// exit idle state below.
+	u64HwINTMask = GenDSPU64(0x0A7FFF4F, 0xFFE33F28); // 仅不包括软件异常
+	
+	if ( GIsBitSet(u32ro_CGCR, 12) )
+	{
+		// CGCR[12]为1, IDLE的解除条件是由中断产生，不管中断是否被屏蔽
+		if(GIsSomeBitSet64(u64HwINTMask, u64TriggeredINTs))
+		{
+			if ( !m_bolSetCGCRBit12 )
+			{
+				u32ri_CGCR = GClrBit(u32ri_CGCR, 12);
+			//	u32ro_CGCR = GClrBit(u32ro_CGCR, 12);
+			}
+			
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+				//bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	}
+	else
+	{
+		// CGCR[12]为0, IDLE的解除条件是有中断产生，并且中断未被屏蔽
+		
+		if ( GIsBitSet(u32ro_CGCR, 0) && GIsSomeBitSet64(u64ro_IMASK, u64TriggeredINTs) )  // this HW interrupt should be enabled.
+		{
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+				//bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	}
+
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SimService(DSPU32 p_u32TrapCode, DSPU32 p_u32R50, DSPU32 p_u32R51, DSPU32 p_u32R52)
+{
+	//bool bolTemp;
+	//MEM_INSTR_DETAIL  mem_instr_detail;
+	DSPU32 u32Temp = 0;
+	bool bolInit = false;
+	
+	switch (p_u32TrapCode)
+	{
+		case 0:
+			//SetIVT(p_u32R50, p_u32R51);
+			break;
+		case 1:
+			//TrigINT(p_u32R50);
+			break;
+		case 2:
+			// u32ro_R[50]: start address
+			// u32ro_R[51]: number of 32-bit words
+			// u32ro_R[52]: columns of out put file
+			LogTestResult(p_u32R50, p_u32R51, p_u32R52);
+			break;
+		case 3:
+			bolr_TestEnd = true;         // indicate to the end of a testbench (only for run testbench)
+			#ifdef BWSIM_LOG_INFO
+			if(!m_bolDMemDumped)
+			{
+//				LogDataMem();
+				m_bolDMemDumped = true;
+			}
+			#endif
+			break;
+		case 4:
+			// init INT signals
+			if (m_bolRTrap4Valid)
+			{
+				bolInit = InitNewIntSignals();
+			}
+			if(bolInit)
+			{
+				bolr_UseCustomINT = true;				
+				u64r_INTReg0 = 0ULL;
+				u64r_INTReg1 = 0ULL;
+			}
+			else
+			{
+				bolr_UseRTLINT = InitINTI();
+			}
+
+			break;
+		case 5:
+			u64ri_IMASK = GenDSPU64(0xFFFFFFFF, 0xFFFFFFFF);
+			u64ro_IMASK = u64ri_IMASK;
+			break;
+		case 6:
+			//LogCallStk();
+			break;
+		case 7:
+			//WriteMem(p_u32R50, p_u32R51);
+			break;
+		case 8:
+			//ReadMem(p_u32R50, &u32Temp);
+			//wr_u32r_R(0, 52, u32Temp);
+			break;
+		case 9:
+			bolr_UseRealINT = true;
+			break;
+		case 10:
+			m_bolStartDump = true;
+			break;
+		case 12:
+			m_u32TraceState = 1;
+			memset(m_arrDeltaPC, 0, sizeof(m_arrDeltaPC));
+			memset(m_arrDeltaTime, 0, sizeof(m_arrDeltaTime));
+			m_u32TraceBasePC = PIPE_EX.EX_WB.m_right.uint32r_pc;
+			m_u32TraceBaseTime = m_u32CyclesL;
+			break;
+		case 13:
+			m_u32TraceState = 2;
+			LogTraceCases();
+			break;
+		case 14:
+			m_bolSimEnd = true;
+			break;
+		// ABI_CHECK:
+		// callee save寄存器使用合法性检查
+		case 15:
+			if (!m_bolABIChkFromECS) {
+				m_u32ABIMask = 0xf;
+				m_u32ABIBase = 0x417fff;
+				m_u32ABITop = 0x408000;
+				/*
+				m_u32ABIMask = u32ro_R[0];
+				m_u32ABIBase = u32ro_U[7];
+				m_u32ABITop = u32ro_U[6];
+				*/
+				m_bolABIChkEn = true;
+				FILE *fp = NULL;
+				sprintf(g_arrFileName, "./ABI_CHECK.txt");
+				if ((fp = fopen(g_arrFileName, "w+")) == NULL) {
+					PrintToCerr("Error occured when open ABI_CHECK.txt\n");
+					return;
+				}
+				fclose(fp);				
+			}
+			break;
+		case 16:
+			if (!m_bolABIChkFromECS) {
+				m_bolABIChkEn = false;
+			}
+			break;
+ 		case 19:
+			LogDSPMem();
+			break;
+
+		case 20:
+			LogStateOnCall();
+			break;
+
+		case 21:
+			LogStateOnRet();
+			CompStates(2);
+			break;
+
+		case 22:
+			LogStateOnCall_ForLib();
+			break;
+
+		case 23:
+			LogStateOnRet_ForLib();
+			CompStates(1);
+			break;
+
+		case 29:                                    // only for IRQ Lib testing, on enter ISR
+			LogStateForISR_Enter();
+			break;
+
+		case 30:                                   // only for IRQ Lib testing, on leave ISR
+			u32Temp = u32r_CyclesL;
+			sprintf(g_arrLisaMsg, "Cycle 0x%08x: leave ISR\n", u32Temp);
+			ModelLogFrameInfo(g_arrLisaMsg);
+			LogStateForISR_Leave();
+			if ( !CompStates(3) )
+			{
+				m_bolStateDiffer = true;
+			}
+			break;
+		//rtrap 31 32用来做库函数性能测试的
+		//检查算法是否栈越界、记录中断时间等
+#ifdef LIBTEST
+		case 31: 
+			m_bolTestForLib = true;
+			m_TestLibInput.identify = "";
+			m_TestLibInput.InParaMemList.clear();
+			m_TestLibInput.DataPagList.clear();
+			m_TestLibInput.INTLockAddr = 0;
+			m_TestLibInput.IntTime = 0;
+			m_TestLibInput.INTUnLockAddr = 0;
+			m_TestLibInput.MallocAddr = 0;
+			m_TestLibInput.module = "";
+			m_TestLibInput.StackSize = 0;
+			m_TestLibInput.Vendor = "";
+			m_TestLibOutput.FuncUseTime = 0;
+			m_TestLibOutput.FunEndTime = 0;
+			m_TestLibOutput.FunStartTime = 0;
+			m_TestLibOutput.INTEndTime = 0;
+			m_TestLibOutput.INTStartTime = 0;
+			m_TestLibOutput.IntTime = 0;
+			m_TestLibOutput.ReadExtAddr.clear();
+			m_TestLibOutput.ReadIllegalAddr.clear();
+			m_TestLibOutput.StackEndAddr = 0;
+			m_TestLibOutput.StackStartAddr = 0;
+			m_TestLibOutput.UseMalloc = false;
+			m_TestLibOutput.WriteExtAddr.clear();
+			m_TestLibOutput.WriteIllegalAddr.clear();
+			m_TestLibOutput.WriteIllegalDataPagAddr.clear();
+			GetFuncInfoFromFile();
+			u32Temp = u32r_CyclesL;
+			m_TestLibOutput.FunStartTime = u32Temp;
+			m_TestLibOutput.StackStartAddr = u32ro_U[8];
+			m_TestLibOutput.StackEndAddr = m_TestLibOutput.StackStartAddr;
+			m_TestLibOutput.StackSize = 0;
+			break;
+		case 32:
+			u32Temp = u32r_CyclesL;
+			m_TestLibOutput.FunEndTime = u32Temp;
+			m_TestLibOutput.FuncUseTime = m_TestLibOutput.FunEndTime - m_TestLibOutput.FunStartTime;
+			PrintTestStatus();
+			m_bolTestForLib = false;
+			break;
+#endif
+/*
+#ifdef LIBTESTCODE
+		case 33:
+			m_CodeCovForLibTest = true;
+			m_pc.clear();
+			m_cond_pc.clear();
+			break;
+		case 34:
+			{
+			char *p=NULL;
+			PrintCodeCoverage(p);
+			PrintCondCoverage();
+			m_pc.clear();
+			m_cond_pc.clear();
+			m_CodeCovForLibTest = false;
+			break;
+			}
+#endif
+*/
+		default:
+			PrintToCerr("Invalid SimService code\n");
+
+	} // switch (p_u32TrapCode)
+
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::InitINTI()
+{
+	FILE *fp;
+	DSPU32 u32Line = 0;
+	
+	sprintf(g_arrFileName, "%s/INTI.txt", g_arrIOPath);
+
+	fp = fopen(g_arrFileName, "r");
+	if(fp == NULL)
+	{
+		fprintf(stderr, "%s: cannot open INTI.txt", __FUNCTION__);
+		return false;
+	}
+	#ifdef LOG_STEP_TESTING
+	fprintf(stderr, "Begin to use RTL INT\n");
+	#endif	
+
+	memset(g_arrRTLINTCnt, 0, sizeof(g_arrRTLINTCnt));
+	memset(g_arrRTLINTId, 0, sizeof(g_arrRTLINTId));
+
+	while(fscanf(fp, "%x %d", &g_arrRTLINTId[u32Line], &g_arrRTLINTCnt[u32Line]) != EOF)
+	{
+		u32Line++;
+	}
+	if(u32Line == 0)
+	{
+		fprintf(stderr, "%s: input file has error", __FUNCTION__);
+		return false; 
+	}
+	m_u32RTLINTs = u32Line;
+	return true;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::UseRTLINT()
+{
+	for(int i = 0; i < m_u32RTLINTs; i++)
+	{
+		if(g_arrRTLINTCnt[i] != 0)
+		{
+			if(!GIsBitSet64(u64ro_ILAT, g_arrRTLINTId[i]))
+			{
+				TrigINT(g_arrRTLINTId[i]);
+				g_arrRTLINTCnt[i]--;
+			}
+			break;
+		}
+	}
+}
+//-----------------------------------------------------------------------------------
+DSPU32  sc_iss::GAShift32(DSPU32 p_u32Value, int p_i32ShfCtrl)
+{
+	DSPU32 u32Rtn, u32Sign;
+	int  i;
+
+	if ( (p_i32ShfCtrl < -32) || (p_i32ShfCtrl > 31) )
+	{
+		PrintToCerr("GAShift32: Invalid parameter\n");
+		return 0;
+	}
+
+	if ( p_i32ShfCtrl > 0 )
+	{
+		u32Sign = p_u32Value & 0x80000000;
+		for (i = 0; i < p_i32ShfCtrl; i++)
+		{
+			p_u32Value = p_u32Value << 1;
+		}
+
+		u32Rtn = (p_u32Value & 0x7FFFFFFF) | u32Sign;
+	}
+	else if (p_i32ShfCtrl == 0)
+	{
+		u32Rtn = p_u32Value;
+	}
+	else
+	{
+		p_i32ShfCtrl = p_i32ShfCtrl * (-1);
+		for (i = 0; i < p_i32ShfCtrl; i++)
+		{
+			p_u32Value = (p_u32Value & 0x80000000) | ( p_u32Value >> 1 );
+		}
+
+		u32Rtn = p_u32Value;
+	}
+
+	return u32Rtn;
+}
+
+
+//-----------------------------------------------------------------------------------
+void sc_iss::UpdateBKFlags()
+{
+	int i, j;
+	unsigned int  u32Max;
+
+	for (i = 0; i < NUM_OF_UNITS; i++)
+    {
+		if ( m_arrChgBKF[i] )
+		{
+			u32Max = 0;
+			for (j = 0; j < ALU_NUM_OF_UNIT; j++)
+			{
+				u32Max = (m_arrALU_BKFlag[ i ][ j ] > u32Max)? m_arrALU_BKFlag[ i ][ j ] : u32Max;
+			}
+
+			if ( u32Max > u32r_ALU_BKFlag[ i ] )
+			{
+				WriteALUBKFlag(i, u32Max);
+			}
+			else
+			{
+				WriteALUBKFlag(i, u32r_ALU_BKFlag[ i ]);
+			}
+		}	
+
+		if ( m_arrChgBKF_SHF[i] )
+		{
+			u32Max = 0;
+			for (j = 0; j < SHF_NUM_OF_UNIT; j++)
+			{
+				u32Max = (m_arrSHF_BKFlag[ i ][ j ] > u32Max)? m_arrSHF_BKFlag[ i ][ j ] : u32Max;
+			}
+
+			if ( u32Max > u32r_SHF_BKFlag[ i ] )
+			{
+				WriteSHFBKFlag(i, u32Max);
+			}
+			else
+			{
+				WriteSHFBKFlag(i, u32r_SHF_BKFlag[ i ]);
+			}
+		}
+		
+	} // for (i = 0; i < NUM_OF_UNITS; i++)
+
+}
+
+//--------------------------------------------------------------------------
+bool  sc_iss::CompStates(int p_intType)
+{
+	/*
+	if ( comp_svct_call_ret(g_arrIOPath, p_intType) == false )
+	{
+		sprintf(g_arrLisaMsg, "CompStates: error, states differ on cycle 0x%x\n", (unsigned int)u32r_CyclesL);
+		PrintToCerr(g_arrLisaMsg);
+	}
+	*/
+	if ( comp_svct_call_ret(g_arrIOPath, p_intType) == false )
+	{
+		sprintf(g_arrLisaMsg, "CompStates: error, states differ on cycle 0x%x. ", (unsigned int)u32r_CyclesL);
+		PrintToCerr(g_arrLisaMsg);
+		if ( p_intType == 1 )
+		{
+			PrintToCerr("compared files are StateOnCall_ForLib.txt and StateOnRet_ForLib.txt\n");
+		}
+		else if ( p_intType == 2 )
+		{
+			PrintToCerr("compared files are StateOnCall.txt and StateOnRet.txt\n");
+		}
+		else if ( p_intType == 3 )
+		{
+			PrintToCerr("compared files are StateOnEnterISR.txt and StateOnLeaveISR.txt\n");
+		}
+
+		return false;
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+// Added by liuyu:
+//	Remove Conditional Do judgement from decode phase to top module(do_slots)
+//	Each instructions need to check execution condition before they enter pipeline phases
+//-----------------------------------------------------------------------------------
+
+bool sc_iss::FillCondDoInfo(DSPU32 *p_pSlots, DSPU32 *p_pSlotsRes, DSPU32 p_u32SlotNum, DSPU32 p_u32Phase)
+{
+	DSPU32 u32SLKIdx, u32CondDoN;
+	bool bolNotDoByUVW1, bolNotDoByUVW2;
+	bool bolNotDoByCPred1, bolNotDoByCPred2;
+	bool bolIsMacroInstr;
+	DSPU32 u32CurrentInstrIdx, u32CondDoNPlus2;
+
+	ISS_ASSERT(p_u32Phase == PHASE_DC2 || p_u32Phase == PHASE_DC2_POST || p_u32Phase == PHASE_DC4_POST);
+	
+	if(p_u32Phase == PHASE_DC2)
+	{
+		DSPU32 u32InstrNum = 0;
+		DSPU32 u32PipePC = PIPE_EX.DC1_DC2.m_right.uint32r_pc;
+		for (int i = 0; i < p_u32SlotNum; i++)
+		{
+			u32SLKIdx = p_pSlotsRes[i];
+			ISS_ASSERT(u32SLKIdx !=0 && u32SLKIdx < RES_SLK_SIZE);
+			
+			m_arrResSLK[ u32SLKIdx ].bolHoldInfo = true;
+			m_arrResSLK[ u32SLKIdx ].cond_do_info.u32InstrIdx = i;
+			m_arrResSLK[ u32SLKIdx ].cond_do_info.bolNotDo = false;		// default value
+			m_arrResSLK[ u32SLKIdx ].cond_do_info.u32PC = u32PipePC + i;
+
+			if ( IsExtFirstWord(p_pSlots[i]) )  // instruction with two words
+			{
+				++i;
+			}
+			m_arrResSLK[ u32SLKIdx ].cond_do_info.u32UnitMask = ExtractBinStr(p_pSlots[i], 27, 4);
+			u32InstrNum++;
+		}		
+		
+		if ( IS_CHPG_INSN ( p_pSlots[p_u32SlotNum - 1] ) )
+		{
+			DSPU32 u32PageSel = 0U;
+			DSPU32 u32Insn;
+			u32PageSel |= ExtractBinStr(p_pSlots[p_u32SlotNum - 1], 0, 24);
+			u32PageSel |= ( ExtractBinStr(p_pSlots[p_u32SlotNum - 1], 27, 4) << 24 );
+
+			for(int i = p_u32SlotNum - 2, j = 0; i >= 0; i--)
+			{
+				u32Insn = p_pSlots[i];
+				if ( IsInstNoCalc(u32Insn) && (GetOpcodeNoCalc(u32Insn) == op_padding_c) )
+				{
+					continue;
+				}
+				u32SLKIdx = p_pSlotsRes[i];
+				if(m_arrResSLK[u32SLKIdx].bolHoldInfo)
+				{
+					m_arrResSLK[u32SLKIdx].slot_res_used.bolUseSpecificPage = true;
+					m_arrResSLK[u32SLKIdx].slot_res_used.u32SrcPageIdx = GIsBitSet(u32PageSel, j);
+					m_arrResSLK[u32SLKIdx].slot_res_used.u32DestPageIdx = GIsBitSet(u32PageSel, j+1);
+				}
+				j += 2;
+			}
+			
+			u32InstrNum--;
+		}		
+		PIPE_EX.DC2_DC3.m_left.u32InstrNum = u32InstrNum;
+
+		return true;
+	}
+
+	// Note:
+	// 	Conditional Do instructions must be at the first 2 slots,
+	//	therefore ignored them when fill cond_do_info	
+	u32CondDoN = m_arrResSLK[p_pSlotsRes[0]].cond_do_info.u32CondDoN;
+	u32CondDoNPlus2 = u32CondDoN + 2;
+	
+	// 条件执行指令占用两个指令槽，且位于首两个
+	for (int i = 2; i < p_u32SlotNum; i++)
+	{
+		u32SLKIdx = p_pSlotsRes[i];
+		ISS_ASSERT(u32SLKIdx !=0 && u32SLKIdx < RES_SLK_SIZE);
+		// u32CurrentInstrIdx = [2, 15], u32CondDoNPlus2 = [2, 17]		
+		u32CurrentInstrIdx = m_arrResSLK[ u32SLKIdx ].cond_do_info.u32InstrIdx;
+		ISS_ASSERT(u32CurrentInstrIdx < MAX_INUM_LINE);		
+		
+		if(p_u32Phase == PHASE_DC2_POST)
+		{		
+			if(u32CurrentInstrIdx < u32CondDoNPlus2)
+			{
+				bolNotDoByUVW1 = m_arrResSLK[p_pSlotsRes[0]].cond_do_info.bolNotDoByUVW1;			
+				if(bolNotDoByUVW1)
+				{
+					m_arrResSLK[ u32SLKIdx ].cond_do_info.bolNotDo = true;
+					memset(&(m_arrResSLK[ u32SLKIdx ].slot_res_used), 0, sizeof(SLOT_RES_USED));
+				}
+			}
+			else
+			{
+				bolNotDoByUVW2 = m_arrResSLK[p_pSlotsRes[0]].cond_do_info.bolNotDoByUVW2;
+				if(bolNotDoByUVW2)
+				{
+					m_arrResSLK[ u32SLKIdx ].cond_do_info.bolNotDo = true;
+					memset(&(m_arrResSLK[ u32SLKIdx ].slot_res_used), 0, sizeof(SLOT_RES_USED));
+				}
+			}				
+		}
+		else if(p_u32Phase == PHASE_DC4_POST)
+		{
+			bolIsMacroInstr = m_arrResSLK[u32SLKIdx].bolIsMacroInstr;
+			
+			for(int j = 0; j < NUM_OF_UNITS; j++)
+			{
+				if(u32CurrentInstrIdx < u32CondDoNPlus2)
+				{
+					bolNotDoByCPred1 = m_arrResSLK[p_pSlotsRes[0]].cond_do_info.bolNotDoByCPred1[j];
+					if(bolNotDoByCPred1 && bolIsMacroInstr)
+					{
+						m_arrResSLK[ u32SLKIdx ].cond_do_info.u32UnitMask = GClrBit(m_arrResSLK[ u32SLKIdx ].cond_do_info.u32UnitMask, j);
+						CondClrHzd_DC4_POST(u32SLKIdx, j);
+					}
+				}
+				else
+				{
+					bolNotDoByCPred2 = m_arrResSLK[p_pSlotsRes[0]].cond_do_info.bolNotDoByCPred2[j];
+					if(bolNotDoByCPred2 && bolIsMacroInstr)
+					{
+						m_arrResSLK[ u32SLKIdx ].cond_do_info.u32UnitMask = GClrBit(m_arrResSLK[ u32SLKIdx ].cond_do_info.u32UnitMask, j);
+						CondClrHzd_DC4_POST(u32SLKIdx, j);
+					}
+				}					
+			}
+		
+		}
+		
+		if ( IsExtFirstWord(p_pSlots[i]) )  // instruction with two word
+		{
+			i++;
+		}
+	}  // for (i = 2; i < p_u32SlotNum; i++)
+
+	return true;
+}
+
+//-------------------------------------------------------------------------------
+void sc_iss::CondClrHzd_DC4_POST(DSPU32 p_u32SLKIdx, DSPU32 p_u32UnitIdx)
+{
+	SLOT_RES_USED * pSlotResUsed = &(m_arrResSLK[ p_u32SLKIdx ].slot_res_used);
+	
+	pSlotResUsed->u8ALUs[ p_u32UnitIdx ] = 0;
+	pSlotResUsed->u8MULs[ p_u32UnitIdx ] = 0;
+	pSlotResUsed->u8SHFs[ p_u32UnitIdx ] = 0;
+	pSlotResUsed->u8SPUs[ p_u32UnitIdx ] = 0;
+	pSlotResUsed->arrSrcGenRegs[ p_u32UnitIdx ] = 0ULL;
+	pSlotResUsed->arrDestGenRegs[ p_u32UnitIdx ] = 0ULL;
+	pSlotResUsed->u32SrcCPred &= ( ~(0xffU<<(p_u32UnitIdx*8)) );
+	pSlotResUsed->u32DestCPred &= ( ~(0xffU<<(p_u32UnitIdx*8)) );
+	pSlotResUsed->u32SrcU = 0;
+	pSlotResUsed->u32SrcV = 0;
+	pSlotResUsed->u32SrcW = 0;
+	pSlotResUsed->u32DestU = 0;
+	pSlotResUsed->u32DestV = 0;
+	pSlotResUsed->u32DestW = 0;
+	pSlotResUsed->u32AddrMask = GClrBit(pSlotResUsed->u32AddrMask, p_u32UnitIdx*2);
+	pSlotResUsed->u32AddrMask = GClrBit(pSlotResUsed->u32AddrMask, p_u32UnitIdx*2+1);
+	pSlotResUsed->arrMemSrcReg[ p_u32UnitIdx ] = 0;
+	pSlotResUsed->arrMemDestReg[ p_u32UnitIdx ] = 0;
+	pSlotResUsed->u32RdAMACCMask &= ( ~ ( 0xffU << (p_u32UnitIdx * 8) ) );
+	pSlotResUsed->u32WrAMACCMask &= ( ~ ( 0xffU << (p_u32UnitIdx * 8) ) );
+}
+//-------------------------------------------------------------------------------
+bool sc_iss::GetAddr12FromAddr32(DSPU32 p_addr32, DSPU32 *p_addr12, DSPU32 *p_units)
+{
+	DSPU32 temp = 0;
+	if( (p_addr32>=0x00E00000) && (p_addr32<=0x00E00003))  //xyztALUCR
+	{
+		*p_addr12 = 0x0;
+		*p_units = p_addr32 - 0x00E00000;
+	}
+	else if( (p_addr32>=0x00E00004) && (p_addr32<=0x00E00007))  //xyztALUFAR
+	{
+		*p_addr12 = 0x4;
+		*p_units = p_addr32 - 0x00E00004;
+	}
+	else if( (p_addr32>=0x00E00008) && (p_addr32<=0x00E0000B))  //xyztALUFOR
+	{
+		*p_addr12 = 0x8;
+		*p_units = p_addr32 - 0x00E00008;
+	}
+	else if( (p_addr32>=0x00E0000c) && (p_addr32<=0x00E0000f))  //xyztABFPR
+	{
+		*p_addr12 = 0xd0c;
+		*p_units = p_addr32 - 0x00E0000c;
+	}
+	else if( (p_addr32>=0x00E00010) && (p_addr32<=0x00E0002f))  //xyztALUFR0-7
+	{
+		temp = p_addr32 - 0x00E00010;		
+		*p_addr12 = 0xc10 + ( temp % 8 );
+		*p_units = temp / 8;
+	}
+	else if( (p_addr32>=0x00E00030) && (p_addr32<=0x00E0004f))  //xyztACF0-7
+	{
+		temp = p_addr32 - 0x00E00030;		
+		*p_addr12 = 0xc30 + ( temp % 8 );
+		*p_units = temp / 8;
+	}
+	else if( (p_addr32>=0x00E00050) && (p_addr32<=0x00E0006f))  //xyztCON0-7
+	{
+		temp = p_addr32 - 0x00E00050;		
+		*p_addr12 = 0xc50 + ( temp % 8 );
+		*p_units = temp / 8;
+	}
+	else if( (p_addr32>=0x00E00070) && (p_addr32<=0x00E0008f))  //xyztALUCAFR0-7
+	{
+		temp = p_addr32 - 0x00E00070;		
+		*p_addr12 = 0xc70 + ( temp % 8 );
+		*p_units = temp / 8;
+	}
+	else if( (p_addr32>=0x00E00090) && (p_addr32<=0x00E000af))  //xyztALUDFER0-7
+	{
+		temp = p_addr32 - 0x00E00090;		
+		*p_addr12 = 0xc90 + ( temp % 8 );
+		*p_units = temp / 8;
+	}
+	else if( (p_addr32>=0x00E000b0) && (p_addr32<=0x00E000ef))  //xyztALUDFMR0-7
+	{
+		temp = p_addr32 - 0x00E000b0;
+		if( temp%2 == 0)
+		{
+			*p_addr12 = 0xcb0 + ( (temp % 16) / 2 );
+		}
+		else
+		{
+			*p_addr12 = 0xcb8 + ( (temp % 16) / 2 );
+		}
+		*p_units = temp / 16;
+	}
+	else if( (p_addr32>=0x00E000f0) && (p_addr32<=0x00E0012f))  //xyztALUDFIRR0-7
+	{
+		temp = p_addr32 - 0x00E000f0;
+		if( temp%2 == 0)
+		{
+			*p_addr12 = 0xcf0 + ( (temp % 16) / 2 );
+		}
+		else
+		{
+			*p_addr12 = 0xcf8 + ( (temp % 16) / 2 );
+		}
+		*p_units = temp / 16;
+	}
+	else if( (p_addr32>=0x00E00130) && (p_addr32<=0x00E00133))  //xyztCPRED
+	{
+		*p_addr12 = 0x130;
+		*p_units = p_addr32 - 0x00E00130;
+	}
+	else if( (p_addr32>=0x00E00134) && (p_addr32<=0x00E00193))  //xyztACC0-7
+	{
+		temp = p_addr32 - 0x00E00134;
+		if( temp%3 == 0)
+		{
+			*p_addr12 = 0xcc0 + ( (temp % 24) / 3 );
+		}
+		else if( temp%3 == 1)
+		{
+			*p_addr12 = 0xcc8 + ( (temp % 24) / 3 );
+		}
+		else
+		{
+			*p_addr12 = 0xcd0 + ( (temp % 24) / 3 );
+		}
+		*p_units = temp / 24;
+	}
+	else if( (p_addr32>=0x00E00200) && (p_addr32<=0x00E00203))  //xyztSHFCR
+	{
+		*p_addr12 = 0x200;
+		*p_units = p_addr32 - 0x00E00200;
+	}
+	else if( (p_addr32>=0x00E00204) && (p_addr32<=0x00E00207))  //xyztSHFFAR
+	{
+		*p_addr12 = 0x204;
+		*p_units = p_addr32 - 0x00E00204;
+	}
+	else if( (p_addr32>=0x00E00208) && (p_addr32<=0x00E0020B))  //xyztSHFFOR
+	{
+		*p_addr12 = 0x208;
+		*p_units = p_addr32 - 0x00E00208;
+	}
+	else if( (p_addr32>=0x00E00210) && (p_addr32<=0x00E0021f))  //xyztSHFFR0-3
+	{
+		temp = p_addr32 - 0x00E00210;		
+		*p_addr12 = 0xe10 + ( temp % 4 );
+		*p_units = temp / 4;
+	}
+	else if( (p_addr32>=0x00E00220) && (p_addr32<=0x00E0022f))  //xyztSLTAR0-3
+	{
+		temp = p_addr32 - 0x00E00220;		
+		*p_addr12 = 0xe20 + ( temp % 4 );
+		*p_units = temp / 4;
+	}
+	else if( (p_addr32>=0x00E00230) && (p_addr32<=0x00E0023f))  //xyztSCF0-3
+	{
+		temp = p_addr32 - 0x00E00230;		
+		*p_addr12 = 0xe30 + ( temp % 4 );
+		*p_units = temp / 4;
+	}
+	else if( (p_addr32>=0x00E00274) && (p_addr32<=0x00E00277))  //xyztSHFCUTR
+	{
+		*p_addr12 = 0x274;
+		*p_units = p_addr32 - 0x00E00274;
+	}
+	else if( (p_addr32>=0x00E00260) && (p_addr32<=0x00E00263))  //xyztGPLYR
+	{
+		*p_addr12 = 0x260;
+		*p_units = p_addr32 - 0x00E00260;
+	}
+	else if( (p_addr32>=0x00E00264) && (p_addr32<=0x00E00273))  //xyztSHFER0-3
+	{
+		temp = p_addr32 - 0x00E00264;		
+		*p_addr12 = 0xe64 + ( temp % 4 );
+		*p_units = temp / 4;
+	}
+	else if( (p_addr32>=0x00E002C0) && (p_addr32<=0x00E002C3))  //xyztSPUCR
+	{
+		*p_addr12 = 0x2C0;
+		*p_units = p_addr32 - 0x00E002C0;
+	}
+	else if( (p_addr32>=0x00E002c4) && (p_addr32<=0x00E002c7))  //xyztSPUPR
+	{
+		*p_addr12 = 0xdc4;
+		*p_units = p_addr32 - 0x00E002c4;
+	}
+	else if( (p_addr32>=0x00E00300) && (p_addr32<=0x00E00303))  //xyztMULCR
+	{
+		*p_addr12 = 0x300;
+		*p_units = p_addr32 - 0x00E00300;
+	}
+	else if( (p_addr32>=0x00E00304) && (p_addr32<=0x00E00307))  //xyztMULFAR
+	{
+		*p_addr12 = 0x304;
+		*p_units = p_addr32 - 0x00E00304;
+	}
+	else if( (p_addr32>=0x00E00308) && (p_addr32<=0x00E0030B))  //xyztMULFOR
+	{
+		*p_addr12 = 0x308;
+		*p_units = p_addr32 - 0x00E00308;
+	}
+	else if( (p_addr32>=0x00E0030c) && (p_addr32<=0x00E0032b))  //xyztMULFR0-7
+	{
+		temp = p_addr32 - 0x00E0030c;		
+		*p_addr12 = 0xf10 + ( temp % 8 );
+		*p_units = temp / 8;
+	}
+	else if( (p_addr32>=0x00E003AC) && (p_addr32<=0x00E003AF))  //xyztMULCUTR
+	{
+		*p_addr12 = 0x3B0;
+		*p_units = p_addr32 - 0x00E003AC;
+	}
+	else
+	{
+		return false;
+	}
+	return true;
+}
+//-----------------------------------------------------------------------------------
+inline int DSP_BSF32(DSPU32 p_u32Val)
+{
+	int ret;
+	if(p_u32Val == 0U)
+	{
+		ret = -1;
+	}
+	else
+	{	
+	#ifdef DSP_WIN32
+		__asm
+		{
+			bsf eax, p_u32Val
+			mov ret, eax
+		}
+	#else
+		__asm__ __volatile__
+		(
+			"bsf %1, %0\n\t"
+			:"=r"(ret)
+			:"m"(p_u32Val)
+		);
+	#endif
+	}
+	return ret;
+}
+//-----------------------------------------------------------------------------------
+inline int DSP_BSR32(DSPU32 p_u32Val)
+{
+	int ret;
+	if(p_u32Val == 0U)
+	{
+		ret = -1;
+	}
+	else
+	{	
+	#ifdef DSP_WIN32
+		__asm
+		{
+			bsr eax, p_u32Val
+			mov ret, eax
+		}
+	#else
+		__asm__ __volatile__
+		(
+			"bsr %1, %0\n\t"
+			:"=r"(ret)
+			:"m"(p_u32Val)
+		);
+	#endif
+	}
+	return ret;
+}
+//-----------------------------------------------------------------------------------
+int sc_iss::GetLSB_64(DSPU64 p_u64Value)
+{
+	if(p_u64Value == 0ULL)
+	{
+		return -1;
+	}
+	
+	int result = -1;
+	
+	result = DSP_BSF32(p_u64Value & 0xffffffffU);
+	if(result >= 0)
+	{
+		return result;
+	}
+	result = DSP_BSF32((p_u64Value >> 32) & 0xffffffffU);
+	if(result >= 0)
+	{
+		return (result + 32);
+	}
+
+	return -1;
+}
+//-----------------------------------------------------------------------------------
+int sc_iss::GetMSB_64(DSPU64 p_u64Value)
+{
+	if(p_u64Value == 0ULL)
+	{
+		return -1;
+	}
+	
+	int result = -1;
+	
+	result = DSP_BSR32((p_u64Value >> 32U) & 0xffffffffU);
+	if(result >= 0)
+	{
+		return (result + 32);
+	}
+
+	result = DSP_BSR32(p_u64Value & 0xffffffffU);
+	if(result >= 0)
+	{
+		return result;
+	}
+	return -1;
+}
+//-----------------------------------------------------------------------------------
+int sc_iss::GetLSB_32(DSPU32 p_u32Value)
+{
+	return (DSP_BSF32(p_u32Value));
+}
+//-----------------------------------------------------------------------------------
+int sc_iss::GetMSB_32(DSPU32 p_u32Value)
+{
+	return (DSP_BSR32(p_u32Value));
+}
+
+//-----------------------------------------------------------------------------------
+// 取中断嵌套级别: 此处即为中断级别+ 1，并非反映目前正在被服务的中断嵌套情况。
+//
+//	range of nest level: 0 ~ 64
+//  0 means normal app and 1 ~ 64 means interrupt. 
+//
+DSPU32 sc_iss::GetNestLvl(DSPU64 p_u64PMASK)
+{
+	return (GetMSB_64(p_u64PMASK) + 1);
+}
+
+//-----------------------------------------------------------------------------------
+DSPU64 sc_iss::GetPMASK_R(DSPU64 p_u64PMASK)
+{
+	DSPU32 u32NestLvl = GetMSB_64(p_u64PMASK) + 1;
+	return ((~0ULL >> u32NestLvl) << u32NestLvl);
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::GenModelPass(DSPU32 p_u32Input)
+{
+	unsigned int u32Result;
+
+	u32Result= p_u32Input;
+	u32Result=u32Result | 0x12345678;
+	u32Result=u32Result & 0xAAAAAAAA;
+	return u32Result;
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::SetModelPass(DSPU32 p_u32Input, DSPU32 p_u32Output)
+{
+	if ( p_u32Output == GenModelPass(p_u32Input) )
+	{
+		g_bolDoShfReg = true;
+	}
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::RstModelPass()
+{
+	g_bolDoShfReg = false;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsFlagReg(DSPU32 p_u32SpecRegIdx)
+{
+	bool bolRtn = false;
+
+	switch (p_u32SpecRegIdx)
+	{
+		case 0x004:  //ALUFAR
+		case 0x008:  //ALUFOR
+		case 0x204:  //SHFFAR
+		case 0x208:  //SHFFOR
+		case 0x304:  //MULFAR
+		case 0x308:  //MULFOR
+			bolRtn = true;
+			break;
+	}
+
+	if ( p_u32SpecRegIdx == 0x3c0 || p_u32SpecRegIdx == 0x3c1 )  // CC0 ~ CC1
+	{
+		bolRtn = true;
+	}
+
+	/*
+	if ( (p_u32SpecRegIdx >= 0x253) && (p_u32SpecRegIdx <= 0x256) )  // DLLPR0 ~ DLLPR3
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x263) && (p_u32SpecRegIdx <= 0x266) )  // LDDPR
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x32E) && (p_u32SpecRegIdx <= 0x32F) )  // PMASKL, PMASKH
+	{
+		bolRtn = true;
+	}
+	else if (p_u32SpecRegIdx == 0x64E)  // SRDR
+	{
+		bolRtn = true;
+	}
+	else if (p_u32SpecRegIdx == 0x652)  // SFR
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x804) && (p_u32SpecRegIdx <= 0x805) )  // CC0 ~ CC1
+	{
+		bolRtn = true;
+	}*/
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+char sc_iss::GetMacroName(int macroIdx)
+{
+	char c = ' ';
+	switch(macroIdx)
+	{
+	case 0:
+		c = 'x';
+		break;
+	case 1:
+		c = 'y';
+		break;
+	case 2:
+		c = 'z';
+		break;
+	case 3:
+		c = 't';
+		break;
+	default:
+		PrintToCerr("%s(), %s, %d: illegal MacroIdx", __FUNCTION__, __FILE__, __LINE__);
+	}
+
+	return c;
+}
+//-----------------------------------------------------------------------------------
+char sc_iss::GetUVWName(DSPU32 p_u32UVWIdx)
+{
+	char c = ' ';
+	switch(p_u32UVWIdx)
+	{
+	case 0:
+		c = 'U';
+		break;
+	case 1:
+		c = 'V';
+		break;
+	case 2:
+		c = 'W';
+		break;
+	default:
+		PrintToCerr("%s(), %s, %d: illegal UVWIdx", __FUNCTION__, __FILE__, __LINE__);
+		break;
+	}
+
+	return c;
+}
+
+void sc_iss::InitCurFunStatus()
+{
+	CurFunStatus.BeginCycle = 0;
+	CurFunStatus.EndCycle = 0;
+	CurFunStatus.InstPC = PIPE_EX.DC4_AC.m_right.uint32r_pc;
+	CurFunStatus.JumpAddr = 0;
+	CurFunStatus.RetAddr = PIPE_EX.DC4_AC.m_right.uint32r_pc + PIPE_EX.DC4_AC.m_right.u32r_SlotNum;
+	CurFunStatus.Cycles = 0;
+}
+
+void sc_iss::PrintFunStatus()
+{
+	FILE *fp = NULL;
+
+	sprintf(g_arrFileName, "%s/FunStatus.txt", g_arrIOPath);
+	if ((fp = fopen(g_arrFileName, "w+")) == NULL)
+	{
+		printf("Error occured when open FunStatus.txt\n");
+		return;
+	}
+	
+	vector<TestFunStatus> FunStatusVec;
+	TestFunStatus FunStatusTmp;
+	while(FunStatusBuf1.empty() == false)
+	{
+		FunStatusTmp = FunStatusBuf1.top();
+		fprintf(fp,"PC:0x%08x    JumpAddr:0x%08x    RetAddr:0x%08x    Cycles: %d\n",FunStatusTmp.InstPC,FunStatusTmp.JumpAddr,FunStatusTmp.RetAddr,FunStatusTmp.Cycles);
+		if(FunStatusVec.empty() == false)
+		{
+			bool flag = false;
+			vector<TestFunStatus>::iterator iter = FunStatusVec.begin();
+			vector<TestFunStatus>::iterator iter_end = FunStatusVec.end();
+			for(; iter!=iter_end;++iter)
+			{
+				if (FunStatusTmp.JumpAddr == (*iter).JumpAddr)
+				{
+					(*iter).Cycles += FunStatusTmp.Cycles;
+					flag = true;
+				}
+			}
+
+			if (flag == false)
+			{
+				FunStatusVec.push_back(FunStatusTmp);
+			}
+		}
+		else
+		{
+			FunStatusVec.push_back(FunStatusTmp);
+		}
+		FunStatusBuf1.pop();
+	}
+
+	fprintf(fp, "/**************************************************************************************/\n");
+	
+	if(FunStatusVec.empty() == false)
+	{
+		vector<TestFunStatus>::iterator iter = FunStatusVec.begin();
+		vector<TestFunStatus>::iterator iter_end = FunStatusVec.end();
+		for(; iter!=iter_end;++iter)
+		{
+			fprintf(fp,"PC:0x%08x    JumpAddr:0x%08x    RetAddr:0x%08x    Cycles: %d\n",(*iter).InstPC,(*iter).JumpAddr,(*iter).RetAddr,(*iter).Cycles);
+		}
+
+	}
+
+	fclose(fp);
+}
+
+DSPU32 sc_iss::U4toU32Mask(DSPU32 u4Mask)
+{
+	ISS_ASSERT(u4Mask <= 0xfU);
+	DSPU32 u32Mask = 0U;
+	
+	for(int i = 0; i < 4; i++)
+	{
+		if(!GIsBitSet(u4Mask, i))
+		{
+			u32Mask |= (0xffU << (i * 8));
+		}
+	}
+
+	return u32Mask;
+}
+#ifdef ECS_RES_STAT
+bool sc_iss::GetResInfo(DSPU32 *pStatInfo)
+{
+	if(!m_bolStatEn)
+		return false;
+
+	memcpy(pStatInfo, m_arrALUStat, sizeof(m_arrALUStat));
+	pStatInfo += sizeof(m_arrALUStat)/sizeof(DSPU32);
+	
+	memcpy(pStatInfo, m_arrMULStat, sizeof(m_arrMULStat));
+	pStatInfo += sizeof(m_arrMULStat)/sizeof(DSPU32);
+	
+	memcpy(pStatInfo, m_arrSHFStat, sizeof(m_arrSHFStat));
+	pStatInfo += sizeof(m_arrSHFStat)/sizeof(DSPU32);
+	
+	memcpy(pStatInfo, m_arrSPUStat, sizeof(m_arrSPUStat));
+	pStatInfo += sizeof(m_arrSPUStat)/sizeof(DSPU32);
+	
+	memcpy(pStatInfo, m_arrBMCStat, sizeof(m_arrBMCStat));
+	pStatInfo += sizeof(m_arrBMCStat)/sizeof(DSPU32);
+	
+	memcpy(pStatInfo, m_arrRdStat, sizeof(m_arrRdStat));
+	pStatInfo += sizeof(m_arrRdStat)/sizeof(DSPU32);
+	
+	memcpy(pStatInfo, m_arrWrStat, sizeof(m_arrWrStat));
+	pStatInfo += sizeof(m_arrWrStat)/sizeof(DSPU32);
+
+	return true;	
+}
+
+void sc_iss::GetResInfo_Phase(RES_STAT_PHASE ePhase, DSPU32 *pStatInfo)
+{
+	DSPU32 *arrSLKIdx;
+	DSPU32 *pALUMask, *pMULMask, *pSHFMask, *pSPUMask;
+	DSPU32 u32ALUCnt, u32MULCnt, u32SHFCnt, u32SPUCnt, u32SlotNum;
+	DSPU32 u32ALUMask, u32MULMask, u32SHFMask, u32SPUMask;
+
+	u32ALUMask = u32MULMask = u32SHFMask = u32SPUMask = 0;
+	u32ALUCnt = u32MULCnt = u32SHFCnt = u32SPUCnt = 0;
+
+	switch(ePhase)
+	{
+		case STAT_PHASE_DC3:
+			arrSLKIdx = PIPE_EX.DC2_DC3.m_right.u32r_slot_res;
+			u32SlotNum = PIPE_EX.DC2_DC3.m_right.u32r_SlotNum;
+			break;
+		case STAT_PHASE_DC4:
+			arrSLKIdx = PIPE_EX.DC3_DC4.m_right.u32r_slot_res;
+			u32SlotNum = PIPE_EX.DC3_DC4.m_right.u32r_SlotNum;			
+			break;
+		case STAT_PHASE_AC:
+			arrSLKIdx = PIPE_EX.DC4_AC.m_right.u32r_slot_res;
+			u32SlotNum = PIPE_EX.DC4_AC.m_right.u32r_SlotNum;			
+			break;
+		case STAT_PHASE_EX:
+			arrSLKIdx = PIPE_EX.AC_EX.m_right.u32r_slot_res;
+			u32SlotNum = PIPE_EX.AC_EX.m_right.u32r_SlotNum;			
+			break;
+		case STAT_PHASE_WB:
+			arrSLKIdx = PIPE_EX.EX_WB.m_right.u32r_slot_res;
+			u32SlotNum = PIPE_EX.EX_WB.m_right.u32r_SlotNum;			
+			break;
+	}
+
+	for(int i = 0; i < u32SlotNum; i++)
+	{
+		pALUMask = (DSPU32 *)m_arrResSLK[arrSLKIdx[i]].slot_res_used.u8ALUs;
+		pMULMask = (DSPU32 *)m_arrResSLK[arrSLKIdx[i]].slot_res_used.u8MULs;
+		pSHFMask = (DSPU32 *)m_arrResSLK[arrSLKIdx[i]].slot_res_used.u8SHFs;
+		pSPUMask = (DSPU32 *)m_arrResSLK[arrSLKIdx[i]].slot_res_used.u8SPUs;
+
+		u32ALUMask |= *pALUMask;
+		u32MULMask |= *pMULMask;
+		u32SHFMask |= *pSHFMask;
+		u32SPUMask |= *pSPUMask;
+	}
+
+	for(int i = 0; i < 32; i++)
+	{
+		if(GIsBitSet(u32ALUMask, i))
+			u32ALUCnt++;
+		if(GIsBitSet(u32MULMask, i))
+			u32MULCnt++;
+		if(GIsBitSet(u32SHFMask, i))
+			u32SHFCnt++;
+		if(GIsBitSet(u32SPUMask, i))
+			u32SPUCnt++;
+	}
+
+	pStatInfo[0] = u32ALUCnt;
+	pStatInfo[1] = u32MULCnt;
+	pStatInfo[2] = u32SHFCnt;
+	pStatInfo[3] = u32SPUCnt;
+}
+
+void sc_iss::ISSEnStat(bool bolEnStat)
+{
+	m_bolStatEn = bolEnStat;
+
+	memset(m_arrALUStat, 0, sizeof(m_arrALUStat));
+	memset(m_arrMULStat, 0, sizeof(m_arrMULStat));
+	memset(m_arrSHFStat, 0, sizeof(m_arrSHFStat));
+	memset(m_arrSPUStat, 0, sizeof(m_arrSPUStat));
+	memset(m_arrBMCStat, 0, sizeof(m_arrBMCStat));
+	memset(m_arrRdStat, 0, sizeof(m_arrRdStat));
+	memset(m_arrWrStat, 0, sizeof(m_arrWrStat));
+}
+
+void sc_iss::ISSResStat()
+{
+	DSPU32 u32ALUCnt = 0;
+	DSPU32 u32MULCnt = 0;
+	DSPU32 u32SHFCnt = 0;
+	DSPU32 u32SPUCnt = 0;
+	DSPU32 u32BMCnt = 0;
+	DSPU32 u32SrcUnit, u32DestMask;
+	DSPU32 u32SLKIdx;
+	
+	DSPU32 *pALUMask = (DSPU32 *)m_dsp_res_tbl.arrALU;
+	DSPU32 *pMULMask = (DSPU32 *)m_dsp_res_tbl.arrMUL;
+	DSPU32 *pSHFMask = (DSPU32 *)m_dsp_res_tbl.arrSHF;
+	DSPU32 *pSPUMask = (DSPU32 *)m_dsp_res_tbl.arrSPU;
+	for(int i = 0; i < 32; i++)
+	{
+		if(GIsBitSet(*pALUMask, i))
+			u32ALUCnt++;
+		if(GIsBitSet(*pMULMask, i))
+			u32MULCnt++;
+		if(GIsBitSet(*pSHFMask, i))
+			u32SHFCnt++;
+		if(GIsBitSet(*pSPUMask, i))
+			u32SPUCnt++;
+	}
+	for(int i = 0; i < PIPE_EX.AC_EX.m_right.u32r_SlotNum; i++)
+	{
+		u32SLKIdx = PIPE_EX.AC_EX.m_right.u32r_slot_res[i];
+		u32SrcUnit = m_arrResSLK[u32SLKIdx].slot_res_used.u32BMRCSrc;
+		u32DestMask = m_arrResSLK[u32SLKIdx].slot_res_used.u32BMRCDest;
+		if( u32DestMask != 0 )
+		{
+			for(int j = 0; j < NUM_OF_UNITS; j++)
+			{
+				if(GIsBitSet(u32DestMask, j))
+				{
+					u32BMCnt++;
+				}
+			}
+		}
+	}
+	m_arrALUStat[u32ALUCnt]++;
+	m_arrMULStat[u32MULCnt]++;
+	m_arrSHFStat[u32SHFCnt]++;
+	m_arrSPUStat[u32SPUCnt]++;
+	m_arrBMCStat[u32BMCnt]++;
+	m_arrRdStat[m_u32RdMemCnt]++;
+	m_arrWrStat[m_u32WrMemCnt]++;
+}
+
+#endif
+//-----------------------------------------------------------------------------------
+void sc_iss::ISSStat()
+{
+	DSPU64 u64Cycles = (DSPU32)u32r_CyclesH;
+	u64Cycles <<= 32;
+	u64Cycles |= (DSPU32)u32r_CyclesL;
+
+	DSPU64 u64StallCycles = m_u64MemStallCycles + m_u64HzdStallCycles;
+	DSPU64 u64FlushCycles = m_u64WastedCycles - u64StallCycles;
+
+	printf("--------------------------------------------------------------------------\n");
+	printf("-----------------------Simulator Running Statistics-----------------------\n");
+	printf("Committed Instructions: %lld, Running Cycles: %lld\n", m_u64InstNum_WB, u64Cycles);
+	printf("Wasted Cycles: %lld\n", m_u64WastedCycles);
+	printf("Stalled Cycles: %lld = %lld(Mem) + %lld(Hzd), Flushed Cycles: %lld\n", 
+		u64StallCycles, m_u64MemStallCycles, m_u64HzdStallCycles, u64FlushCycles);
+}
+
+
+void sc_iss::SaveRegs()
+{
+	CalleeSavedRegs saved_regs;
+	for(int i = 0; i < 24; i++)
+	{
+		saved_regs.GPRX[i] = u32ro_R[i+40];			// ReadGPR_Page(0, i+40, 0);
+		saved_regs.GPRY[i] = u32ro_R[i+104];		// ReadGPR_Page(1, i+40, 0);
+		saved_regs.GPRZ[i] = u32ro_R[i+168];		// ReadGPR_Page(2, i+40, 0);
+		saved_regs.GPRT[i] = u32ro_R[i+232];		// ReadGPR_Page(3, i+40, 0);
+	}
+	for(int i = 0; i < 6; i++)
+	{
+		saved_regs.AddrU[i] = u32ro_U[i+10];
+	}
+	for(int i = 0; i < 8; i++)
+	{
+		saved_regs.AddrV[i] = u32ro_V[i+8];
+		saved_regs.AddrW[i] = u32ro_W[i+8];
+	}
+	saved_regs.LC2 = u32ro_LC[2];
+	saved_regs.LC3 = u32ro_LC[3];
+	saved_regs.IMACR = (DSPU32)u32r_IMACR;
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		saved_regs.ALUCR[i] = u32ro_ALUCR[i];
+		saved_regs.MULCR[i] = u32ro_MULCR[i];
+		saved_regs.SHFCR[i] = u32ro_SHFCR[i];
+		saved_regs.SPUCR[i] = u32ro_SPUCR[i];
+		saved_regs.SHFCUTR[i] = (DSPU32)u32r_SHFCUTR[i];
+		saved_regs.MULCUTR[i] = (DSPU32)u32r_MULCUTR[i];
+	}
+
+	CalleeRegsBuf.push_back(saved_regs);
+}
+
+bool sc_iss::CheckRegs()
+{
+	FILE *fp = NULL;
+	if (m_u32MainAddr == u32ro_CJMP) {
+		m_bolABIChkEn = false;
+		CalleeRegsBuf.clear();
+		return true;
+	}
+		
+	if (CalleeRegsBuf.empty()) {
+		return false;
+	}	
+
+//	sprintf(g_arrFileName, "%s/ABI_CHECK.txt", g_arrIOPath);
+	if (m_bolABIChkFromECS) {
+		sprintf(g_arrFileName, "%s/ABI_CHECK.txt", g_arrABIPath);
+	} else {
+		sprintf(g_arrFileName, "./ABI_CHECK.txt");
+	}
+	if ((fp = fopen(g_arrFileName, "a+")) == NULL)
+	{
+		PrintToCerr("Error occured when open ABI_CHECK.txt\n");
+		return false;
+	}
+
+	CalleeSavedRegs saved_regs = CalleeRegsBuf.back();
+	CalleeRegsBuf.pop_back();
+	
+	for(int i = 0; i < 24; i++)
+	{
+		if(saved_regs.GPRX[i] != u32ro_R[i+40])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: xAR%d is inconsistent\n", (i+40));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.GPRX[i], u32ro_R[i+40]);
+			fclose(fp);
+			return false;
+		}
+		if(saved_regs.GPRY[i] != u32ro_R[i+104])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: yAR%d is inconsistent\n", (i+40));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.GPRY[i], u32ro_R[i+104]);
+			fclose(fp);
+			return false;
+		}
+		if(saved_regs.GPRZ[i] != u32ro_R[i+168])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: zAR%d is inconsistent\n", (i+40));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.GPRZ[i], u32ro_R[i+168]);
+			fclose(fp);
+			return false;
+		}
+		if(saved_regs.GPRT[i] != u32ro_R[i+232])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: tAR%d is inconsistent\n", (i+40));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.GPRT[i], u32ro_R[i+232]);
+			fclose(fp);
+			return false;
+		}
+		
+	}
+	for(int i = 0; i < 6; i++)
+	{
+		if(saved_regs.AddrU[i] != u32ro_U[i+10])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: U%d is inconsistent\n", (i+10));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.AddrU[i], u32ro_U[i+10]);
+			fclose(fp);
+
+			return false;
+		}
+	}
+	for(int i = 0; i < 8; i++)
+	{
+		if(saved_regs.AddrV[i] != u32ro_V[i+8])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: V%d is inconsistent\n", (i+8));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.AddrV[i], u32ro_V[i+8]);
+			fclose(fp);
+
+			return false;
+		}
+		if(saved_regs.AddrW[i] != u32ro_W[i+8])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: W%d is inconsistent\n", (i+8));
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.AddrW[i], u32ro_W[i+8]);
+			fclose(fp);
+
+			return false;
+		}
+	}
+	if(saved_regs.LC2 != u32ro_LC[2])
+	{
+		fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+		fprintf(fp, "ABI_CHECK failed: LC2 is inconsistent\n");
+		fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.LC2, u32ro_LC[2]);
+		fclose(fp);
+
+		return false;
+	}
+	if(saved_regs.LC2 != u32ro_LC[2])
+	{
+		fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+		fprintf(fp, "ABI_CHECK failed: LC3 is inconsistent\n");
+		fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.LC3, u32ro_LC[3]);
+		fclose(fp);
+
+		return false;
+	}
+	if(saved_regs.IMACR!= (DSPU32)u32r_IMACR)
+	{
+		fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+		fprintf(fp, "ABI_CHECK failed: IMACR is inconsistent\n");
+		fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.IMACR, (DSPU32)u32r_IMACR);
+		fclose(fp);
+
+		return false;
+	}
+
+	for(int i = 0; i < NUM_OF_UNITS; i++)
+	{
+		if(saved_regs.ALUCR[i] != u32ro_ALUCR[i])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: ALUCR%d is inconsistent\n", i);
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.ALUCR[i], u32ro_ALUCR[i]);
+			fclose(fp);
+
+			return false;
+		}
+		if(saved_regs.MULCR[i] != u32ro_MULCR[i])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: MULCR%d is inconsistent\n", i);
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.MULCR[i], u32ro_MULCR[i]);
+			fclose(fp);
+
+			return false;
+		}
+		if(saved_regs.SHFCR[i] != u32ro_SHFCR[i])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: SHFCR%d is inconsistent\n", i);
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.SHFCR[i], u32ro_SHFCR[i]);
+			fclose(fp);
+
+			return false;
+		}
+		if(saved_regs.SPUCR[i] != u32ro_SPUCR[i])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: SPUCR%d is inconsistent\n", i);
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.SPUCR[i], u32ro_SPUCR[i]);
+			fclose(fp);
+
+			return false;
+		}
+		if(saved_regs.SHFCUTR[i] != (DSPU32)u32r_SHFCUTR[i])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: SHFCUTR%d is inconsistent\n", i);
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.SHFCUTR[i], (DSPU32)u32r_SHFCUTR[i]);
+			fclose(fp);
+
+			return false;
+		}
+		if(saved_regs.MULCUTR[i] != (DSPU32)u32r_MULCUTR[i])
+		{
+			fprintf(fp, "Cycles: %#x, EPC: %#x\n", (DSPU32)u32r_CyclesL, (DSPU32)u32r_EPC);
+			fprintf(fp, "ABI_CHECK failed: MULCUTR%d is inconsistent\n", i);
+			fprintf(fp, "old_value: %#x, new_value: %#x\n", saved_regs.MULCUTR[i], (DSPU32)u32r_MULCUTR[i]);
+			fclose(fp);
+
+			return false;
+		}
+	}
+	fclose(fp);
+
+	return true;
+}
+//----------------------------------------------------------------------------
+void sc_iss::TrigEvent(DSPU32 u32EvtSrc, bool bolPosEdge)
+{
+	ISS_ASSERT(u32EvtSrc < MAX_EVT_NUM);
+	DSPU32 u32IntLvl = EvtSrc2Int_Map[u32EvtSrc];
+	DSPU64 u64TrigMode = u32ro_ITMRh;
+	u64TrigMode <<= 32;
+	u64TrigMode |= u32ro_ITMRl;
+	bool bolLevelMode;
+	
+	if(u32IntLvl < MAX_INT_LVL)
+	{
+		bolLevelMode = GIsBitSet64(u64TrigMode, u32IntLvl);
+		if(bolLevelMode)		// 电平触发
+		{
+			if(bolPosEdge)
+			{
+				SetILAT(u32IntLvl);
+			}
+			else
+			{
+				ClrINTReq(u32IntLvl);
+			}
+		}
+		else if(bolPosEdge)	// 上升沿触发
+		{
+			SetILAT(u32IntLvl);
+		}
+	}
+	// Event 0 is bounded to all intlvl in default case
+	else if(u32EvtSrc == 0 && u32IntLvl == 0x5a5a5a5a)
+	{
+		for(int i = 0; i < MAX_INT_LVL; i++)
+		{
+			bolLevelMode = GIsBitSet64(u64TrigMode, i);
+			if(bolLevelMode)		// 电平触发
+			{
+				if(bolPosEdge)
+				{
+					SetILAT(i);
+				}
+				else
+				{
+					ClrINTReq(i);
+				}
+			}
+			else if(bolPosEdge)	// 上升沿触发
+			{
+				SetILAT(i);
+			}
+		}
+	}
+
+}
+//----------------------------------------------------------------------------
+void sc_iss::DetectTINT()
+{
+	DSPU32 u32TMask = m_pTIMER->GetTINTMask();
+
+	if(GIsBitSet(u32TMask, 0))
+	{	
+		// 定时器0低32位
+		TrigEvent(7, true);
+	}
+	if(GIsBitSet(u32TMask, 1))
+	{
+		// 定时器0高32位/64位
+		TrigEvent(8, true);
+	}
+	if(GIsBitSet(u32TMask, 8))
+	{
+		// 定时器1低32位
+		TrigEvent(9, true);
+	}
+	if(GIsBitSet(u32TMask, 9))
+	{
+		// 定时器1高32位/64位
+		TrigEvent(10, true);
+	}
+}
+#if 0
+DSPU32 m_u32VInt;
+DSPU32 m_u32VRange;
+DSPU32 m_u32VOffset;
+bool m_bolVEn;
+
+bool sc_iss::SetVInt(DSPU32 u32INT, DSPU32 u32Min, DSPU32 u32Max, DSPU32 u32Offset)
+{
+	if(u32INT <0 || u32INT >= 64 || u32Min > u32Max)
+		return false;
+	m_u32VInt = u32INT;
+	m_u32VRange = u32Max - u32Min;
+	m_u32VOffset = u32Offset;
+	m_bolVEn = true;
+}
+
+void sc_iss::TrigVInt()
+{
+	int r;
+	srand(time(0));
+
+	if(m_bolVEn)
+	{
+		static int cnt = m_u32VOffset;
+		if(cnt == 0)
+		{
+			SetILAT(m_u32VInt);			
+			r = (m_u32VRange == 0) ? 0 : (rand()%m_u32VRange);
+			cnt = r;
+		}
+		else
+		{
+			cnt--;
+		}		
+	}	
+}
+#endif
+#if 0
+//-----------------------------------------------------------------------------------
+// 取中断嵌套级别: 此处即为中断级别+ 1，并非反映目前正在被服务的中断嵌套情况。
+//
+//	range of nest level: 0 ~ 64
+//  0 means normal app and 1 ~ 64 means interrupt. 
+//
+DSPU32 sc_iss::GetNestLvl(DSPU64 p_u64PMASK)
+{
+	int i;
+	DSPU64 u64Temp;
+	DSPU64 u64One = 1;
+	DSPU32 u32INTLvl;
+	DSPU32 u32NestLvl = 0;
+
+	for (i = 0; i <= MAX_INT_LVL; i++)
+	{
+		// 从高位向低位检查p_u64PMASK的每一位
+		// 遇到为"1"位时停止检查
+	
+		u64Temp = u64One << (MAX_INT_LVL - i);
+		if ( (p_u64PMASK & u64Temp) != 0 )
+		{
+			u32INTLvl = MAX_INT_LVL - i;           // 0 ~ 63
+			u32NestLvl = u32INTLvl + 1;
+			break;
+		}
+	}
+
+	return u32NestLvl;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU64 sc_iss::GetPMASK_R(DSPU64 p_u64PMASK)
+{
+	int i;
+	DSPU32 u32INTLvl;
+	DSPU32 u32NestLvl = 0;
+	DSPU64 u64Temp, u64PMASK_R;		
+	DSPU64 u64One = 1;
+
+	for (i = 0; i <= MAX_INT_LVL; i++)
+	{
+		u64Temp = u64One << (MAX_INT_LVL - i);
+		if ( (p_u64PMASK & u64Temp) != 0 )
+		{
+			u32INTLvl = MAX_INT_LVL - i;
+			u32NestLvl = u32INTLvl + 1;
+			break;
+		}		
+	}
+
+	u64PMASK_R = (GenDSPU64(0xFFFFFFFF, 0xFFFFFFFF) >> u32NestLvl) << u32NestLvl;
+
+	return u64PMASK_R;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsHwINTLvl(DSPU32 p_u32IntLvl)
+{
+	bool bolRtn;
+
+	bolRtn = ( p_u32IntLvl < EXCP_INT_LVL )? true:false;
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsExcpINTLvl(DSPU32 p_u32IntLvl)
+{
+	bool bolRtn;
+
+	bolRtn = ( p_u32IntLvl == EXCP_INT_LVL )? true:false;
+
+	return bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsMemExcp(DSPU32  p_u32ExcpMask)
+{
+	bool bolIsMemExcp;
+
+	bolIsMemExcp = ( (p_u32ExcpMask & 0x3E0) != 0 )? true:false;
+	return bolIsMemExcp;
+}
+//-----------------------------------------------------------------------------------
+// 已根据BWDSP104x文档调整
+//
+DSPU64  sc_iss::GenILATMask()
+{
+	DSPU64  u64BitMask;
+
+	u64BitMask = 0x2A7FFF4F;
+	u64BitMask = (u64BitMask << 32) + 0xFFE33F28;
+	return u64BitMask;
+}
+//-----------------------------------------------------------------------------------
+DSPU64  sc_iss::GenICTLRMask()
+{
+	DSPU64  u64BitMask;
+
+	u64BitMask = 0x103C0000;
+	u64BitMask = u64BitMask << 32;
+	return u64BitMask;
+}
+//-----------------------------------------------------------------------------------
+DSPU64  sc_iss::GenDSPU64(DSPU32 p_u32HighWord, DSPU32 p_u32LowWord)
+{
+	DSPU64 u64Result;
+
+	u64Result = p_u32HighWord;
+	u64Result = (u64Result << 32) + p_u32LowWord;
+	return u64Result;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsCondDoInst(DSPU32 p_u32IWord)
+{
+	DSPU32 u32Mode;
+	if(GetOpcodeExt(p_u32IWord) == op_ext_cond_do_etc_c)
+	{
+		u32Mode = ExtractBinStr(p_u32IWord, 18, 3);
+		if(u32Mode == 1 || u32Mode == 2)
+			return true;
+	}
+	return false;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsCondDo_UVW(DSPU32 p_u32IWord)
+{
+	DSPU32 u32Mode;
+	if(GetOpcodeExt(p_u32IWord) == op_ext_cond_do_etc_c)
+	{
+		u32Mode = ExtractBinStr(p_u32IWord, 18, 3);
+		if(u32Mode == 1)
+			return true;
+	}
+	return false;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsCondDo_CPred(DSPU32 p_u32IWord)
+{
+	DSPU32 u32Mode;
+	if(GetOpcodeExt(p_u32IWord) == op_ext_cond_do_etc_c)
+	{
+		u32Mode = ExtractBinStr(p_u32IWord, 18, 3);
+		if(u32Mode == 2)
+			return true;
+	}
+	return false;
+}
+
+//-----------------------------------------------------------------------------------
+// extract binary string from 32-bit input
+DSPU32  sc_iss::ExtractBinStr(DSPU32 p_u32BinStr, DSPU32 p_u32StartBit, DSPU32 p_u32BitLen)
+{
+	DSPU32 u32Mask = 0xFFFFFFFF;
+
+	if (p_u32StartBit > 31) // 0 ~ 31 is valid
+	{
+		return  -1;
+	}
+
+	if ((p_u32BitLen > 32) || (p_u32BitLen == 0)) // 1 ~ 32 is valid
+	{
+		return -1;
+	}
+
+	p_u32BinStr = p_u32BinStr >> p_u32StartBit;
+	u32Mask = u32Mask >> (32 - p_u32BitLen);
+
+	return (p_u32BinStr & u32Mask);
+}
+
+
+//-----------------------------------------------------------------------------------
+// valid return value is 1 ~ 7
+DSPU32  sc_iss::IncSeqCounter(DSPU32 p_u32SeqCounter)
+{
+	DSPU32  u32Temp;
+
+	u32Temp = p_u32SeqCounter & 0x7;
+	u32Temp = (u32Temp == 7)? 1 : (u32Temp + 1);
+
+	return u32Temp;
+}
+
+
+
+//-----------------------------------------------------------------------------------
+DSPU32  sc_iss::BinStrToHex(DSPU32 p_u32BinStr)
+{
+	int i;
+	DSPU32 u32Temp;
+	DSPU32 u32Value = 0;
+
+	for (i = 0; i < 8; i++)
+	{
+		u32Temp = ((p_u32BinStr >> (i * 4)) & 0xF);
+		if (u32Temp == 1)
+		{
+			u32Value = GSetBit(u32Value, i);
+		}
+	}
+
+	return u32Value;
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::WrSRP(DSPU32 p_u32Value, bool p_bolWrInOut)
+{
+	DSPU32 u32BitMask = 0x0001FFFF;
+	DSPU32 u32Value;
+
+	u32Value = p_u32Value & u32BitMask;
+	u32ri_SRP = u32Value;
+	if (p_bolWrInOut)
+	{
+		u32ro_SRP = u32Value;
+	}
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::WrBAR(DSPU32 p_u32Value, bool p_bolWrInOut)
+{
+	DSPU32 u32BitMask = 0x0001FFFF;
+	DSPU32 u32Value;
+
+	u32Value = p_u32Value & u32BitMask;
+	u32ri_BAR = u32Value;
+	if (p_bolWrInOut)
+	{
+		u32ro_BAR = u32Value;
+	}
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32  sc_iss::RdDMRWCFR(DSPU32 p_u32BlkIdx, DSPU32 p_u32BankIdx, DSPU32 p_u32Type)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( (p_u32BlkIdx > 2) || (p_u32BankIdx > 7) || (p_u32Type > 4) )
+	{
+		return u32Rtn;
+	}
+
+	if (p_u32Type == 0)
+	{
+		u32Rtn = u32r_DMRWCFR_ACEX[p_u32BlkIdx][p_u32BankIdx];
+	}
+	else if (p_u32Type == 1)
+	{
+		u32Rtn = u32r_DMRWCFR_EXWB[p_u32BlkIdx][p_u32BankIdx];
+	}
+
+	return u32Rtn;
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::WrICTLR(DSPU32 p_u32Value, bool p_bolWrInOut, bool p_LowHalf)
+{
+	DSPU64 u64Value;
+
+	if (p_LowHalf)
+	{
+		// do nothing
+	}
+	else
+	{
+		u64Value = p_u32Value;
+		u64Value = (u64Value << 32) & GenICTLRMask();
+		u64ri_ICTLR = u64Value;
+		if (p_bolWrInOut)
+		{
+			u64ro_ICTLR = u64Value;
+		}
+	}
+	
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::SetRealINTFlag()
+{
+	bolr_UseRealINT = true;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsFlagReg(DSPU32 p_u32SpecRegIdx)
+{
+	bool bolRtn = false;
+	
+	if ( (p_u32SpecRegIdx >= 0x100) && (p_u32SpecRegIdx <= 0x117) )  // XALUFAR ~ TSHFFOR
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x253) && (p_u32SpecRegIdx <= 0x256) )  // DLLPR0 ~ DLLPR3
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x263) && (p_u32SpecRegIdx <= 0x266) )  // LDDPR
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x32E) && (p_u32SpecRegIdx <= 0x32F) )  // PMASKL, PMASKH
+	{
+		bolRtn = true;
+	}
+	else if (p_u32SpecRegIdx == 0x64E)  // SRDR
+	{
+		bolRtn = true;
+	}
+	else if (p_u32SpecRegIdx == 0x652)  // SFR
+	{
+		bolRtn = true;
+	}
+	else if ( (p_u32SpecRegIdx >= 0x804) && (p_u32SpecRegIdx <= 0x805) )  // CC0 ~ CC1
+	{
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32  sc_iss::ReadLogMode()
+{
+	DSPU32 u32Temp;
+
+	u32Temp = m_u32LogMode;
+
+	return u32Temp;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsExcpDected()
+{
+	return m_bolFatalExcp;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::DoTestDLL()
+{
+	//TestDLL();
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::ReadAppINT()
+{
+	return m_u32AppINT;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SetLogOnStrap( bool p_bolLogOnStrap )
+{
+	m_bolLogOnStrap = p_bolLogOnStrap;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SetLimitRtrap10( bool p_bolLimitRtrap10 )
+{
+	m_bolLimitRtrap10 = p_bolLimitRtrap10;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SetOnlyOutINT( bool p_bolOnlyOutINT )
+{
+	m_bolOnlyOutINT = p_bolOnlyOutINT;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::SetGateCycles( unsigned int p_u32GateCycles )
+{
+	m_u32GateCycles = p_u32GateCycles;
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::SetRTrap4Invalid()
+{
+	m_bolRTrap4Valid = false;
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::SimRTrap4()
+{
+	bool bolTemp = false;
+
+	bolTemp = InitNewIntSignals();
+	bolr_UseCustomINT = bolTemp;
+
+	return bolTemp;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::RdINTReg0Low()
+{
+	DSPU64 u64Temp;
+	DSPU32 u32Rtn;
+
+	u64Temp = u64r_INTReg0;
+	u32Rtn = u64Temp;
+	
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::RdINTReg0High()
+{
+	DSPU64 u64Temp;
+	DSPU32 u32Rtn;
+
+	u64Temp = u64r_INTReg0;
+	u32Rtn = u64Temp >> 32;
+	
+	return u32Rtn;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::RdINTReg1Low()
+{
+	DSPU64 u64Temp;
+	DSPU32 u32Rtn;
+
+	u64Temp = u64r_INTReg1;
+	u32Rtn = u64Temp;
+	
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::RdINTReg1High()
+{
+	DSPU64 u64Temp;
+	DSPU32 u32Rtn;
+
+	u64Temp = u64r_INTReg1;
+	u32Rtn = u64Temp >> 32;
+	
+	return u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::ReadExcpInfo(DSPU32 *p_pExcpCode, DSPU32 *p_pExcpPC)
+{
+	*p_pExcpCode = u32ro_ExcpCode;
+	*p_pExcpPC = u32ro_ExcpPC;
+}
+
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_ALUA_EX(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_ALUA_EX: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_ALUA_EX: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32r_ALUA_EX[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_ALUA_EX(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_ALUA_EX: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_ALUA_EX: invalid parameter!");
+	}
+	else
+	{
+		u32r_ALUA_EX[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_ALUB_EX(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_ALUB_EX: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_ALUB_EX: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32r_ALUB_EX[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_ALUB_EX(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_ALUB_EX: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_ALUB_EX: invalid parameter!");
+	}
+	else
+	{
+		u32r_ALUB_EX[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::rd_u32r_ALUCR_EX(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_ALUCR_EX: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_ALUCR_EX: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32r_ALUCR_EX[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  u32Rtn;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::wr_u32r_ALUCR_EX(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_ALUCR_EX: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_ALUCR_EX: invalid parameter!");
+	}
+	else
+	{
+		u32r_ALUCR_EX[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+//-----------------------------------------------------------------------------------
+void sc_iss::WrGCSR(DSPU32 p_u32Value, bool p_bolWrInOut)
+{
+	DSPU32 u32BitMask = 0x00000011;
+
+	u32ri_GCSR = p_u32Value & u32BitMask;
+	if (p_bolWrInOut)
+	{
+		u32ro_GCSR = u32ri_CGCR;
+	}
+}
+
+
+//-----------------------------------------------------------------------------------
+void sc_iss::ResetIABP1In()
+{		
+	for (int i = 0; i < IAB_WIDTH; i++)
+	{
+		m_arrIABP1In[i] = 0;
+	}
+}
+
+/*
+//-----------------------------------------------------------------------------------
+// bit mask to indicate how many addresses are generated from each unit
+// 掩码格式: addr_t_1 addr_t_0 addr_z_1 addr_z_0 addr_y_1 addr_y_0 addr_x_1 addr_x_0 (LSB)
+// p_u32UnitIdx:  0 ~ 3
+// p_u32AddrIdx: 0 ~ 1
+DSPU32 sc_iss::SetAddrMaskBit(DSPU32 p_u32AddrMask, DSPU32 p_u32UnitIdx, DSPU32 p_u32AddrIdx)
+{
+	DSPU32 u32Temp;
+
+	u32Temp = GSetBit(p_u32AddrMask, (p_u32UnitIdx * 2 + p_u32AddrIdx));
+	return u32Temp;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::GSetBit(DSPU32 p_u32Value, DSPU32 p_u32BitIdx)
+{
+	return (p_u32Value | (0x1 << p_u32BitIdx));
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::GClrBit(DSPU32 p_u32Value, DSPU32 p_u32BitIdx)
+{
+	return (p_u32Value &  (~(0x1 << p_u32BitIdx)));
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::GIsBitSet(DSPU32 p_u32Value, DSPU32 p_u32BitIdx)
+{
+	return ( (p_u32Value & (0x1 << p_u32BitIdx)) != 0 );
+}
+
+//-----------------------------------------------------------------------------------
+DSPU64 sc_iss::GSetBit64(DSPU64 p_u64Value, DSPU32 p_u32BitIdx)
+{
+	DSPU64 u64Temp = 1;
+
+	return (p_u64Value | (u64Temp << p_u32BitIdx));
+}
+//-----------------------------------------------------------------------------------
+DSPU64 sc_iss::GClrBit64(DSPU64 p_u64Value, DSPU32 p_u32BitIdx)
+{
+	DSPU64 u64Temp = 1;
+
+	return (p_u64Value &  (~(u64Temp << p_u32BitIdx)));
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::GIsBitSet64(DSPU64 p_u64Value, DSPU32 p_u32BitIdx)
+{
+	DSPU64 u64Temp = 1;
+
+	return ( (p_u64Value & (u64Temp << p_u32BitIdx)) != 0 );
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::GIsSomeBitSet64(DSPU64 p_u64Value, DSPU64 p_u64BitMask)
+{
+	return ( (p_u64Value & p_u64BitMask) != 0 );
+}
+*/
+//-----------------------------------------------------------------------------------
+// p_u32InstrNumCondDo: 条件执行指令后的第几条指令(1 ~ 15)
+// p_u32CurrentInstrNum: 当前指令是当前指令行中的第几条指令(0 ~ 15)
+// p_bolIsMacroInstr: true表示受If {x,y,z,t}CPred[d]do n指令控制的指令，否则不受该类指令控制
+bool sc_iss::DoActually(bool p_bolNotDoByUVW, bool p_bolNotDoByCPred, DSPU32 p_u32InstrNumCondDo, DSPU32 p_u32CurrentInstrNum, bool p_bolIsMacroInstr)
+{
+	//p_bolNotDoByUVW = true 该指令受UVW条件控制
+	if (p_bolNotDoByUVW && (p_u32CurrentInstrNum <= p_u32InstrNumCondDo))
+	{
+		return false;
+	}
+
+	//p_bolNotDoByCPred = true 该指令受CPred条件控制
+	//p_bolIsMacroInstr = true 表示该指令是宏内指令
+	if (p_bolNotDoByCPred && (p_u32CurrentInstrNum <= p_u32InstrNumCondDo) && p_bolIsMacroInstr)
+	{
+		return false;
+	}
+	return true;
+}
+
+//-----------------------------------------------------------------------------------
+// 用于条件执行指令"If Um[Un]==C do n"
+// 根据Un中的掩码信息从p_u32Value中提取值
+DSPU32 sc_iss::GetValueOnMask(DSPU32 p_u32Value, DSPU32 p_u32Mask)
+{
+	DSPU32 u32Result = 0;
+	DSPU32 u32ValidBitNum = 0;
+
+	for (int i = 0; i < 32; i++)
+	{
+		if ( ((p_u32Mask >> i) & 1) == 1 ) // p_u32Mask的第i位是否置位
+		{
+			if ( ((p_u32Value >> i) & 1) == 1 ) // p_u32Value的第i位是否置位
+			{
+				u32Result = GSetBit(u32Result, u32ValidBitNum);
+			}
+
+			u32ValidBitNum++;
+		}
+	}
+
+	return u32Result;
+}
+
+//条件执行判断
+bool sc_iss::ConditionalDo(DSPU32 p_u32SLKIdx, DSPU32 p_Units, DSPU32 p_u32Phase, bool p_bolIsMacroInstr)
+{		
+		bool bolNotDoByUVW, bolNotDoByCPred;
+		DSPU32 u32InstrNumCondDo, u32CurrentInstrNum;	
+		
+		switch (p_u32Phase)
+		{
+			case PHASE_AC_POST:
+				bolNotDoByUVW = PIPE_EX.DC4_AC.m_right.bolNotDoByUVW;
+				bolNotDoByCPred = PIPE_EX.DC4_AC.m_right.bolNotDoByCPred[p_Units];
+				u32InstrNumCondDo = PIPE_EX.DC4_AC.m_right.u32InstrNumCondDo;
+				break;
+			case PHASE_EX:
+				bolNotDoByUVW = PIPE_EX.AC_EX.m_right.bolNotDoByUVW;
+				bolNotDoByCPred = PIPE_EX.AC_EX.m_right.bolNotDoByCPred[p_Units];
+				u32InstrNumCondDo = PIPE_EX.AC_EX.m_right.u32InstrNumCondDo;
+				break;
+			case PHASE_WB:
+				bolNotDoByUVW = PIPE_EX.EX_WB.m_right.bolNotDoByUVW;
+				bolNotDoByCPred = PIPE_EX.EX_WB.m_right.bolNotDoByCPred[p_Units];
+				u32InstrNumCondDo = PIPE_EX.EX_WB.m_right.u32InstrNumCondDo;
+				break;
+			default :
+				PrintToCerr("ConditionalDo: parameter is invalid\n");	
+				return false;		
+		}
+		
+		u32CurrentInstrNum = m_arrResSLK[p_u32SLKIdx].u32InstrIdx;
+		
+		if ( !DoActually(bolNotDoByUVW, bolNotDoByCPred, u32InstrNumCondDo, u32CurrentInstrNum, p_bolIsMacroInstr) )
+		{
+			return false;
+		}
+		else
+		{
+			return true;
+		}
+}
+
+//-----------------------------------------------------------------------------------
+bool sc_iss::RdPipeNotDoByUVW(DSPU32 p_u32Phase)
+{
+	bool bolNotDoByUVW = false;
+
+	if (p_u32Phase == PHASE_DC2_POST)
+	{
+		bolNotDoByUVW = PIPE_EX.DC2_DC3.m_left.bolNotDoByUVW;
+	}
+	else if ((p_u32Phase == PHASE_DC4) || (p_u32Phase == PHASE_DC4_POST))
+	{
+		bolNotDoByUVW = PIPE_EX.DC3_DC4.m_right.bolNotDoByUVW;
+	}
+	else if ((p_u32Phase == PHASE_AC) || (p_u32Phase == PHASE_AC_POST))
+	{
+		bolNotDoByUVW = PIPE_EX.DC4_AC.m_right.bolNotDoByUVW;
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		bolNotDoByUVW = PIPE_EX.AC_EX.m_right.bolNotDoByUVW;
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		bolNotDoByUVW = PIPE_EX.EX_WB.m_right.bolNotDoByUVW;
+	}
+
+	return bolNotDoByUVW;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::RdPipeInstrNumCondDo(DSPU32 p_u32Phase)
+{
+	DSPU32 u32InstrNumCondDo = 0;
+
+	if (p_u32Phase == PHASE_DC2_POST)
+	{
+		u32InstrNumCondDo = PIPE_EX.DC2_DC3.m_left.u32InstrNumCondDo;
+	}
+	else if ((p_u32Phase == PHASE_DC4) || (p_u32Phase == PHASE_DC4_POST))
+	{
+		u32InstrNumCondDo = PIPE_EX.DC3_DC4.m_right.u32InstrNumCondDo;
+	}
+	else if ((p_u32Phase == PHASE_AC) || (p_u32Phase == PHASE_AC_POST))
+	{
+		u32InstrNumCondDo = PIPE_EX.DC4_AC.m_right.u32InstrNumCondDo;
+	}
+	else if (p_u32Phase == PHASE_EX)
+	{
+		u32InstrNumCondDo = PIPE_EX.AC_EX.m_right.u32InstrNumCondDo;
+	}
+	else if (p_u32Phase == PHASE_WB)
+	{
+		u32InstrNumCondDo = PIPE_EX.EX_WB.m_right.u32InstrNumCondDo;
+	}
+
+	return u32InstrNumCondDo;
+}
+
+//-----------------------------------------------------------------------------------
+// 清除流水线寄存器中的数据相关性信息，避免产生数据相关效果
+// (为支持条件执行)
+//
+// 本函数的实现目前相对独立，便于根据需要调整其调用位置
+//
+void sc_iss::cond_do_uvw_dc2()
+{
+	DSPU32 arrPipeSlots[16], arrSLKIdx[16];
+	DSPU32 u32SlotNum, u32SLKIdx;
+
+	DSPU32 u32C, u32N, u32NotEqu, u32M, u32UVWIdx;
+	DSPU32 u32AddrRegN, u32AddrRegM;
+	DSPU32 u32MaskedValue;
+	bool bolCondDo = false;
+
+	if (PIPE_EX.DC2_DC3.m_left.u32r_SlotNum == 0)
+	{
+		return;
+	}
+
+	u32SlotNum = PIPE_EX.DC2_DC3.m_left.u32r_SlotNum;
+	for (int i = 0; i < u32SlotNum; i++)
+	{
+		// SLKIdx is malloced at DC2 stage in DC2_ACTION
+		arrPipeSlots[i] = PIPE_EX.DC2_DC3.m_left.uint32r_slot[i];
+		arrSLKIdx[i] = PIPE_EX.DC2_DC3.m_left.u32r_slot_res[i];
+	}
+
+	u32SLKIdx = arrSLKIdx[0]; // 条件执行指令一定在执行行首部
+
+	// 以下形成PIPE_EX.DC2_DC3.m_left.bolNotDoByUVW
+	// 即根据UVW寄存器形成条件执行标志
+
+	// use decode info carried accross pipeline
+    u32C = m_arrResSLK[u32SLKIdx].u32DecodeInfo[0];
+    u32NotEqu = m_arrResSLK[u32SLKIdx].u32DecodeInfo[2];
+	u32M = m_arrResSLK[u32SLKIdx].u32DecodeInfo[3];
+    u32N = m_arrResSLK[u32SLKIdx].u32DecodeInfo[4];       
+    u32UVWIdx = m_arrResSLK[u32SLKIdx].u32DecodeInfo[5];
+
+    u32AddrRegN = rd_u32r_UVW(u32UVWIdx, u32N);
+    u32AddrRegM =  rd_u32r_UVW(u32UVWIdx, u32M);
+    u32MaskedValue = GetValueOnMask(u32AddrRegM, u32AddrRegN);
+	if (u32NotEqu)
+	{
+		if (u32MaskedValue != u32C)
+		{
+			bolCondDo = true;
+		}			
+	}
+	else
+	{
+		if (u32MaskedValue == u32C)
+		{
+			bolCondDo = true;
+		}
+	}
+
+	PIPE_EX.DC2_DC3.m_left.bolNotDoByUVW = !bolCondDo;	
+
+	// 以下根据PIPE_EX.DC2_DC3.m_left.bolNotDoByUVW清数据相关信息
+		
+
+	bool bolNotDoByUVW, bolIsMacroInstr;
+	DSPU32 u32InstrNumCondDo, u32CurrentInstrNum;
+	DSPU64 u64SrcGenRegs, u64DestGenRegs;
+	bool bolNotDoByCPred;
+	
+	bolNotDoByUVW = PIPE_EX.DC2_DC3.m_left.bolNotDoByUVW;
+	u32InstrNumCondDo = RdPipeInstrNumCondDo(PHASE_DC2_POST);
+	for (int i = 0; i < u32SlotNum; i++) // 遍历当前执行行中的每一个slot
+	{
+		u32SLKIdx = arrSLKIdx[i];
+		
+		u32CurrentInstrNum = m_arrResSLK[u32SLKIdx].u32InstrIdx;
+		bolIsMacroInstr = m_arrResSLK[u32SLKIdx].bolIsMacroInstr;
+
+		if ( !DoActually(bolNotDoByUVW, false, u32InstrNumCondDo, u32CurrentInstrNum, bolIsMacroInstr) )
+		{
+			// 若根据条件判断不执行
+			
+			// 清除所有数据相关性信息
+			memset(&m_arrResSLK[u32SLKIdx].slot_res_used, 0, sizeof(SLOT_RES_USED));
+		}
+		
+		if ( IsExtFirstWord(arrPipeSlots[i]) )
+		{
+			// 若当前是双字指令	
+				
+			i++;
+		}
+			
+	}  // for (i = 0; i < p_u32SlotNum; i++)
+
+}
+
+//-----------------------------------------------------------------------------------
+/*
+DSPU32 rd_u32r_ALUA_AC(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_ALUA_AC: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_ALUA_AC: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32r_ALUA_AC[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  u32Rtn;
+}
+*/
+//-----------------------------------------------------------------------------------
+/*
+bool wr_u32r_ALUA_AC(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_ALUA_AC: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_ALUA_AC: invalid parameter!");
+	}
+	else
+	{
+		u32r_ALUA_AC[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+*/
+//-----------------------------------------------------------------------------------
+/*
+DSPU32 rd_u32r_ALUB_AC(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_ALUB_AC: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_ALUB_AC: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32r_ALUB_AC[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  u32Rtn;
+}
+*/
+//-----------------------------------------------------------------------------------
+/*
+bool wr_u32r_ALUB_AC(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_ALUB_AC: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_ALUB_AC: invalid parameter!");
+	}
+	else
+	{
+		u32r_ALUB_AC[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+*/
+//-----------------------------------------------------------------------------------
+/*
+DSPU32 rd_u32r_ALUCR_AC(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("rd_u32r_ALUCR_AC: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("rd_u32r_ALUCR_AC: invalid parameter!");
+	}
+	else
+	{
+		u32Rtn = u32r_ALUCR_AC[p_u32UnitIdx][p_u32ALUIdx];
+	}
+
+	return  u32Rtn;
+}
+*/
+//-----------------------------------------------------------------------------------
+/*
+bool wr_u32r_ALUCR_AC(DSPU32 p_u32UnitIdx, DSPU32 p_u32ALUIdx, DSPU32 p_u32Value)
+{
+	bool bolRtn = false;
+
+	if ( p_u32UnitIdx >= NUM_OF_UNITS )
+	{
+		PrintToCerr("wr_u32r_ALUCR_AC: invalid parameter!");
+	}
+	else if ( p_u32ALUIdx >= ALU_NUM_OF_UNIT )
+	{
+		PrintToCerr("wr_u32r_ALUCR_AC: invalid parameter!");
+	}
+	else
+	{
+		u32r_ALUCR_AC[p_u32UnitIdx][p_u32ALUIdx] = p_u32Value;
+		bolRtn = true;
+	}
+
+	return bolRtn;
+}
+
+*/
+
+//-----------------------------------------------------------------------------------
+/*
+DSPU64 U40ToU64(DSP_BIT40 p_u40Temp)
+{
+	DSPU64 u64Temp;
+
+	u64Temp = p_u40Temp.u8High;
+	u64Temp = (u64Temp << 32) | p_u40Temp.u32Low;
+
+	return u64Temp;
+}
+*/
+
+void  sc_iss::UseRealINT()
+{
+#if 0
+	int i;
+	DSPU64  u64TriggeredINTs = 0;
+	DSPU64  u64ValidPins;
+	DSPU64  u64OutINTs, u64HwINTMask;
+	DSPU32  u32INTLow, u32INTHigh;
+	bool bolCond0, bolCond1;
+
+	if (m_bolOnlyOutINT)
+	{
+		u64ValidPins = GenDSPU64(0x103C0000, 0); // keep outer INT only
+	}
+	else
+	{
+		u64ValidPins = GenDSPU64(0x103FFF00, 0xFF00C07C); // Exclude software exception and TIHRn
+	}
+
+	u64OutINTs = GenDSPU64(0x103C0000, 0);
+	u64HwINTMask = GenDSPU64(0x1FBFFF00, 0xFF00C07C); // Exclude software exception only
+	u32INTLow = 0xFFFF3F83;
+	u32INTHigh = 0xF07FFFFF;
+	/*
+	for (i = 0; i < 5; i++)
+	{
+		if ( bolr_TimerINT[i] )
+		{
+			u32INTLow = GSetBit(u32INTLow, (6 - i));
+		}
+	}
+	*/
+	u64r_INTReg0 = GenDSPU64(u32INTHigh, u32INTLow);
+	for (i = 0; i < 64; i++)
+	{
+		if ( GIsBitSet64(u64ValidPins, i) )
+		{
+			if ( GIsBitSet64(u64OutINTs, i) )  // is outer INT
+			{
+				if ( GIsBitSet64(u64ro_ICTLR, i) )  //  1 means triggered by level
+				{
+					if ( !GIsBitSet64(u64r_INTReg1, i) )
+					{
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, i);
+					}
+				}
+				else  // 0 means triggered by edge
+				{
+					if ( GIsBitSet64(u64r_INTReg0, i) && (!GIsBitSet64(u64r_INTReg1, i)) )
+					{
+						TrigINT(i);
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, i);
+					}
+				}
+
+			}
+			else  // is not outer INT
+			{
+				if ( GIsBitSet64(u64r_INTReg0, i) && (!GIsBitSet64(u64r_INTReg1, i)) )
+				{
+					TrigINT(i);
+					u64TriggeredINTs = GSetBit64(u64TriggeredINTs, i);
+
+					if (i == 2)
+					{
+						TrigINT(55);                       // trigger TIMER4LI and TIMER4HI at the same time.
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 55);
+					}
+
+					if (i == 3)
+					{
+						TrigINT(56);                       // trigger TIMER3LI and TIMER3HI at the same time.
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 56);
+					}
+
+					if (i == 4)
+					{
+						TrigINT(57);                       // trigger TIMER2LI and TIMER2HI at the same time.
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 57);
+					}
+
+					if (i == 5)
+					{
+						TrigINT(58);                       // trigger TIMER1LI and TIMER1HI at the same time.
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 58);
+					}
+
+					if (i == 6)
+					{
+						TrigINT(59);                       // trigger TIMER0LI and TIMER0HI at the same time.
+						u64TriggeredINTs = GSetBit64(u64TriggeredINTs, 59);
+					}
+
+				} // if INT occur
+
+			} // if is not outer INT
+
+		} // if ( GIsBitSet64(u64ValidPins, i) )
+
+	} // for (i = 0; i < 64; i++)
+
+	// exit idle state here
+	if ( GIsBitSet(u32ro_CGCR, 12) )
+	{
+		// CGCR[12]为1, IDLE的解除条件是由中断产生，不管中断是否被屏蔽
+		if(GIsSomeBitSet64(u64HwINTMask, u64TriggeredINTs))
+		{
+			if ( !m_bolSetCGCRBit12 )
+			{
+				u32ri_CGCR = GClrBit(u32ri_CGCR, 12);
+			//	u32ro_CGCR = GClrBit(u32ro_CGCR, 12);
+			}
+			
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher priority.
+			{
+			//	bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	}
+	else
+	{
+		if ( GIsBitSet(u32ro_CGCR, 0) && GIsSomeBitSet64(u64ro_IMASK, u64TriggeredINTs) )  // this HW interrupt should be enabled.
+		{
+			// exclude the condition that bolri_Idle is true and bolro_Idle is false.
+			if (bolro_Idle && bolri_Idle)  // idle instruction has higher prioity.
+			{
+			//	bolro_Idle = false;
+				bolri_Idle = false;
+			}
+		}
+	} // exit idle state here
+#endif
+}
+
+//-----------------------------------------------------------------------------------
+void sc_iss::UpdateECR(DSPU32 p_u32ExcpMask, DSPU32 p_u32ExcpPC)
+{
+	int i;
+	unsigned int u32Temp;
+	bool bolDetected = false;
+
+	if ( p_u32ExcpMask != 0 )
+	{			
+		for (i = 0; i < 32; i++)
+		{
+			if ( GIsBitSet(p_u32ExcpMask, i) )
+			{
+				u32Temp = i;
+				u32ri_ExcpCode = u32Temp;
+				u32ri_ExcpPC = p_u32ExcpPC;
+				bolDetected = true;
+				break;
+			}
+		}					
+	}
+}
+
+#endif
+

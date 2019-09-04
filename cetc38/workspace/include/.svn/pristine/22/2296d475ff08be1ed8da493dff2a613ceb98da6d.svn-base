@@ -1,0 +1,5418 @@
+/********************************************************************
+	created:	2013/07/01
+	created:	1:7:2013   16:53
+	filename: 	CMUL.cpp
+	file base:	CMUL
+	file ext:	cpp
+	author:		林广栋
+	
+	purpose:	
+*********************************************************************/
+
+#include "CMUL.h"
+#include "GlobleDef.h"
+#include "Cfloat32.h"
+#include "DSPU80.h"
+#include "dsptypes.h"
+#include <stdio.h>
+#define SI_SHE_WU_RU
+/******************************************************************
+	函数名：		MulF32
+
+	描述:			32位浮点数据相乘。
+
+	参数:			p_u32Src1 -- 源操作数1。
+					p_u32Src2 -- 源操作数2。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-5-22		林广栋			1。修改了根据尾数相乘结果进行指数进位的判断条件。
+*******************************************************************/
+DSPU32 MulF32(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+       bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation); 
+	   bool bSiSheWuRu = TestFlag(p_u32MULCR,2);
+	   bSiSheWuRu=!bSiSheWuRu;
+
+       DSPU32 u32result = 0 ;
+       CUSTOM_F32 su32src1, su32src2;
+       su32src1.u32Value = p_u32Src1;
+       su32src2.u32Value = p_u32Src2;
+
+       DSPI32 exp = 0 ;
+       DSPU64 u48 = 0 ;
+       DSPU32 u23 = 0 ;
+
+       Cfloat32 u32Src1(p_u32Src1);
+       Cfloat32 u32Src2(p_u32Src2);
+
+       if ( u32Src1.IsNAN()        //当任一输入数为非数时,或者当其中一个输入数为∞，另一个为0时 
+            || u32Src2.IsNAN() 
+            || (u32Src1.IsZero() && u32Src2.IsINF())
+            || (u32Src2.IsZero() && u32Src1.IsINF()) )
+        {
+			bool sr1nan=u32Src1.IsNAN();
+			bool sr2nan=u32Src2.IsNAN();
+			bool sr1inf=u32Src1.IsINF();
+			bool sr2inf=u32Src2.IsINF();
+
+            SetFlag(*p_pStatReg, Mult_Invalid);
+            SetFlag(*p_pStatReg, Mult_MIS);
+            if(u32Src1.GetNega()==u32Src2.GetNega())
+			{
+				u32result = 0x7fffffff;
+			}
+			else
+			{
+				u32result = 0xffffffff;
+			}
+        }
+
+        else if( (u32Src1.IsDNORM() && u32Src2.IsINF())//当任一输入为非规格化数,另一为无穷大 
+                  || (u32Src2.IsDNORM() && u32Src1.IsINF()) )
+         {
+              SetFlag(*p_pStatReg, Mult_FOverFlow);
+              SetFlag(*p_pStatReg, Mult_MVS);
+         }
+        else if((u32Src1.IsNORM() && u32Src2.IsINF())//当任一输入数为∞且另一个为正常值时
+                 || (u32Src2.IsNORM() && u32Src1.IsINF())
+                 || (u32Src1.IsINF() && u32Src2.IsINF()))
+		 {
+			  SetFlag(*p_pStatReg, Mult_FOverFlow);
+			  SetFlag(*p_pStatReg, Mult_MVS);
+		 }
+        else if  ( (u32Src1.IsDNORM())||(u32Src2.IsDNORM())
+                    || (u32Src1.IsZero() || u32Src2.IsZero()) )     //当任一输入为非规格化数 
+         {
+              if( (u32Src1.IsNega() == u32Src2.IsNega()) )
+              {
+                  u32result = 0;//正0
+              }
+              else
+			  {
+				  u32result = 0x80000000;//负0
+			  }
+
+			  if((!u32Src1.IsZero())&&(!u32Src2.IsZero()))
+			  {
+				  SetFlag(*p_pStatReg, Mult_UnderFlow);
+				  SetFlag(*p_pStatReg, Mult_MUS);
+			  }
+         }
+        else
+        {
+           exp = su32src1.split_f32.u8Exp + su32src2.split_f32.u8Exp - 127 ;
+           //尾数相乘得到48位结果     尾数|0x800000表示1.xxxx 
+           u48 = ((DSPU64)((DSPU64)(su32src1.split_f32.u23Frac | 0x800000) * (DSPU64)(su32src2.split_f32.u23Frac | 0x800000)))<<16 ;
+		   //48位结果在64位数的最高48位。
+
+		   if(u48 & u64MSBMask)
+		   {
+			   u48 = u48<<1 ;
+			   exp = exp + 1 ;
+				bool bJinWei=false;
+			   if(bSiSheWuRu)
+			   {
+				   //在此处增加四舍五入功能
+				   const DSPU64 u64Low41AllOneButHighest=0xffffffffffull;
+				   const DSPU64 u64Low41HighestOne=0x10000000000ull;
+				   const DSPU64 u64High23LowestOne=0x20000000000ull;
+
+				   if(u48&u64Low41HighestOne)
+					   //有可能需要进位
+				   {
+					   if(u48&u64Low41AllOneButHighest)
+					   //肯定要进位
+					   {
+						   bJinWei=true;
+						   u48+=u64High23LowestOne;
+						   //printf("sure to jw\n");
+					   }
+					   else
+					   //不一定要进位
+					   {
+						   if(u48&u64High23LowestOne)
+						   {
+								//进位
+							   bJinWei=true;
+							   u48+=u64High23LowestOne;
+						   }
+						   else
+						   {
+							   //不进位
+							   
+							  
+						   }
+					   }
+				   }
+			   }
+			   u23 = (DSPU32)(u48 >> 41);
+				if(bSiSheWuRu)
+				{
+					if(bJinWei&&u23==0)
+				   {
+					   exp++;
+				   }
+				}
+           }
+		   else
+		   {
+			   u48 = u48 << 2;
+			   bool bJinWei=false;
+
+			   if(bSiSheWuRu)
+			   {
+				   //在此处增加四舍五入功能
+				   const DSPU64 u64Low41AllOneButHighest=0xffffffffffull;
+				   const DSPU64 u64Low41HighestOne=0x10000000000ull;
+				   const DSPU64 u64High23LowestOne=0x20000000000ull;
+
+				   if(u48&u64Low41HighestOne)
+					   //有可能需要进位
+				   {
+					   if(u48&u64Low41AllOneButHighest)
+						   //肯定要进位
+					   {
+						   bJinWei=true;
+						   u48+=u64High23LowestOne;
+						   //printf("sure to jw2\n");
+					   }
+					   else
+						   //不一定要进位
+					   {
+						   if(u48&u64High23LowestOne)
+						   {
+							   //进位
+							   bJinWei=true;
+							   u48+=u64High23LowestOne;
+						   }
+						   else
+						   {
+							   //不进位
+							   //printf("jw after2\n");
+						   }
+					   }
+				   }
+			   }
+			   u23 = (DSPU32)(u48 >> 41);
+
+			   if(bSiSheWuRu)
+			   {
+				   if(bJinWei&&u23==0)
+				   {
+					   exp++;
+				   }
+			   }
+		   }
+
+           if(exp<=0)   //表示指数小于等于0 
+           {
+                 SetFlag(*p_pStatReg, Mult_UnderFlow);
+                 SetFlag(*p_pStatReg, Mult_MUS);
+           }
+           else if ( exp > 254 )
+           {
+                 SetFlag(*p_pStatReg, Mult_FOverFlow);
+                 SetFlag(*p_pStatReg, Mult_MVS);
+           }
+           else//指数在正常范围内，表示未溢出
+		   {
+			   if(u32Src1.IsNega()==u32Src2.IsNega())        //置结果的符号位 
+			   {
+					   u32result = (exp<<23) | u23;
+			   }
+			   else
+			   {
+				   u32result = MIN_SN_32| (exp<<23) | u23 ;
+			   }
+		   }
+       }
+
+
+       if( TestFlag(*p_pStatReg, Mult_FOverFlow) )
+       {
+		   if(bolSatu)
+		   {
+				 if( u32Src1.IsNega() == u32Src2.IsNega() ) 
+				 {
+					 u32result = 0x7f7fffff;//浮点数能够表示的最大正数
+				 }
+				 else
+				 {
+					 u32result = 0xff7fffff;//浮点数能够表示的最小负数
+				 }
+		   }
+		   else
+		   {
+			   if( u32Src1.IsNega() == u32Src2.IsNega() ) 
+			   {
+				   u32result = 0x7f800000;//正无穷的浮点数表示
+			   }
+			   else
+			   {
+				   u32result = 0xff800000;//负无穷的浮点数表示
+			   }
+		   }
+       }
+
+       if( TestFlag(*p_pStatReg, Mult_UnderFlow) )
+       {
+             if( u32Src1.IsNega() == u32Src2.IsNega() ) 
+             {
+                 u32result = 0x0;
+             }
+             else
+			 {
+                 u32result = 0x80000000;
+			 }
+       }
+
+       return u32result;
+}
+
+/******************************************************************
+	函数名：		Mul32
+
+	描述:			32位定点数据相乘。
+
+	参数:			p_u32Src1 -- 源操作数1。
+					p_u32Src2 -- 源操作数2。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-5-16		林广栋			1：整理函数内部流程结构，整体分为两个分支处理：有符号数
+									运算和无符号数运算。最后统一用一个DSPU32数返回。
+									2：简化了有符号操作时检查溢出的条件判断条件。
+	
+*******************************************************************/
+DSPU32 Mul32(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+	bool bolSatu   = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU32 u6CutNum = p_u32MULCUTR&0x3f;      //提取截位控制字 
+	//根据硬件设计要求,改为80位截断最大不超过40 
+	if (u6CutNum > 40)
+	{
+		u6CutNum = 40;
+	}
+
+	DSPU32 u32Result;
+
+	if (bolSigned)
+	{
+		DSPI64 Src1ITmp = (DSPI32 &)p_u32Src1;
+		DSPI64 Src2ITmp = (DSPI32 &)p_u32Src2;
+		DSPI64 I64Result = Src1ITmp * Src2ITmp;
+
+		I64Result = I64Result >> u6CutNum;
+
+		DSPI64 Upper33Bits = I64Result >> (64 - 33); 
+
+		//upper33bits共有33位，最后一位是实际使用数的符号位。
+
+
+        if ( ((DSPU64)Upper33Bits != u64AllZero && (DSPU64)Upper33Bits != u64AllOne) )
+        {
+            SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow);
+            SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+            bool bolSrc1Sign = ((p_u32Src1 >> 31)!=0);
+            bool bolSrc2Sign = ((p_u32Src2 >> 31)!=0);
+
+            if (bolSatu)
+            {
+                if ((bolSrc1Sign ^ bolSrc2Sign) == 0)
+                {
+                    I64Result = 0x7fffffff;
+                }
+                else
+                {
+                    I64Result = 0x80000000;
+                }
+            }
+        }
+		u32Result=(DSPU32)I64Result;
+     }
+	else
+	{
+		DSPU64 Src1UTmp = p_u32Src1;
+		DSPU64 Src2UTmp = p_u32Src2;
+		DSPU64 U64Result = Src1UTmp * Src2UTmp; 
+
+		U64Result = U64Result >> u6CutNum;   
+		DSPU64 Upper32Bits = U64Result >> 32; 
+		if ( Upper32Bits)//有溢出，并且是无符号数 
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+			if (bolSatu)    //无符号数，并且有饱和控制 
+			{
+				U64Result = 0xffffffff;     //正的最大值 
+			}
+		} 
+
+		u32Result = (DSPU32)(U64Result);
+	}
+
+    return   u32Result;     
+}
+
+/******************************************************
+修改记录
+--------------------------------------
+日期			作者			修改处
+2013-5-16		林广栋			1：整理函数内部流程结构，整体分为两个分支处理：有符号数
+								运算和无符号数运算。最后统一用一个DSPU32数返回。
+								2：简化了有符号操作时检查溢出的条件判断条件，去掉了冗余的判断。
+******************************************************/
+DSPU16 Mul16(DSPU16 p_u16Src1, DSPU16 p_u16Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+	bool bolSatu   = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU32 u5CutNum = p_u32MULCUTR&0x1f;
+	if (u5CutNum > 24)
+	{
+		u5CutNum = 24;
+	}
+	DSPU16 u16Result;
+
+	if(bolSigned)
+	{
+		DSPI32 Src1ITmp = (DSPI16 &)p_u16Src1;
+		DSPI32 Src2ITmp = (DSPI16 &)p_u16Src2;
+		DSPI32 I32Result = Src1ITmp * Src2ITmp;
+
+		I32Result = I32Result >> u5CutNum;
+
+		DSPI32 Upper17Bits = I32Result >> (32 - 17); 
+
+
+        if ( ((DSPU32)Upper17Bits != 0x0 && (DSPU32)Upper17Bits != 0xffffffff) )
+        {
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+            bool bolSrc1Sign = ((p_u16Src1 >> 15)!=0);
+            bool bolSrc2Sign = ((p_u16Src2 >> 15)!=0);
+
+            if (bolSatu)
+            {       
+                if ((bolSrc1Sign ^ bolSrc2Sign) == 0)
+                {
+                    I32Result = 0x7fff;
+                }
+                else
+                {
+                    I32Result = 0x8000;
+                }   
+            } 
+        } 
+
+		u16Result=(DSPU16)I32Result;
+     }  
+	else
+	{
+		DSPU32 Src1UTmp = p_u16Src1;
+		DSPU32 Src2UTmp = p_u16Src2;
+		DSPU32 U32Result = Src1UTmp * Src2UTmp; 
+
+		U32Result = U32Result >> u5CutNum;   
+		DSPU32 Upper16Bits = U32Result >> 16; 
+		if ( Upper16Bits)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+			if ( bolSatu)
+			{
+				U32Result = 0xffff;
+			}
+		}
+
+		u16Result = U32Result;
+	}
+
+    return   u16Result;     
+}
+
+/******************************************************************
+	函数名：		MulD16
+
+	描述:			输入数据的高低16位分别作定点数据相乘。
+
+	参数:			p_u32Src1 -- 源操作数1，包含高低两个16位定点数据。
+					p_u32Src2 -- 源操作数2，包含高低两个16位定点数据。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-5-16		林广栋			1：UpperReg、LowerReg并不一定要初始化为p_pStatReg中
+									的原值，它们仅仅是一个暂存16位操作溢出标志的局部变量。
+
+	*******************************************************************/
+
+DSPU32 MulD16(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+    DSPU16 u16UpperSrc1 = p_u32Src1 >> 16;
+    DSPU16 u16UpperSrc2 = p_u32Src2 >> 16;
+    DSPU16 u16LowerSrc1 = p_u32Src1;
+    DSPU16 u16LowerSrc2 = p_u32Src2;
+
+	DSPU32 UpperReg=0,LowerReg=0;
+
+    DSPU16 u16UpperResult = Mul16(u16UpperSrc1, u16UpperSrc2, &UpperReg, p_u32MULCR,p_u32MULCUTR);
+    DSPU16 u16LowerResult = Mul16(u16LowerSrc1, u16LowerSrc2, &LowerReg, p_u32MULCR,p_u32MULCUTR);
+
+    (*p_pStatReg)=(UpperReg | LowerReg);
+
+    DSPU32 u32Result = (((DSPU32)u16UpperResult) << 16) | ((DSPU32)u16LowerResult);
+
+    return  u32Result;
+}
+
+/******************************************************************
+	函数名：		MulC16
+
+	描述:			16位定点复数相乘：(a + bi) * (c + di)。
+
+	参数:			p_CFix16Src1 -- 源操作数(a + bi)，16位定点复数。
+					p_CFix16Src2 -- 源操作数(c + di)，16位定点复数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；16位定点复数乘法在一个乘法器内完成。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年6月19日	林广栋			删除了原来对虚部结果的不必要的判断
+	
+*******************************************************************/
+//只有有符号运算,有饱和  
+DSP_CFix16 MulC16(DSP_CFix16 p_CFix16Src1, DSP_CFix16 p_CFix16Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+	bool bolSatuCtl = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU32 u5CutNum = p_u32MULCUTR&0x1f;
+
+	DSPU16 uA=p_CFix16Src1.split.u16Real;
+	DSPU16 uB=p_CFix16Src1.split.u16Imag;
+	DSPU16 uC=p_CFix16Src2.split.u16Real;
+	DSPU16 uD=p_CFix16Src2.split.u16Imag;
+    DSPI64 A = (DSPI16 &)uA;
+    DSPI64 B = (DSPI16 &)uB;
+    DSPI64 C = (DSPI16 &)uC;
+    DSPI64 D = (DSPI16 &)uD;
+
+	DSP_CFix16 cf16Result;
+
+	DSPI64 i64ResultReal, i64ResultImag;
+
+    i64ResultReal = (DSPI64)(A * C - B * D);
+
+    i64ResultImag = (DSPI64)(A * D + B * C);
+
+    if ( u5CutNum > 24 )
+    {
+        u5CutNum = 24;
+    }
+
+    i64ResultReal = i64ResultReal >> u5CutNum;
+    i64ResultImag = i64ResultImag >> u5CutNum;
+
+    cf16Result.split.u16Real = i64ResultReal;
+    cf16Result.split.u16Imag = i64ResultImag;
+
+    DSPI64 ResultRealUpperBits = i64ResultReal >> 15;
+    bool ResultRealOverflow = (ResultRealUpperBits != 0) && (ResultRealUpperBits != -1); 
+    DSPI64 ResultImagUpperBits = i64ResultImag >> 15 ;
+    bool ResultImagOverflow = (ResultImagUpperBits != 0) && (ResultImagUpperBits != -1);
+
+    if (ResultRealOverflow || ResultImagOverflow)
+    {
+        SetFlag(*p_pStatReg, Mult_OverFlow);
+        SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+        if (bolSatuCtl)
+        {
+            if (ResultRealOverflow)
+            {
+                if (i64ResultReal<0)
+                {
+                    cf16Result.split.u16Real = 0x8000;                     
+                }
+                else
+                {
+                    cf16Result.split.u16Real = 0x7fff; 
+                }    
+            } 
+
+            if (ResultImagOverflow)
+            {
+                if (i64ResultImag<0)
+                {
+                    cf16Result.split.u16Imag = 0x8000; 
+                }
+                else
+                {
+                    cf16Result.split.u16Imag = 0x7fff;
+                }
+            }
+        }
+    }
+    return cf16Result;
+}       
+
+/******************************************************************
+	函数名：		MulC16Conj
+
+	描述:			16位定点复数相乘：(a + bi) * (c - di) = (ac + bd) + ( -ad + bc)i;
+
+	参数:			p_CFix16Src1 -- 源操作数(a + bi)，16位定点复数。
+					p_CFix16Src2 -- 源操作数(c + di)，16位定点复数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年6月20日	林广栋			删去原来冗余的溢出判断。
+	
+*******************************************************************/
+DSP_CFix16 MulC16Conj(DSP_CFix16 p_CFix16Src1, DSP_CFix16 p_CFix16Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+	bool bolSatuCtl = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU32 u5CutNum = p_u32MULCUTR&0x1f;
+
+	DSPU16 uA=p_CFix16Src1.split.u16Real;
+	DSPU16 uB=p_CFix16Src1.split.u16Imag;
+	DSPU16 uC=p_CFix16Src2.split.u16Real;
+	DSPU16 uD=p_CFix16Src2.split.u16Imag;
+	DSPI64 A = (DSPI16 &)uA;
+	DSPI64 B = (DSPI16 &)uB;
+	DSPI64 C = (DSPI16 &)uC;
+	DSPI64 D = (DSPI16 &)uD;
+
+	DSP_CFix16 cf16Result;
+
+	DSPI64 i64ResultReal, i64ResultImag;
+
+	i64ResultReal = (DSPI64)(A * C + B * D);
+
+	i64ResultImag = (DSPI64)(B * C - A * D);
+
+	if ( u5CutNum > 24 )
+	{
+		u5CutNum = 24;
+	}
+
+	i64ResultReal = i64ResultReal >> u5CutNum;
+	i64ResultImag = i64ResultImag >> u5CutNum;
+
+	cf16Result.split.u16Real = i64ResultReal;
+	cf16Result.split.u16Imag = i64ResultImag;
+
+	DSPI64 ResultRealUpperBits = i64ResultReal >> 15;
+	bool ResultRealOverflow = (ResultRealUpperBits != 0) && (ResultRealUpperBits != -1); 
+	DSPI64 ResultImagUpperBits = i64ResultImag >> 15 ;
+	bool ResultImagOverflow = (ResultImagUpperBits != 0) && (ResultImagUpperBits != -1);
+
+	if (ResultRealOverflow || ResultImagOverflow)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if (bolSatuCtl)
+		{
+			if (ResultRealOverflow)
+			{
+				if (i64ResultReal<0)
+				{
+					cf16Result.split.u16Real = 0x8000;                     
+				}
+				else
+				{
+					cf16Result.split.u16Real = 0x7fff; 
+				}    
+			} 
+
+			if (ResultImagOverflow)
+			{
+				if (i64ResultImag<0)
+				{
+					cf16Result.split.u16Imag = 0x8000; 
+				}
+				else
+				{
+					cf16Result.split.u16Imag = 0x7fff;
+				}
+			}
+		}
+	}
+	return cf16Result;
+}   
+
+
+/******************************************************************
+	函数名：		MulC16DConj
+
+	描述:			16位定点复数相乘：conj(a + bi) * conj(c + di)。
+
+	参数:			p_CFix16Src1 -- 源操作数(a + bi)，16位定点复数。
+					p_CFix16Src2 -- 源操作数(c + di)，16位定点复数。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年6月20日	林广栋			删去了冗余的溢出判断
+	
+*******************************************************************/
+DSP_CFix16 MulC16DConj(DSP_CFix16 p_CFix16Src1, DSP_CFix16 p_CFix16Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+	bool bolSatuCtl = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU32 u5CutNum = p_u32MULCUTR&0x1f;
+
+	DSPU16 uA=p_CFix16Src1.split.u16Real;
+	DSPU16 uB=p_CFix16Src1.split.u16Imag;
+	DSPU16 uC=p_CFix16Src2.split.u16Real;
+	DSPU16 uD=p_CFix16Src2.split.u16Imag;
+	DSPI64 A = (DSPI16 &)uA;
+	DSPI64 B = (DSPI16 &)uB;
+	DSPI64 C = (DSPI16 &)uC;
+	DSPI64 D = (DSPI16 &)uD;
+
+	DSP_CFix16 cf16Result;
+
+	DSPI64 i64ResultReal, i64ResultImag;
+
+	i64ResultReal = (DSPI64)(A * C - B * D);
+
+	i64ResultImag = (DSPI64)(0 - B * C - A * D);
+
+	if ( u5CutNum > 24 )
+	{
+		u5CutNum = 24;
+	}
+
+	i64ResultReal = i64ResultReal >> u5CutNum;
+	i64ResultImag = i64ResultImag >> u5CutNum;
+
+	cf16Result.split.u16Real = i64ResultReal;
+	cf16Result.split.u16Imag = i64ResultImag;
+
+	DSPI64 ResultRealUpperBits = i64ResultReal >> 15;
+	bool ResultRealOverflow = (ResultRealUpperBits != 0) && (ResultRealUpperBits != -1); 
+	DSPI64 ResultImagUpperBits = i64ResultImag >> 15 ;
+	bool ResultImagOverflow = (ResultImagUpperBits != 0) && (ResultImagUpperBits != -1);
+
+	if (ResultRealOverflow || ResultImagOverflow)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if (bolSatuCtl)
+		{
+			if (ResultRealOverflow)
+			{
+				if (i64ResultReal<0)
+				{
+					cf16Result.split.u16Real = 0x8000;                     
+				}
+				else
+				{
+					cf16Result.split.u16Real = 0x7fff; 
+				}    
+			} 
+
+			if (ResultImagOverflow)
+			{
+				if (i64ResultImag<0)
+				{
+					cf16Result.split.u16Imag = 0x8000; 
+				}
+				else
+				{
+					cf16Result.split.u16Imag = 0x7fff;
+				}
+			}
+		}
+	}
+	return cf16Result;
+}      
+/******************************************************************
+	函数名：		MULSqrAdd16
+
+	描述:			求两个16位定点数据p_u16Src1和p_u16Src2的平方和。
+
+	参数:			p_u32Src -- 源操作数
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年6月20日	林广栋			修改了冗余的溢出判断条件
+	
+*******************************************************************/
+DSPU32 MULSqrAdd16(DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU32 u5CutNum = p_u32MULCUTR&0x3f;
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed);
+
+    DSPU16 u16UpperSrc = p_u32Src >> 16;
+    DSPU16 u16LowerSrc = p_u32Src;
+
+    if ( u5CutNum > 40 )
+    {
+        u5CutNum = 40;
+    }
+
+    DSPI64 i64Result = 0;
+	DSPU64 u64Result = 0;
+    DSPU32 u32Result = 0;
+
+    if(bolSigned)//有符号数运算 （只有一种溢出情况，即0x8000*0x8000 *2） 
+    {
+        DSPI32 A = (DSPI16 &)u16UpperSrc;
+        DSPI32 B = (DSPI16 &)u16LowerSrc;
+
+        i64Result = ((DSPI64)A) *((DSPI64) A) + ((DSPI64)B) * ((DSPI64) B);
+        i64Result >>= u5CutNum;
+        u32Result = (DSPU32)i64Result;
+
+        if (i64Result>>31)//高低16位求平方后，必然是正数，所以不必考虑负数溢出的情况
+        {
+            SetFlag(*p_pStatReg, Mult_OverFlow);
+            SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+            if (bolSatu)
+            {
+                u32Result = 0x7fffffff;
+            }
+        }
+    }
+    else                   //无符号数运算 
+    {
+        u64Result = ((DSPU64)u16UpperSrc) *((DSPU64) u16UpperSrc) + ((DSPU64)u16LowerSrc) * ((DSPU64)u16LowerSrc);
+        u64Result >>= u5CutNum;
+        u32Result = (DSPU32)u64Result;
+        if((u64Result >> 32))
+        {
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+             if(bolSatu)
+             {
+                  u32Result = 0xffffffff;
+             }
+        }
+    }
+    return  u32Result;
+}
+/******************************************************************
+	函数名：		MACCTo32
+
+	描述:			乘累加结果寄存器MACC截位输出为32位定点数据。
+
+	参数:			DSP_BIT80 -- 80位MACC。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_intCutPos -- 截位信息。
+					p_bolUseCutPos -- 截位信号选择。true: 使用p_intCutPos作为截位信号；
+					  				false：使用p_u32ALUCR中的截位信号。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；
+					此函数中截位信息来自p_intCutPos而不是p_u32MULCR。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-6-30		林广栋			修改标志寄存器置位处理。
+	*******************************************************************/
+
+DSPU32 MACCTo32(const DSP_BIT80 &p_u80MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, int p_intCutPos, bool p_bolUseCutPos)
+{
+    if(!p_bolUseCutPos)
+    {
+         p_intCutPos = p_u32MULCUTR&0x3f;      //提取截位控制字 
+    }
+
+	if(p_intCutPos>40)
+	{
+		p_intCutPos=40;
+	}
+
+    bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+	bool bolSatu   = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSPU16 u16MACCHigh = p_u80MACC.u16High;
+    DSPU64 u64MACCLow  = p_u80MACC.u64Low;
+
+    DSPI16 i16MACCHigh = (DSPI16 &)u16MACCHigh;
+    DSPI64  i64MACCLow = (DSPI64 &)u64MACCLow;
+
+
+    DSPU32 u32Result = 0;
+
+    bool bolSignOverFlow = false;
+    bool bolUnsignOverFlow = false;
+    bool bolResultSign;
+
+    if (p_intCutPos <= 32)
+    {
+        u32Result = (DSPU32)(u64MACCLow >> p_intCutPos);
+        bolResultSign = ((u32Result & 0x80000000)!=0);
+        bolSignOverFlow = !(i16MACCHigh ==  0 && (i64MACCLow >>   32 >> p_intCutPos) ==  0 && !bolResultSign)
+                       && !(i16MACCHigh == -1 && (i64MACCLow >>   32 >> p_intCutPos) == -1 && bolResultSign);
+        bolUnsignOverFlow = !((u16MACCHigh ==  0) &&((u64MACCLow >> 32 >> p_intCutPos) ==  0) );
+    }
+    else
+    {
+       int CutPosHigh = p_intCutPos - 32;
+       u32Result = (((DSPU32)u16MACCHigh )<< ( 32 - CutPosHigh )) | (DSPU32)((u64MACCLow >> p_intCutPos));
+       bolResultSign = ((u32Result & 0x80000000)!=0);
+       bolSignOverFlow = !((i16MACCHigh >> CutPosHigh) ==  0 && !bolResultSign)
+                      && !((i16MACCHigh >> CutPosHigh) == -1 &&  bolResultSign);
+       bolUnsignOverFlow = !( (u16MACCHigh >> CutPosHigh) ==  0 );
+    }
+
+    bool u80Sign = (( u16MACCHigh & 0x8000)!=0);
+    if (bolSigned && bolSignOverFlow)
+    {
+        SetFlag(*p_pStatReg, Mult_OverFlow);
+        SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_32_OverFlow);
+		SetFlag(*p_pStatReg,Mult_32_OverFlow_S);
+        if (bolSatu)
+        {
+            if (!u80Sign)
+            {
+                u32Result = MAX_SN_32;
+            }
+            else
+            {
+                u32Result = MIN_SN_32;
+            }
+        }
+    }
+    if ((!bolSigned) && bolUnsignOverFlow)
+    {
+        SetFlag(*p_pStatReg, Mult_OverFlow); 
+        SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_32_OverFlow);
+		SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+        if (bolSatu)
+        {
+            u32Result = MAX_UN_32;
+        }
+    }
+
+    return u32Result;
+}
+
+
+/***************************************************************
+修改记录
+--------------------------------------
+日期			作者			修改处
+2012-6-28		林广栋			1.修改溢出处理。
+*******************************************************************/
+DSPU16 MACCTo16(DSP_BIT40 p_u40MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, int p_intCutPos, bool p_bolUseCutPos)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+
+    DSPU8 u8MACCHigh = p_u40MACC.u8High;
+    DSPU32 u32MACCLow  = p_u40MACC.u32Low; 
+
+    DSPI8  i8MACCHigh = (DSPI8 &)u8MACCHigh;
+    DSPI32 i32MACCLow = (DSPI32 &)u32MACCLow;
+
+    DSPU16 u16Result = 0;
+
+    bool bolSignOverFlow = false;
+    bool bolUnsignOverFlow = false;
+    bool bolResultSign;
+    if (p_intCutPos <= 16)
+    {
+        u16Result = u32MACCLow >> p_intCutPos;
+        bolResultSign = ((u16Result & 0x8000)!=0);
+        bolSignOverFlow = !(i8MACCHigh ==  0 && (i32MACCLow >>   16 >> p_intCutPos) ==  0 && !bolResultSign)
+                       && !(i8MACCHigh == -1 && (i32MACCLow >>   16 >> p_intCutPos) == -1 && bolResultSign);
+        bolUnsignOverFlow = !(u8MACCHigh ==  0 && (u32MACCLow >> 16 >> p_intCutPos) ==  0 );
+    }
+    else
+    {
+       int CutPosHigh = p_intCutPos - 16;
+       u16Result = ((DSPU16)(u8MACCHigh << ( 8 - CutPosHigh )) << 8) | (u32MACCLow >> p_intCutPos);
+       bolResultSign = ((u16Result & 0x8000)!=0);
+       bolSignOverFlow = !((i8MACCHigh >> CutPosHigh) ==  0 && !bolResultSign)
+                      && !((i8MACCHigh >> CutPosHigh) == -1 &&  bolResultSign);
+       bolUnsignOverFlow = !( (u8MACCHigh >> CutPosHigh) ==  0 );
+    }
+
+    bool u40Sign = ((u8MACCHigh & 0x80)!=0);
+    if (bolSigned && bolSignOverFlow)
+    {
+		SetFlag(*p_pStatReg, Mult_OverFlow); 
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+        if(bolSatu)
+        {
+            if (!u40Sign)
+            {
+                u16Result = MAX_SN_16;
+            }
+            else
+            {
+                u16Result = MIN_SN_16;
+            }
+        }
+    }
+
+    if (!bolSigned && bolUnsignOverFlow)
+    {
+		SetFlag(*p_pStatReg, Mult_OverFlow); 
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+        if (bolSatu)
+        {
+            u16Result = MAX_UN_16;
+        }    
+    } 
+    return u16Result;
+}
+
+/******************************************************************
+	函数名：		MACCToD16
+
+	描述:			乘累加结果寄存器MACC截位输出为高低16位定点数据。
+
+	参数:			DSP_BIT80 -- 80位MACC。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_intCutPos -- 截位信息。
+					p_bolUseCutPos -- 截位信号选择。true: 使用p_intCutPos作为截位信号；
+					  					 false：使用p_u32ALUCR中的截位信号。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；
+					此函数中截位信息来自p_intCutPos而不是p_u32MULCR。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-6-28		林广栋			1.修改了标志寄存器的初始化值。
+									2.增加了过大的截位的处理。
+	*******************************************************************/
+DSPU32 MACCToD16(const DSP_BIT80 &p_u80MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, int p_intCutPos, bool p_bolUseCutPos)
+{ 
+    if(!p_bolUseCutPos)
+    {
+         p_intCutPos = p_u32MULCUTR&0x1f;      //提取截位控制字 
+    }
+
+	if(p_intCutPos>24)
+	{
+		p_intCutPos=24;
+	}
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);      
+
+    DSP_BIT40 u40UpperSrc;
+    DSP_BIT40 u40LowerSrc;
+
+    u40UpperSrc.u8High = p_u80MACC.u16High >> 8;
+    u40UpperSrc.u32Low = (DSPU32)p_u80MACC.u16High << 8 << 16 | p_u80MACC.u64Low >> 40;
+    u40LowerSrc.u8High = p_u80MACC.u64Low >> 32 & 0xff;
+    u40LowerSrc.u32Low = (DSPU32)p_u80MACC.u64Low;
+
+    DSPU32 UpperReg =0;
+    DSPU32 LowerReg =0;
+
+    DSPU16 u16UpperResult = MACCTo16(u40UpperSrc, &UpperReg, p_u32MULCR, p_u32MULCUTR, p_intCutPos, p_bolUseCutPos);
+    DSPU16 u16LowerResult = MACCTo16(u40LowerSrc, &LowerReg, p_u32MULCR, p_u32MULCUTR, p_intCutPos, p_bolUseCutPos); 
+
+    *p_pStatReg = UpperReg | LowerReg;
+
+    DSPU32 u32Result = (((DSPU32)u16UpperResult) << 16) | ((DSPU32)u16LowerResult);
+
+    return  u32Result;
+}
+
+
+/******************************************************************
+	函数名：		MAC32
+
+	描述:			32位定点数据乘累加。
+
+	参数:			p_u32Src1 -- 源操作数1。
+					p_u32Src2 -- 源操作数2。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-5-22		林广栋			1。修改了无符号数的溢出判断条件；
+									2。修改了有符号数的溢出判断条件；
+									3。修改了有符号数的符号判断条件。
+	
+*******************************************************************/
+void MAC32(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+    bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed);    
+    bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);      
+
+    DSPU64 U64Result;
+    DSPU80 u80MAC(*p_pACC);
+
+    DSPU80 u80Result;
+
+    if(bolSigned)//有符号运算
+    {
+		u80MAC.MACCSExtend();
+        DSPI32 Src1ITmp = (DSPI32)p_u32Src1;
+        DSPI32 Src2ITmp = (DSPI32)p_u32Src2;
+        DSPI64 I64Result = ((DSPI64)Src1ITmp) * ((DSPI64)Src2ITmp);
+        U64Result = (DSPU64 &)I64Result;
+
+        DSPU80 i80Result(U64Result);
+        i80Result.SignExtend();
+
+        u80Result = u80MAC + i80Result;
+
+        if(((u80Result.u16High & 0xff80) != 0xff80 ) && ((u80Result.u16High & 0xff80) != 0)) 
+        {
+             SetFlag(*p_pStatReg, Mult_OverFlow); 
+             SetFlag(*p_pStatReg, Mult_MOS);
+			 SetFlag(*p_pStatReg, Mult_32_OverFlow);
+			 SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+             if(bolSatu)
+             {
+                if(u80MAC.MACCSign())
+                {
+                      u80Result.SetToMIN_SN_80();
+                }
+                else
+                {
+                      u80Result.SetToMAX_SN_80();
+                }
+             }
+        }
+    }
+    else//无符号运算 
+    {
+		u80MAC.MACCUExtend();
+        U64Result = ((DSPU64)p_u32Src1) * ((DSPU64)p_u32Src2);
+        DSPU80 Src3(U64Result);
+        Src3.USignExtend();
+        u80Result = u80MAC + Src3;
+        if( (u80Result.u16High & 0xff00) != 0)
+        {
+             SetFlag(*p_pStatReg, Mult_OverFlow);
+             SetFlag(*p_pStatReg, Mult_MOS);
+			 SetFlag(*p_pStatReg, Mult_32_OverFlow);
+			 SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+             if(bolSatu)
+             {
+                 u80Result.SetToMAX_usigned_80();
+             }
+			 else
+			 {
+				 u80Result.u16High = u80Result.u16High & 0x00ff;
+			 }
+        }
+    }
+
+    *p_pACC = u80Result.GetDSPBIT();
+}
+
+/**********************************************
+--------------------------------------
+日期			作者			修改处
+2013-6-21		林广栋			1。修改溢出时的正负号判断条件。
+*******************************************************************/
+void MAC16(DSPU16 p_u16Src1, DSPU16 p_u16Src2, DSP_BIT40 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+    bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed);
+    bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+    DSP_BIT40 u40_ACC = *p_pACC ;
+    DSPU64 Src_ACC = (((DSPU64)u40_ACC.u8High)<<32)|((DSPU64)u40_ACC.u32Low);
+
+    DSP_BIT40 u40Result;
+    DSPU64 u40_ACCRes;
+
+	DSPU64 u40Bit=0x8000000000ull;//第40位为1，其余为0
+	DSPU64 u40Mask=0xffffff8000000000ull;//第40位及以上为1，其余为0
+
+    if(bolSigned)              //有符号运算处理 
+    {
+        DSPI64 Src1ITmp = (DSPI16 &)p_u16Src1;
+        DSPI64 Src2ITmp = (DSPI16 &)p_u16Src2;
+        DSPI64 I64Result = Src1ITmp * Src2ITmp;
+
+		if(Src_ACC&u40Bit)
+		{
+			Src_ACC=Src_ACC|u40Mask;//对Src_ACC进行符号位扩展。
+		}
+
+		DSPI64 i40ACC=(DSPI64 &)Src_ACC;
+
+        u40_ACCRes = (DSPU64)(I64Result + i40ACC);
+		DSPU64 u64Sign=u40_ACCRes & u40Mask;
+
+		u40Result.u32Low=u40_ACCRes;
+        u40Result.u8High = (u40_ACCRes>>32) & 0xff;
+
+        if( (u64Sign!= 0x0) && (u64Sign != u40Mask))
+        {
+            SetFlag(*p_pStatReg, Mult_OverFlow);
+            SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+            if(bolSatu)
+            {
+				//不能根据u64Sign来判断结果是正数还是负数，因为在溢出
+				//的情况下，u64Sign必然不为0。
+				//首先，i40ACC肯定没有溢出。
+				//如果I64Result为负数，若存在溢出，则溢出的数一定是负数
+				//同样，如果I64Result为正数，若存在溢出，则溢出的数一定是正数
+                 if(I64Result<0)
+                 {
+                     u40Result.u8High = 0x80;
+                     u40Result.u32Low = 0x0;
+                 }
+                 else
+                 {
+                     u40Result.u8High = 0x7f;
+                     u40Result.u32Low = 0xffffffff;
+                 }
+            }
+        }
+     }
+     else                  //无符号处理 
+     {
+         u40_ACCRes = ((DSPU64) p_u16Src1) * ((DSPU64) p_u16Src2);
+         u40_ACCRes += Src_ACC;
+
+         u40Result.u8High = (u40_ACCRes>>32) & 0xff;   //无溢出处理  或者  有溢出但无饱和控制 
+         u40Result.u32Low = u40_ACCRes;
+
+         if(u40_ACCRes>>40)
+         {
+			   SetFlag(*p_pStatReg, Mult_OverFlow);
+			   SetFlag(*p_pStatReg, Mult_MOS);
+			   SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			   SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+			   if(bolSatu)
+			   {
+					 u40Result.u8High = 0xff;
+					 u40Result.u32Low = 0xffffffff;
+			   }
+         }
+     }
+    *p_pACC = u40Result;
+} 
+
+/******************************************************************
+	函数名：		MACD16
+
+	描述:			高低16位定点数据乘累加。
+
+	参数:			p_u32Src1 -- 源操作数1。
+					p_u32Src2 -- 源操作数2。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+void MACD16(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+    DSPU16 u16UpperSrc1 = p_u32Src1 >> 16;
+    DSPU16 u16LowerSrc1 = p_u32Src1;
+
+    DSPU16 u16UpperSrc2 = p_u32Src2 >> 16;
+    DSPU16 u16LowerSrc2 = p_u32Src2;
+
+    DSP_BIT40 u40UpperACC;
+    u40UpperACC.u8High = p_pACC->u16High >> 8 ;
+    u40UpperACC.u32Low = (((DSPU32)(p_pACC->u16High) )<< 24 )| ((DSPU32)(p_pACC->u64Low >> 40)) ;
+
+    DSP_BIT40 u40LowerACC;
+    u40LowerACC.u8High = (DSPU8)(p_pACC->u64Low >> 32);
+    u40LowerACC.u32Low = (DSPU32)(p_pACC->u64Low); 
+
+    DSPU32 UpperReg = 0;
+    DSPU32 LowerReg = 0;	
+
+    MAC16(u16UpperSrc1, u16UpperSrc2, &(u40UpperACC), &UpperReg, p_u32MULCR);
+    MAC16(u16LowerSrc1, u16LowerSrc2, &(u40LowerACC), &LowerReg, p_u32MULCR);
+
+
+    DSP_BIT80 u80Result;
+    u80Result.u64Low = (((DSPU64)(u40UpperACC.u32Low) )<< 40) | (((DSPU64)(u40LowerACC.u8High)) << 32) | (DSPU64)(u40LowerACC.u32Low);
+    u80Result.u16High = (((DSPU16)(u40UpperACC.u8High)) << 8) | ((DSPU16)(u40UpperACC.u32Low >> 24));
+
+    *p_pACC = u80Result;
+
+    *p_pStatReg = UpperReg | LowerReg;
+
+}   
+
+/******************************************************************
+	函数名：		MACC16
+
+	描述:			16位定点复数乘累加。
+
+	参数:			p_u32Src1 -- 16位定点复数1。
+					p_u32Src2 -- 16位定点复数2。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年6月20日	林广栋			重写整个函数
+	
+*******************************************************************/
+void MACC16(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+    bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+    DSPU16 uA = p_u32Src1 >> 16;
+    DSPU16 uB = p_u32Src1;
+
+    DSPU16 uC = p_u32Src2 >> 16;
+    DSPU16 uD = p_u32Src2;
+
+	DSPI64 A=(DSPI16 &)uA;
+	DSPI64 B=(DSPI16 &)uB;
+	DSPI64 C=(DSPI16 &)uC;
+	DSPI64 D=(DSPI16 &)uD;
+
+	DSPI64 iReal=A*C-B*D;
+	DSPI64 iImg=A*D+B*C;
+
+	DSPU64 u40Mask=-1;
+	u40Mask<<=40;
+
+	DSPU64 u40Sign=1;
+	u40Sign<<=39;
+
+	DSPU64 uMacLow40=(p_pACC->u64Low)&(~u40Mask);
+	DSPU64 uMacHigh40=(((DSPU64)(p_pACC->u16High))<<24)|((p_pACC->u64Low)>>40);
+
+	if(uMacHigh40&u40Sign)
+	{
+		uMacHigh40|=u40Mask;
+	}
+	if(uMacLow40&u40Sign)
+	{
+		uMacLow40|=u40Mask;
+	}
+
+	DSPI64 iMacReal=(DSPI64 &)uMacHigh40;
+	DSPI64 iMacImg=(DSPI64 &)uMacLow40;
+
+	iMacReal+=iReal;
+	iMacImg+=iImg;
+
+	DSPU64 uLow40=iMacImg&(~u40Mask);
+	DSPU64 uHigh40=iMacReal&(~u40Mask);
+
+	if(((iMacImg>>39)!=0)&&((iMacImg>>39)!=(-1)))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(iImg<0)
+			{
+				uLow40=0x8000000000ull;
+			}
+			else
+			{
+				uLow40=0x7fffffffffull;
+			}
+		}
+	}
+
+	if(((iMacReal>>39)!=0)&&((iMacReal>>39)!=(-1)))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(iReal<0)
+			{
+				uHigh40=0x8000000000ull;
+			}
+			else
+			{
+				uHigh40=0x7fffffffffull;
+			}
+		}
+	}
+
+	p_pACC->u16High=uHigh40>>24;
+	p_pACC->u64Low=(uHigh40<<40)|uLow40;
+	return;
+}
+
+
+
+//////////////////*DWBSP 1042*/////////////////////////////////////
+/*found*****************************************************************
+	函数名：		MulS16
+	
+	对应指令形式: Rs=LHRm*LHRn 
+	              Rs=HHRm*HHRn 
+	              Rs=LHRm*HHRn 
+
+	描述:			从两个通用寄存器中分别选择高16位或低16位作定点有符号数乘法。
+
+	参数:		p_u32Src1 -- 源操作数1，对应Rm，包含高低两个16位定点数据。
+					p_u32Src2 -- 源操作数2，对应Rn，包含高低两个16位定点数据。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Mode -- 模式选择
+					    0 -- 选择Rm的低16位与Rn的低16位相乘
+					    1 -- 选择Rm的高16位与Rn的高16位相乘
+					    2 -- 选择Rm的低16位与Rn的高16位相乘
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-16            linguangdong         new
+	
+*******************************************************************/
+DSPU32 MulS16(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32Mode)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation); 
+	DSPU32 u5CutNum = p_u32MULCUTR&0x3f;
+
+	if ( u5CutNum > 40 )
+	{
+		u5CutNum = 40;
+	}
+
+
+	DSPU16 uh1=p_u32Src1>>16;
+	DSPU16 ul1=p_u32Src1;
+
+	DSPU16 uh2=p_u32Src2>>16;
+	DSPU16 ul2=p_u32Src2;
+
+	DSPI16 hSrc1=(DSPI16 )uh1;
+	DSPI16 lSrc1=(DSPI16 )ul1;
+
+	DSPI16 hSrc2=(DSPI16 )uh2;
+	DSPI16 lSrc2=(DSPI16 )ul2;
+
+	DSPI32 iResult;
+	switch(p_u32Mode)
+	{
+	case 0:
+		iResult=((DSPI32)lSrc1)*((DSPI32)lSrc2);
+		break;
+	case 1:
+		iResult=((DSPI32)hSrc1)*((DSPI32)hSrc2);
+		break;
+	case 2:
+		iResult=((DSPI32)lSrc1)*((DSPI32)hSrc2);
+		break;
+	}
+
+	if(u5CutNum>=32)
+	{
+		if(iResult<0)
+		{
+			iResult=0xffffffff;
+		}
+		else
+		{
+			iResult=0;
+		}
+	}
+	else
+	{
+		iResult>>=u5CutNum;
+	}
+
+	//两个16位有符号数相乘，放入32位寄存器中，不会产生溢出，所以不做溢出判断
+	DSPU32 uResult=(DSPU32 &)iResult;
+	return uResult;
+}
+
+
+/*found*****************************************************************
+	函数名：		LoadMACC32
+	
+	对应指令形式: MACCs=Rm(C)(z,s,p)                      // z, s, p必定3选1
+
+	描述:			将32位Rm寄存器内容放置在MACC[(31+c):c]处。
+
+	参数:		DSP_BIT80 -- 80位MACC。
+					p_u32Src -- 源操作数，对应Rm。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Pos -- 放置起始位置，对应c。
+					p_u32Mode -- 模式选择
+					    0 -- 对于MACC中的其他位，高低位均补零，对应后缀z
+					    1 -- 对于MACC中的其他位，高位进行符号位扩展，低位补零，对应后缀s
+					    2 -- 对于MACC中的其他位，保持原值，对应后缀p
+
+	返回值：		
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-16       linguangdong    new
+	2013-6-27		林广栋			增加了溢出处理	
+
+*******************************************************************/
+void LoadMACC32(DSP_BIT80 &p_u80MACC, DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32Pos, DSPU32 p_u32Mode, bool p_bolUseCutPos)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	if(!p_bolUseCutPos)
+	{
+		p_u32Pos=p_u32MULCUTR&0x3f;
+	}
+
+	DSPU64 u64Src=p_u32Src;
+	DSPI32 i32Src=(DSPI32 &)p_u32Src;
+	DSPI64 i64Src=i32Src;
+
+	if(p_u32Pos<=32)
+	{
+	switch(p_u32Mode)
+		{
+		case 0:
+			p_u80MACC.u64Low=u64Src<<p_u32Pos;
+			p_u80MACC.u16High=0;
+			break;
+		case 1:
+			p_u80MACC.u64Low=i64Src<<p_u32Pos;
+			if(p_u32Src&0x80000000)
+			{
+				p_u80MACC.u16High=0xFFFF;
+			}
+			else
+			{
+				p_u80MACC.u16High=0;
+			}
+			break;
+		case 2:
+			{
+				u64Src=u64Src<<p_u32Pos;
+
+				DSPU32 uAllOne=-1;
+				
+				DSPU64 u64Mask=uAllOne;
+				u64Mask=~(u64Mask<<p_u32Pos);
+
+				p_u80MACC.u64Low&=u64Mask;
+
+				p_u80MACC.u64Low|=u64Src;
+			}
+			break;
+		}
+	}
+	else
+	{
+	switch(p_u32Mode)
+		{
+		case 0:
+			p_u80MACC.u64Low=u64Src<<p_u32Pos;
+			p_u80MACC.u16High=(DSPU16)(u64Src>>(64-p_u32Pos));
+
+			if((u64Src>>(64-p_u32Pos))&0xffff0000)
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_32_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+				if(bolSatu)
+				{
+					p_u80MACC.u16High=0xffff;
+					p_u80MACC.u64Low=u64AllOne;
+				}
+			}
+			break;
+		case 1:
+			{
+				p_u80MACC.u64Low=i64Src<<p_u32Pos;
+				p_u80MACC.u16High=(DSPU16)(i64Src>>(64-p_u32Pos));
+				//移位操作时，负数前面自动补1
+
+				bool not0=((i64Src>>(64-p_u32Pos))&0xffff8000)!=0;
+				bool not1=((i64Src>>(64-p_u32Pos))&0xffff8000)!=0xffff8000;
+				if(not1&not0)
+				{
+					SetFlag(*p_pStatReg, Mult_OverFlow);
+					SetFlag(*p_pStatReg, Mult_32_OverFlow);
+					SetFlag(*p_pStatReg, Mult_MOS);
+					SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+					if(bolSatu)
+					{
+						if(i64Src<0)
+						{
+							p_u80MACC.u16High=0x8000;
+							p_u80MACC.u64Low=0;
+						}
+						else
+						{
+							p_u80MACC.u16High=0x7fff;
+							p_u80MACC.u64Low=u64AllOne;
+						}
+					}
+				}
+			}
+			break;
+		case 2:
+			{
+				DSPU64 lSrc=u64Src<<p_u32Pos;
+				DSPU16 hSrc=(DSPU16)(u64Src>>(64-p_u32Pos));
+
+				DSPU32 uAllOne=-1;
+
+				DSPU64 u64Mask=uAllOne;
+				u64Mask=~(u64Mask<<p_u32Pos);
+
+				p_u80MACC.u64Low&=u64Mask;
+
+				p_u80MACC.u64Low|=lSrc;
+
+				DSPU16 u16AllOne=-1;
+				DSPU16 u16Mask=u16AllOne<<(p_u32Pos-32);
+
+				p_u80MACC.u16High&=u16Mask;
+				p_u80MACC.u16High|=hSrc;
+			}
+			break;
+		}
+	}
+}
+
+
+/*found*****************************************************************
+	函数名：		LoadMACC64
+	
+	对应指令形式: MACCs=Rm+1:m(C)(z,s,p)
+
+	描述:			将64位Rm+1:m寄存器内容放置在MACC[(63+c):c]处。
+
+	参数:		DSP_BIT80 -- 80位MACC。
+					p_Src -- 64位输入，p_Src.Low32对应Rm，p_Src.High32对应Rm+1。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Pos -- 放置起始位置，对应c。
+					p_u32Mode -- 模式选择
+					    0 -- 对于MACC中的其他位，高低位均补零，对应后缀z
+					    1 -- 对于MACC中的其他位，高位进行符号位扩展，低位补零，对应后缀s
+					    2 -- 对于MACC中的其他位，保持原值，对应后缀p
+
+	返回值：	
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改?
+	2012-8-16       linguangdong	new
+	
+*******************************************************************/
+void LoadMACC64(DSP_BIT80 &p_u80MACC, DSP_BIT64 &p_Src, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32Pos, DSPU32 p_u32Mode, bool p_bolUseCutPos)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	if(!p_bolUseCutPos)
+	{
+		p_u32Pos=p_u32MULCUTR&0x3f;
+	}
+
+	DSPU64 u64Src=p_Src.u32Low;
+	u64Src|=(((DSPU64)(p_Src.u32High))<<32);
+	DSPI64 i64Src=(DSPI64 &)u64Src;
+
+	switch(p_u32Mode)
+	{
+		case 0:
+			{
+				p_u80MACC.u64Low=u64Src<<p_u32Pos;
+				if(p_u32Pos==0)
+				//in linux, a 64bit var to shift 64 bit will different thing 
+				//from windows. Therefore, for C=0, special process is needed.
+				{
+					p_u80MACC.u16High=0;
+				}
+				else
+				{
+					p_u80MACC.u16High=(DSPU16)(u64Src>>(64-p_u32Pos));
+				}
+				if(p_u32Pos>16)
+				{
+					if(u64Src>>(80-p_u32Pos))
+					{
+						SetFlag(*p_pStatReg, Mult_OverFlow);
+						SetFlag(*p_pStatReg, Mult_32_OverFlow);
+						SetFlag(*p_pStatReg, Mult_MOS);
+						SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+						if(bolSatu)
+						{
+							p_u80MACC.u16High=0xffff;
+							p_u80MACC.u64Low=u64AllOne;
+						}
+					}
+				}
+			}
+			break;
+		case 1:
+		{
+			p_u80MACC.u64Low=i64Src<<p_u32Pos;
+				if(p_u32Pos==0)
+					//in linux, a 64bit var to shift 64 bit will different thing 
+					//from windows. Therefore, for C=0, special process is needed.
+				{
+					if(i64Src>=0)
+					{
+						p_u80MACC.u16High=0;
+					}
+					else
+					{
+						p_u80MACC.u16High=0xffff;
+					}
+				}
+				else
+				{
+					p_u80MACC.u16High=(DSPU16)(i64Src>>(64-p_u32Pos));
+				}			//移位操作时，负数前面自动补1
+			if(p_u32Pos>16)
+			{
+				DSPU64 uOverFlow=i64Src>>(79-p_u32Pos);
+
+				if((uOverFlow!=0)&&(uOverFlow!=u64AllOne))
+				{
+					SetFlag(*p_pStatReg, Mult_OverFlow);
+					SetFlag(*p_pStatReg, Mult_32_OverFlow);
+					SetFlag(*p_pStatReg, Mult_MOS);
+					SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+					if(bolSatu)
+					{
+						if(i64Src<0)
+						{
+							p_u80MACC.u16High=0x8000;
+							p_u80MACC.u64Low=0;
+						}
+						else
+						{
+							p_u80MACC.u16High=0x7fff;
+							p_u80MACC.u64Low=u64AllOne;
+						}
+					}
+				}
+			}
+		}
+		break;
+		case 2:
+		{
+			DSPU64 lSrc=u64Src<<p_u32Pos;
+				DSPU16 hSrc=0;
+				if(p_u32Pos==0)
+				{
+					hSrc=0;
+				}
+				else
+				{
+					hSrc=(DSPU16)(u64Src>>(64-p_u32Pos));
+				}
+
+			DSPU64 u64Mask=-1;
+			u64Mask=~(u64Mask<<p_u32Pos);
+
+			p_u80MACC.u64Low&=u64Mask;
+
+			p_u80MACC.u64Low|=lSrc;
+
+			DSPU16 u16AllOne=-1;
+			DSPU16 u16Mask;
+			if(p_u32Pos<16)
+			{
+				u16Mask=u16AllOne<<p_u32Pos;
+			}
+			else
+			{
+				u16Mask=0;
+			}
+
+			p_u80MACC.u16High&=u16Mask;
+			p_u80MACC.u16High|=hSrc;
+		}
+		break;
+	}
+}
+
+
+/*found*****************************************************************
+	函数名：		LoadMACCD16
+	
+	对应指令形式: HMACCs=HRm(C)(z,s,p)  
+
+	描述:			将寄存器Rm分成高低16位，分别对应存入MACC的高低40位。放置起始位置为c和c+40，具体位置为[(16+c):c]，[(56+c):c+40]。
+
+	参数:		DSP_BIT80 -- 80位MACC。
+					p_u32Src -- 源操作数，对应Rm。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Pos -- 放置起始位置，对应c。
+					p_u32Mode -- 模式选择
+					    0 -- 对于MACC中的其他位，高低位均补零，对应后缀z
+					    1 -- 对于MACC中的其他位，高位进行符号位扩展，低位补零，对应后缀s
+					    2 -- 对于MACC中的其他位，保持原值，对应后缀p
+
+	返回值：		
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-17 		linguangdong	new
+	2013-6-26		林广栋			修改了饱和处理过程。饱和处理时，整个MACC的高（或低）40位
+									都赋最大值或最小值。
+	
+*******************************************************************/
+void LoadMACCD16(DSP_BIT80 &p_u80MACC, DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32Pos, DSPU32 p_u32Mode, bool p_bolUseCutPos)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	if(!p_bolUseCutPos)
+	{
+		p_u32Pos=p_u32MULCUTR&0x1f;
+	}
+
+	DSPU16 hSrc=p_u32Src>>16;
+	DSPU16 lSrc=p_u32Src;
+
+	DSPU64 h64Src=hSrc;
+	DSPU64 l64Src=lSrc;
+
+	DSPI16 ihSrc=(DSPI16)hSrc;
+	DSPI16 ilSrc=(DSPI16)lSrc;
+
+	DSPI64 ih64Src=ihSrc;
+	DSPI64 il64Src=ilSrc;
+
+	DSPU64 u40Mask=-1;
+	u40Mask<<=40;
+	DSPU64 u40Mask0=u40Mask;//u40Mask0低40位为0，高位为1
+	u40Mask=~u40Mask;//u40Mask低40位为1，高位为0
+
+	switch(p_u32Mode)
+	{
+	case 0://高低位补0
+		{
+			l64Src<<=p_u32Pos;
+
+			h64Src<<=p_u32Pos;
+
+			if(l64Src&u40Mask0)
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+				if(bolSatu)
+				{
+					l64Src=0xffffffffffull;
+				}
+			}
+
+			if(h64Src&u40Mask0)
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+				if(bolSatu)
+				{
+					h64Src=0xffffffffffull;
+				}
+			}
+
+			l64Src&=u40Mask;
+			h64Src&=u40Mask;
+
+			p_u80MACC.u64Low=l64Src;
+			p_u80MACC.u64Low|=(h64Src<<40);
+			p_u80MACC.u16High=h64Src>>24;
+		}
+		break;
+	case 1:
+		{
+			il64Src<<=p_u32Pos;
+			ih64Src<<=p_u32Pos;
+
+			DSPU64 l39Mask=-1;
+			l39Mask<<=39;
+			//l39Mask低39位为0，高位为1
+
+			if(((il64Src&l39Mask)!=0)&&((il64Src&l39Mask)!=l39Mask))
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+				if(bolSatu)
+				{
+					if(ilSrc<0)
+					{
+						il64Src=0x8000000000ull;
+					}
+					else
+					{
+						il64Src=0x7fffffffffull;
+					}
+				}
+			}
+
+			if(((ih64Src&l39Mask)!=0)&&((ih64Src&l39Mask)!=l39Mask))
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+				if(bolSatu)
+				{
+					if(ihSrc<0)
+					{
+						ih64Src=0x8000000000ull;
+					}
+					else
+					{
+						ih64Src=0x7fffffffffull;
+					}
+				}
+			}
+
+			il64Src&=u40Mask;
+			ih64Src&=u40Mask;
+
+			p_u80MACC.u64Low=il64Src;
+			p_u80MACC.u64Low|=(ih64Src<<40);
+			p_u80MACC.u16High=ih64Src>>24;
+		}
+		break;
+	case 2:
+		{
+			DSPU64 u16Mask=-1;
+			u16Mask<<=p_u32Pos;
+			u16Mask=~u16Mask;
+
+			DSPU16 u161=-1;
+			DSPU64 u16Maskh=u161;
+			u16Maskh=~u16Maskh;
+			u16Maskh<<=p_u32Pos;
+
+			u16Maskh|=u16Mask;
+			u16Maskh|=u40Mask0;
+
+			l64Src<<=p_u32Pos;
+			h64Src<<=p_u32Pos;
+
+			l64Src&=u40Mask;
+			h64Src&=u40Mask;
+
+			DSPU64 u64Oldl=p_u80MACC.u64Low&u40Mask;
+			DSPU64 u64Oldh=(p_u80MACC.u64Low>>40)|(((DSPU64)(p_u80MACC.u16High))<<24);
+
+			u64Oldl&=u16Maskh;
+			u64Oldh&=u16Maskh;
+
+			u64Oldl|=l64Src;
+			u64Oldh|=h64Src;
+
+			p_u80MACC.u64Low=u64Oldl;
+			p_u80MACC.u64Low|=(u64Oldh<<40);
+			p_u80MACC.u16High=u64Oldh>>24;
+		}
+		break;
+	}
+}
+
+
+
+/******************************************************************
+	函数名：		LoadMACCHL32
+	
+	对应指令形式: DHMACCs=Rm(C)(z,s,p)  
+
+	描述:			将寄存器Rm中的32位数据存入MACC的高40位或低40位。
+
+	参数:		DSP_BIT80 -- 80位MACC。
+					p_u32Src -- 源操作数，对应Rm。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Pos -- 放置起始位置，对应c。
+					p_u32Mode -- 模式选择
+					    0 -- 对于MACC中的其他位，高低位均补零，对应后缀z。
+					    1 -- 对于MACC中的其他位，高位进行符号位扩展，低位补零，对应后缀s。
+					    2 -- 对于MACC中的其他位，保持原值，对应后缀p。
+
+	返回值：		
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-17		linguangdong	new
+	2013-6-26		林广栋			重写全部代码。
+									1。先赋值MACC高低40位要写入的值，再根据三种不同的p_u32HLSel
+									对高低40位置位，这样可以避免对三种p_u32Mode和三种p_u32HLSel同时考虑。
+									2。修改了高位溢出的判断条件。因为32位左移（左移超过32位）之后
+									可能超过64位，造成对64位的高24位进行判断不能正确判断是否溢出，
+									所以对32位数进行右移，得到有效的移出值，进行溢出判断。
+	2014-3-28		linguangdong	去掉了对截位范围的限制，增加了对溢出条件的判断。
+*******************************************************************/
+void LoadMACCD32(DSP_BIT80 &p_u80MACC, DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32Pos, DSPU32 p_u32Mode, bool p_bolUseCutPos)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	if(!p_bolUseCutPos)
+	{
+		p_u32Pos=p_u32MULCUTR&0x1f;
+	}
+
+	DSPU64 u39Mask=0xffffff8000000000ull;
+	//DSPU64 u40Mask0=0xffffff0000000000ull;
+	DSPU64 u40Mask=0x000000ffffffffffull;
+
+	DSPU64 u40High=0,u40Low=0;
+
+	DSPI32 iSrc=(DSPI32 &)p_u32Src;
+	DSPI64 i64Src=iSrc;
+	DSPU64 u64Src=p_u32Src;
+
+	switch(p_u32Mode)
+	{
+	case 0://高低位补0
+		{
+			u64Src<<=p_u32Pos;
+
+			bool bOverflow=false;
+
+			//if(p_u32Pos<=32)
+			{
+				if(u64Src>>40)
+				{
+					bOverflow=true;
+				}
+			}
+			//else
+			//{
+			//	if(u64Src>>40)
+			//	{
+			//		bOverflow=true;
+			//	}
+			//	if(p_u32Src>>(64-p_u32Pos))
+			//	{
+			//		bOverflow=true;
+			//	}
+			//}
+
+			if(bOverflow)
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_32_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+				if(bolSatu)
+				{
+					u40Low=u40AllOne;
+					u40High=u40AllOne;
+				}
+				else
+				{
+					u40Low=u64Src&u40AllOne;
+					u40High=u64Src&u40AllOne;
+				}
+			}
+			else
+			{
+				u40Low=u64Src&u40AllOne;
+				u40High=u64Src&u40AllOne;
+			}
+		}
+		break;
+	case 1://高位补符号位，低位补0
+		{
+			i64Src<<=p_u32Pos;
+
+			bool bOverflow=false;
+
+			if(((i64Src>>39)!=0)&&((i64Src>>39)!=-1))
+			{
+				bOverflow=true;
+			}
+
+			//if(p_u32Pos>32)
+			//{
+			//	if((i64Src>>39)&1)//负数
+			//	{
+			//		if((iSrc>>(64-p_u32Pos))!=-1)
+			//		{
+			//			bOverflow=true;
+			//		}
+			//	}
+			//	else//正数
+			//	{
+			//		if(iSrc>>(64-p_u32Pos))
+			//		{
+			//			bOverflow=true;
+			//		}
+			//	}
+			//}
+
+			if(bOverflow)
+			{
+				SetFlag(*p_pStatReg, Mult_OverFlow);
+				SetFlag(*p_pStatReg, Mult_32_OverFlow);
+				SetFlag(*p_pStatReg, Mult_MOS);
+				SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+				if(bolSatu)
+				{
+					if(iSrc<0)
+					{
+						u40Low=u40SignedMin;
+						u40High=u40SignedMin;
+					}
+					else
+					{
+						u40Low=u40SignedMax;
+						u40High=u40SignedMax;
+					}
+				}
+				else
+				{
+					u40Low=i64Src&u40AllOne;
+					u40High=i64Src&u40AllOne;
+				}
+			}
+			else
+			{
+				u40Low=i64Src&u40AllOne;
+				u40High=i64Src&u40AllOne;
+			}
+		}
+		break;
+	case 2://高低位均保持原值
+		{
+			DSPU64 uMask32=0xffffffffull;
+			uMask32<<=p_u32Pos;
+			uMask32=~uMask32;
+
+			//DSPU64 uMask32Low=u64AllOne;
+			//uMask32Low<<=p_u32Pos;
+			//uMask32Low=~uMask32Low;
+			//uMask32|=uMask32Low;
+
+			//uMask32|=u40Mask0;
+
+			DSPU64 u64Src=p_u32Src;
+			u64Src<<=p_u32Pos;
+
+			u40Low=p_u80MACC.u64Low&u40Mask;//MACC低40位
+			u40High=(p_u80MACC.u64Low>>40)|(((DSPU64)(p_u80MACC.u16High))<<24);
+
+			u40Low&=uMask32;//清零源操作数需要放置的位
+			u40Low|=u64Src;//把源操作数所在的位放到MACC中
+			u40Low&=u40Mask;
+
+			u40High&=uMask32;
+			u40High|=u64Src;
+			u40High&=u40Mask;
+		}
+		break;
+	}
+
+
+	p_u80MACC.u64Low=u40Low;
+	p_u80MACC.u64Low|=(u40High<<40);
+	p_u80MACC.u16High=u40High>>24;
+}
+
+
+
+
+
+/*found*****************************************************************
+	函数名：		MACNeg32
+
+	对应指令形式: MACCs-=Rm*Rn(U)
+                MACCs-=Rm*Rn
+
+	描述:			32位定点数据乘累减。
+
+	参数:		p_u32Src1 -- 源操作数1，对应Rm。
+					p_u32Src2 -- 源操作数2，对应Rn。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器，其第0位被算法库扩展用于表示源操作数是否为有符号数。
+					    p_u32MULCR[0] == 1： 源操作数为有符号数
+					    p_u32MULCR[0] == 0： 源操作数为无符号数
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-20		linguangdong		new
+	2013-5-23		林广栋				修改原来的错误之处
+	
+*******************************************************************/
+void MACNeg32(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+	bool bsigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+	bool bolSatu   = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	DSPU80 u80MACC((*p_pACC));
+
+	if(bsigned)
+	{
+		u80MACC.MACCSExtend();
+		DSPI32 i32Src1=p_u32Src1;
+		DSPI32 i32Src2=p_u32Src2;
+
+		DSPI64 i64result=((DSPI64)i32Src1)*((DSPI64)i32Src2);
+
+
+		DSPU64 u64Result=(DSPU64 &)i64result;
+		DSPU80 u80Result;
+		u80Result.u64Low=u64Result;
+		u80Result.SignExtend();
+
+		DSPU80 uOld80MACC=u80MACC;
+
+		u80MACC=u80MACC-u80Result;
+
+		if(((u80MACC.u16High & 0xff80)!=0x0)&&((u80MACC.u16High & 0xff80)!=0xff80))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow); 
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(uOld80MACC.MACCSign())
+				{
+					u80MACC.SetToMIN_SN_80();
+				}
+				else
+				{
+					u80MACC.SetToMAX_SN_80();
+				}
+			}
+		}
+	}
+	else
+	{
+		u80MACC.MACCUExtend();
+		DSPU64 u64result=((DSPU64)p_u32Src1)*((DSPU64)p_u32Src2);
+		DSPU80 u80Result(u64result);
+
+		u80MACC=u80MACC-u80Result;
+
+		if(u80MACC.u16High & 0xff00)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow); 
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow);
+			SetFlag(*p_pStatReg, Mult_32_OverFlow_S);
+
+			if(bolSatu)
+			{
+				u80MACC.u16High=0x0;
+				u80MACC.u64Low=0x0;
+			}
+			else
+			{
+				u80MACC.u16High = u80MACC.u16High &0x00ff;
+			}
+		}
+	}
+
+	p_pACC->u16High=u80MACC.u16High;
+	p_pACC->u64Low=u80MACC.u64Low;
+}
+
+
+
+void MACNeg16(DSPU16 p_u16Src1, DSPU16 p_u16Src2, DSP_BIT40 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed);
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSP_BIT40 u40_ACC = *p_pACC ;
+	DSPU64 Src_ACC = (((DSPU64)u40_ACC.u8High)<<32)|((DSPU64)u40_ACC.u32Low);
+
+	DSP_BIT40 u40Result;
+	DSPU64 u40_ACCRes;
+
+	DSPU64 u40Bit=0x8000000000ull;//第40位为1，其余为0
+	DSPU64 u40Mask=0xffffff8000000000ull;//第40位及以上为1，其余为0
+
+	if(bolSigned)              //有符号运算处理 
+	{
+		DSPI64 Src1ITmp = (DSPI16 &)p_u16Src1;
+		DSPI64 Src2ITmp = (DSPI16 &)p_u16Src2;
+		DSPI64 I64Result = Src1ITmp * Src2ITmp;
+
+		if(Src_ACC&u40Bit)
+		{
+			Src_ACC=Src_ACC | u40Mask;//对Src_ACC进行符号位扩展。
+		}
+
+		DSPI64 i40ACC=(DSPI64 &)Src_ACC;
+
+		u40_ACCRes = (i40ACC - I64Result );
+		DSPU64 u64Sign=u40_ACCRes & u40Mask;
+
+		u40Result.u32Low=u40_ACCRes;
+		u40Result.u8High=u40_ACCRes>>32;
+
+		if( (u64Sign!= 0x0) && (u64Sign != u40Mask))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+			if(bolSatu)
+			{
+				//如果被减数是正数，若溢出，则一定是负溢出
+				//如果被减数是负数，若溢出，则一定是正溢出
+				if(I64Result>0)
+				{
+					u40Result.u8High = 0x80;
+					u40Result.u32Low = 0x0;
+				}
+				else
+				{
+					u40Result.u8High = 0x7f;
+					u40Result.u32Low = 0xffffffff;
+				}
+			}
+		}
+	}
+	else//无符号处理
+	{
+		DSPU64 u64Res = ((DSPU64) p_u16Src1 )*((DSPU64) p_u16Src2 );
+
+		u40_ACCRes =Src_ACC-u64Res;
+
+		u40Result.u8High = u40_ACCRes>>32;//无溢出处理  或者  有溢出但无饱和控制 
+		u40Result.u32Low = u40_ACCRes;
+
+		if(u40_ACCRes>>40)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow);
+			SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+			if(bolSatu)
+			{
+				u40Result.u8High = 0;
+				u40Result.u32Low = 0;
+			}
+		}
+	}
+	*p_pACC = u40Result;
+} 
+
+
+/*found*****************************************************************
+	函数名：		MACNegD16
+
+	对应指令形式: HMACCs-=HRm*HRn(U)
+                HMACCs-=HRm*HRn
+
+	描述:			高低16位定点数据乘累减。
+
+	参数:		p_u32Src1 -- 源操作数1，对应Rm。
+					p_u32Src2 -- 源操作数2，对应Rn。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器，其第0位被算法库扩展用于表示源操作数是否为有符号数。
+					    p_u32MULCR[0] == 1： 源操作数为有符号数
+					    p_u32MULCR[0] == 0： 源操作数为无符号数
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-20		linguangdong		new(默认为高16位相乘，存入MACC中高40位，低16位相乘，存入MACC中低40位）
+	
+*******************************************************************/
+void MACNegD16(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+	DSPU16 u16UpperSrc1 = p_u32Src1 >> 16;
+	DSPU16 u16LowerSrc1 = p_u32Src1;    
+
+	DSPU16 u16UpperSrc2 = p_u32Src2 >> 16;
+	DSPU16 u16LowerSrc2 = p_u32Src2;        
+
+	DSP_BIT40 u40UpperACC;
+	u40UpperACC.u8High = p_pACC->u16High >> 8 ;
+	u40UpperACC.u32Low = (((DSPU32)(p_pACC->u16High) )<< 24 )| ((DSPU32)(p_pACC->u64Low >> 40)) ;
+
+	DSP_BIT40 u40LowerACC;
+	u40LowerACC.u8High = (DSPU8)(p_pACC->u64Low >> 32);
+	u40LowerACC.u32Low = (DSPU32)(p_pACC->u64Low); 
+
+	DSPU32 UpperReg = 0;
+	DSPU32 LowerReg = 0;
+
+	MACNeg16(u16UpperSrc1, u16UpperSrc2, &(u40UpperACC), &UpperReg, p_u32MULCR);
+	MACNeg16(u16LowerSrc1, u16LowerSrc2, &(u40LowerACC), &LowerReg, p_u32MULCR);
+
+
+	DSP_BIT80 u80Result;
+	u80Result.u64Low = (((DSPU64)(u40UpperACC.u32Low) )<< 40) | (((DSPU64)(u40LowerACC.u8High)) << 32) | (DSPU64)(u40LowerACC.u32Low);
+	u80Result.u16High = (((DSPU16)(u40UpperACC.u8High)) << 8) | ((DSPU16)(u40UpperACC.u32Low >> 24));
+
+	*p_pACC = u80Result;
+
+	*p_pStatReg = UpperReg | LowerReg;
+}
+
+/*found*****************************************************************
+	函数名：		MACQ8
+	
+	对应指令形式: OMACCs=ORm*ORn(U)（相当于先把MACC清零，再调用OMACCs+=ORm*ORn(U)）
+	              OMACCs+=ORm*ORn(U)
+                OMACCs-=ORm*ORn(U)
+
+	描述:			8位无符号定点数据乘累加或乘累减。
+
+	参数:			p_u32Src1 -- 源操作数1，对应Rm。
+					p_u32Src2 -- 源操作数2，对应Rn。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_bolIsAdd -- 累加或累减选择。
+					    true -- 乘累加
+					    false -- 乘累减
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-20		linguangdong		new
+	2013-5-14		linguangdong		验证
+	2014-1-1		林广栋				修改MACC为128位
+	
+*******************************************************************/
+void MACQ8(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT128 *p_p128ACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, bool p_bolIsAdd)
+{
+	DSPU32 re1=((DSPU32)((DSPU8)p_u32Src1))*((DSPU8)p_u32Src2);
+	DSPU32 re2=((DSPU32)((DSPU8)(p_u32Src1>>8)))*((DSPU8)(p_u32Src2>>8));
+	DSPU32 re3=((DSPU32)((DSPU8)(p_u32Src1>>16)))*((DSPU8)(p_u32Src2>>16));
+	DSPU32 re4=((DSPU32)((DSPU8)(p_u32Src1>>24)))*((DSPU8)(p_u32Src2>>24));
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSPU64 u64Mac1=p_p128ACC->u32LL;
+	DSPU64 u64Mac2=p_p128ACC->u32HL;
+	DSPU64 u64Mac3=p_p128ACC->u32LH;
+	DSPU64 u64Mac4=p_p128ACC->u32HH;
+
+	if(p_bolIsAdd)
+	{
+		u64Mac1+=re1;
+		u64Mac2+=re2;
+		u64Mac3+=re3;
+		u64Mac4+=re4;
+	}
+	else
+	{
+		u64Mac1-=re1;
+		u64Mac2-=re2;
+		u64Mac3-=re3;
+		u64Mac4-=re4;
+	}
+
+
+	if(u64Mac1>>32)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+		if(bolSatu)
+		{
+			if(p_bolIsAdd)
+			{
+				u64Mac1=0xffffffff;
+			}
+			else
+			{
+				u64Mac1=0;
+			}
+		}
+		else
+		{
+			u64Mac1&=0xffffffff;
+		}
+	}
+
+	if(u64Mac2>>32)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+		if(bolSatu)
+		{
+			if(p_bolIsAdd)
+			{
+				u64Mac2=0xffffffff;
+			}
+			else
+			{
+				u64Mac2=0;
+			}
+		}
+		else
+		{
+			u64Mac2&=0xffffffff;
+		}
+	}
+
+	if(u64Mac3>>32)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+		if(bolSatu)
+		{
+			if(p_bolIsAdd)
+			{
+				u64Mac3=0xffffffff;
+			}
+			else
+			{
+				u64Mac3=0;
+			}
+		}
+		else
+		{
+			u64Mac3&=0xffffffff;
+		}
+	}
+
+	if(u64Mac4>>32)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+		if(bolSatu)
+		{
+			if(p_bolIsAdd)
+			{
+				u64Mac4=0xffffffff;
+			}
+			else
+			{
+				u64Mac4=0;
+			}
+		}
+		else
+		{
+			u64Mac4&=0xffffffff;
+		}
+	}
+
+	p_p128ACC->u32LL=u64Mac1;
+	p_p128ACC->u32HL=u64Mac2;
+	p_p128ACC->u32LH=u64Mac3;
+	p_p128ACC->u32HH=u64Mac4;
+}
+
+/*found*****************************************************************
+	函数名：		MACSigmaQ8
+	
+	对应指令形式: LLOMACCs+=sigma(ORm*ORn(U)); LLOMACCs=sigma(ORm*ORn(U))                
+                LHOMACCs+=sigma(ORm*ORn(U)); LHOMACCs=sigma(ORm*ORn(U))
+
+	描述:			将Rm和Rn分别分成4个8bit无符号数据，分别对应相乘相加，并与LLOMACC/LHOMACC相加后再存入到LLOMACC或LHOMACC中。
+	          MACC的其它位清零。
+
+	参数:		p_u32Src1 -- 源操作数1，对应Rm。
+					p_u32Src2 -- 源操作数2，对应Rn。
+					p_pMACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Mode -- 模式选择
+						0：LLOMACCs=sigma(ORm*ORn(U))
+						1：LHOMACCs=sigma(ORm*ORn(U))
+						2：LLOMACCs+=sigma(ORm*ORn(U))
+						3：LHOMACCs+=sigma(ORm*ORn(U))
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者				修改处
+	2012-8-21		linguangdong		new
+	2013-7-30		linguangdong		增加MACC其他位的处理方法。
+	2014-1-1		林广栋				修改MACC为128位
+*******************************************************************/
+void MACSigmaQ8(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT128 *p_p128MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32Mode)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSPU8 uSrc1Byte1=p_u32Src1;
+	DSPU8 uSrc1Byte2=p_u32Src1>>8;
+	DSPU8 uSrc1Byte3=p_u32Src1>>16;
+	DSPU8 uSrc1Byte4=p_u32Src1>>24;
+
+	DSPU8 uSrc2Byte1=p_u32Src2;
+	DSPU8 uSrc2Byte2=p_u32Src2>>8;
+	DSPU8 uSrc2Byte3=p_u32Src2>>16;
+	DSPU8 uSrc2Byte4=p_u32Src2>>24;
+
+	DSPU32 uRe1=((DSPU32)uSrc1Byte1)*((DSPU32)uSrc2Byte1);
+	DSPU32 uRe2=((DSPU32)uSrc1Byte2)*((DSPU32)uSrc2Byte2);
+	DSPU32 uRe3=((DSPU32)uSrc1Byte3)*((DSPU32)uSrc2Byte3);
+	DSPU32 uRe4=((DSPU32)uSrc1Byte4)*((DSPU32)uSrc2Byte4);
+
+	DSPU32 uRe=uRe1+uRe2+uRe3+uRe4;
+
+	switch(p_u32Mode)
+	{
+	case 0:
+		{
+			p_p128MACC->u32LL=uRe;
+		}
+		break;
+	case 1:
+		{
+			p_p128MACC->u32HL=uRe;
+		}
+		break;
+	case 2:
+		{
+			DSPU64 u64Mac=p_p128MACC->u32LL;
+			u64Mac+=uRe;
+			if(u64Mac>>32)
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_8_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+
+				if(bolSatu)
+				{
+					p_p128MACC->u32LL=0xffffffff;
+				}
+				else
+				{
+					p_p128MACC->u32LL=u64Mac;
+				}
+			}
+			else
+			{
+				p_p128MACC->u32LL=u64Mac;
+			}
+		}
+		break;
+	case 3:
+		{
+			DSPU64 u64Mac=p_p128MACC->u32HL;
+			u64Mac+=uRe;
+			if(u64Mac>>32)
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_8_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+
+				if(bolSatu)
+				{
+					p_p128MACC->u32HL=0xffffffff;
+				}
+				else
+				{
+					p_p128MACC->u32HL=u64Mac;
+				}
+			}
+			else
+			{
+				p_p128MACC->u32HL=u64Mac;
+			}
+		}
+		break;
+	}
+}
+
+
+/*found*****************************************************************
+	函数名：		MACCToQ8
+	
+	对应指令形式: ORs=OMACCn(U,cut=C)
+                ORs=OMACCn(cut=C)
+
+	描述:				乘累加结果寄存器MACC截位输出为4个8位定点数据。
+
+	参数:					DSP_BIT80 -- 80位MACC。
+							p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+							p_u32MULCR -- 乘法器控制寄存器。
+							p_intCutPos -- 截位信息。
+							p_bolUseCutPos -- 截位信号选择。
+							    true: 使用p_intCutPos作为截位信号；
+					  			false：使用p_u32MULCR中的截位信号。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；
+					根据p_bolUseCutPos选择截位信号来源。
+
+	修改记录
+	--------------------------------------
+	日期			作者				修改
+	2012-8-21		linguangdong		new
+	2013-6-28		林广栋				修改溢出与饱和处理。
+	2013-12-31		林广栋				把MACC的位数调整为128位
+	*******************************************************************/
+DSPU32 MACCToQ8(const DSP_BIT128 &p_u128MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, int p_intCutPos, bool p_bolUseCutPos)
+{
+	if(!p_bolUseCutPos)
+	{
+	    p_intCutPos = p_u32MULCUTR&0x1f;      //提取截位控制字 
+	}
+
+	if(p_intCutPos>24)
+	{
+		p_intCutPos=24;
+	}
+
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed);
+	DSPU8 uByte1=0,uByte2=0,uByte3=0,uByte4=0;
+
+	if(bolSigned)
+	{
+		DSPI32 iMac1=(DSPI32 &)(p_u128MACC.u32LL);
+		DSPI32 iMac2=(DSPI32 &)(p_u128MACC.u32HL);
+		DSPI32 iMac3=(DSPI32 &)(p_u128MACC.u32LH);
+		DSPI32 iMac4=(DSPI32 &)(p_u128MACC.u32HH);
+
+		iMac1>>=p_intCutPos;
+		iMac2>>=p_intCutPos;
+		iMac3>>=p_intCutPos;
+		iMac4>>=p_intCutPos;
+
+		if(((iMac1>>7)!=0)&&((iMac1>>7)!=-1))
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(iMac1<0)
+				{
+					uByte1=0x80;
+				}
+				else
+				{
+					uByte1=0x7f;
+				}
+			}
+			else
+			{
+				uByte1=iMac1&0xff;
+			}
+		}
+		else
+		{
+			uByte1=iMac1&0xff;
+		}
+
+		if(((iMac2>>7)!=0)&&((iMac2>>7)!=-1))
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(iMac2<0)
+				{
+					uByte2=0x80;
+				}
+				else
+				{
+					uByte2=0x7f;
+				}
+			}
+			else
+			{
+				uByte2=iMac2&0xff;
+			}
+		}
+		else
+		{
+			uByte2=iMac2&0xff;
+		}
+
+		if(((iMac3>>7)!=0)&&((iMac3>>7)!=-1))
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(iMac3<0)
+				{
+					uByte3=0x80;
+				}
+				else
+				{
+					uByte3=0x7f;
+				}
+			}
+			else
+			{
+				uByte3=iMac3&0xff;
+			}
+		}
+		else
+		{
+			uByte3=iMac3&0xff;
+		}
+
+		if(((iMac4>>7)!=0)&&((iMac4>>7)!=-1))
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(iMac4<0)
+				{
+					uByte4=0x80;
+				}
+				else
+				{
+					uByte4=0x7f;
+				}
+			}
+			else
+			{
+				uByte4=iMac4&0xff;
+			}
+		}
+		else
+		{
+			uByte4=iMac4&0xff;
+		}
+	}
+	else
+	{
+		uByte1=(DSPU8)((p_u128MACC.u32LL)>>p_intCutPos);
+		if((p_u128MACC.u32LL)>>p_intCutPos>>8)
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				uByte1=0xffff;
+			}
+		}
+
+		uByte2=(DSPU8)((p_u128MACC.u32HL)>>(p_intCutPos));
+
+		if((p_u128MACC.u32HL)>>(p_intCutPos)>>8)
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				uByte2=0xffff;
+			}
+		}
+
+		uByte3=(DSPU8)((p_u128MACC.u32LH)>>(p_intCutPos));
+
+		if((p_u128MACC.u32LH)>>(p_intCutPos)>>8)
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				uByte3=0xffff;
+			}
+		}
+
+		uByte4=(DSPU8)((p_u128MACC.u32HH)>>(p_intCutPos));
+
+		if((p_u128MACC.u32HH>>p_intCutPos)>>8)
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				uByte4=0xffff;
+			}
+		}
+	}
+	DSPU32 uRe1=uByte1;
+	DSPU32 uRe2=uByte2;
+	DSPU32 uRe3=uByte3;
+	DSPU32 uRe4=uByte4;
+
+	DSPU32 uRe=uRe1|(uRe2<<8)|(uRe3<<16)|(uRe4<<24);
+	return uRe;
+}
+
+
+
+/*found*****************************************************************
+	函数名：		HMACCTo32
+
+	对应指令形式: Rs=LHMACCn(U,cut=C)
+	              Rs=LHMACCn(cut=C)
+                Rs=HHMACCn(U,cut=C)                
+                Rs=HHMACCn(cut=C)
+
+	描述:				将累加结果寄存器MACC[39:0]或MACC[79:40]按照截位控制截位后输出至目的寄存器Rs，
+
+	参数:				DSP_BIT80 -- 80位MACC。
+							p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+							p_u32MULCR -- 乘法器控制寄存器，其第0位被算法库扩展用于表示源操作数是否为有符号数。
+					        p_u32MULCR[0] == 1： 源操作数为有符号数
+					        p_u32MULCR[0] == 0： 源操作数为无符号数
+							p_bolIsHigh -- MACC高低位选择
+							    true -- 将MACC[79:40]按照截位控制截位后输出
+							    false -- 将MACC[39:0]按照截位控制截位后输出
+							p_intCutPos -- 截位信息。
+							p_bolUseCutPos -- 截位信号选择。
+							    true: 使用p_intCutPos作为截位信号；
+					  			false：使用p_u32MULCR中的截位信号。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；
+							根据p_bolUseCutPos选择截位信号来源。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-22		linguangdong	new
+	2013-6-30		林广栋			修改了溢出处理
+	2013-7-1		林广栋			修改了截位的最大值
+	*******************************************************************/
+DSPU32 HMACCTo32(const DSP_BIT80 &p_u80MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, bool p_bolIsHigh, int p_intCutPos, bool p_bolUseCutPos)
+{
+	if(!p_bolUseCutPos)
+	{
+	       p_intCutPos = p_u32MULCUTR&0x3f;//提取截位控制字
+	}
+
+	if(p_intCutPos>40)
+	{
+		p_intCutPos=40;
+	}
+
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+	bool bolSign = TestFlag(p_u32MULCR, Mul_Ctl_Signed);
+
+	DSPU64 u64Mask=-1;
+	u64Mask<<=40;
+	//u64Mask高24位为1，低40位为0
+
+	DSPU64 u64Low40=p_u80MACC.u64Low;
+	u64Low40&=(~u64Mask);
+
+	DSPU64 u64High40=p_u80MACC.u64Low;
+
+	u64High40>>=40;
+	DSPU64 u16High=p_u80MACC.u16High;
+	u16High<<=24;
+
+	u64High40|=u16High;
+
+	//至此，u64Low40中保存MAC中低40位无符号数，u64High40中保存MACC中高40位无符号数
+
+	DSPU32 u32Re=0;
+	DSPU64 uFlag40=1;
+	uFlag40<<=39;
+
+	DSPU64 u64MACC40=0;
+	if(p_bolIsHigh)
+	{
+		u64MACC40=u64High40;
+	}
+	else
+	{
+		u64MACC40=u64Low40;
+	}
+
+	if(bolSign)
+	{
+		if(u64MACC40&uFlag40)
+		{
+			u64MACC40|=u64Mask;
+		}
+		else
+		{
+			u64MACC40&=(~u64Mask);
+		}
+
+		DSPI64 i64High40=(DSPI64 &)u64MACC40;
+		i64High40>>=p_intCutPos;
+		u32Re=(DSPU32)i64High40;
+
+		DSPU64 u64SignMask=-1;
+		u64SignMask<<=31;
+		if(((i64High40&u64SignMask)!=0)&&((i64High40&u64SignMask)!=u64SignMask))
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_32_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_32_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(u64MACC40&uFlag40)
+				{
+					u32Re=0x80000000;
+				}
+				else
+				{
+					u32Re=0x7fffffff;
+				}
+				
+			}
+		}
+	}
+	else
+	{
+		u64MACC40>>=p_intCutPos;
+		u32Re=(DSPU32)u64MACC40;
+
+		DSPU64 u64UnsignMask=-1;
+		u64UnsignMask<<=32;
+		if(u64MACC40&u64UnsignMask)
+		{
+			SetFlag(*p_pStatReg,Mult_OverFlow);
+			SetFlag(*p_pStatReg,Mult_32_OverFlow);
+			SetFlag(*p_pStatReg,Mult_MOS);
+			SetFlag(*p_pStatReg,Mult_32_OverFlow_S);
+
+			if(bolSatu)
+			{
+				u32Re=0xffffffff;
+			}
+		}
+	}
+
+	return u32Re;
+}
+
+
+/*found*****************************************************************
+	函数名：		OMACCToD16
+
+	对应指令形式: HRs=HOMACCn(U,cut=C)
+                HRs=LOMACCn(U,cut=C)
+
+	描述:				将累加结果寄存器MACC[79:60]、MACC[59:40](或MACC[39:20]、MACC[19:0])分别按照截位控制截位后输出至目的寄存器Rs[31:16]和Rs[15:0]，
+	            如果不满16位则高位补零，如果截取后超过16位，则进行饱和处理，并对溢出标志位置位，
+
+	参数:				DSP_BIT80 -- 80位MACC。
+							p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+							p_u32MULCR -- 乘法器控制寄存器。
+							p_bolIsHigh -- MACC高低位选择
+							    true -- 将MACC[79:60]、MACC[59:40]按照截位控制截位后输出
+							    false -- 将MACC[39:20]、MACC[19:0]按照截位控制截位后输出
+							p_intCutPos -- 截位信息。
+							p_bolUseCutPos -- 截位信号选择。
+							    true: 使用p_intCutPos作为截位信号；
+					  			false：使用p_u32MULCR中的截位信号。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；
+							根据p_bolUseCutPos选择截位信号来源。
+
+	修改记录
+	--------------------------------------
+	日期			作者				修改处
+	2012-8-22		linguangdong		new
+	2013-6-28		林广栋				修改了溢出处理。
+	2014-1-3		linguangdong		修改了MACC的位宽。
+	
+	*******************************************************************/
+DSPU32 OMACCToD16(const DSP_BIT128 &p_u128MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, bool p_bolIsHigh, int p_intCutPos, bool p_bolUseCutPos)
+{
+	if(!p_bolUseCutPos)
+	{
+	       p_intCutPos = p_u32MULCUTR&0x1f;      //提取截位控制字 
+	}
+
+	if(p_intCutPos>24)
+	{
+		p_intCutPos=24;
+	}
+
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSPU32 uRe=0;
+	if(bolSigned)
+	{
+		DSPI32 i32LL=(DSPI32 &)(p_u128MACC.u32LL);
+		DSPI32 i32HL=(DSPI32 &)(p_u128MACC.u32HL);
+		DSPI32 i32LH=(DSPI32 &)(p_u128MACC.u32LH);
+		DSPI32 i32HH=(DSPI32 &)(p_u128MACC.u32HH);
+
+		if(!p_bolIsHigh)
+		{
+			i32LL>>=p_intCutPos;
+			i32HL>>=p_intCutPos;
+
+			if(((i32LL>>15)!=0)&&((i32LL>>15)!=-1))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					if(i32LL<0)
+					{
+						i32LL=0x8000;
+					}
+					else
+					{
+						i32LL=0x7fff;
+					}
+				}
+			}
+
+			if(((i32HL>>15)!=0)&&((i32HL>>15)!=-1))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					if(i32HL<0)
+					{
+						i32HL=0x8000;
+					}
+					else
+					{
+						i32HL=0x7fff;
+					}
+				}
+			}
+
+			i32LL&=0xffff;
+			i32HL<<=16;
+			i32HL|=i32LL;
+
+			uRe=(DSPU32 &)(i32HL);
+		}
+		else
+		{
+			i32LH>>=p_intCutPos;
+			i32HH>>=p_intCutPos;
+
+			if(((i32LH>>15)!=0)&&((i32LH>>15)!=-1))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					if(i32LH<0)
+					{
+						i32LH=0x8000;
+					}
+					else
+					{
+						i32LH=0x7fff;
+					}
+				}
+			}
+
+			if(((i32HH>>15)!=0)&&((i32HH>>15)!=-1))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					if(i32HH<0)
+					{
+						i32HH=0x8000;
+					}
+					else
+					{
+						i32HH=0x7fff;
+					}
+				}
+			}
+
+			i32LH&=0xffff;
+			i32HH<<=16;
+			i32HH|=i32LH;
+
+			uRe=(DSPU32 &)(i32HH);
+		}
+	}
+	else
+	{
+		DSPU32 u32LL=p_u128MACC.u32LL;
+		DSPU32 u32HL=p_u128MACC.u32HL;
+		DSPU32 u32LH=p_u128MACC.u32LH;
+		DSPU32 u32HH=p_u128MACC.u32HH;
+
+		if(!p_bolIsHigh)
+		{
+			u32LL>>=p_intCutPos;
+			u32HL>>=p_intCutPos;
+
+			if((u32LL>>16))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					u32LL=0xffff;
+				}
+			}
+
+			if((u32HL>>16))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					u32HL=0xffff;
+				}
+			}
+
+			u32LL&=0xffff;
+			u32HL<<=16;
+			u32HL|=u32LL;
+
+			uRe=u32HL;
+		}
+		else
+		{
+			u32LH>>=p_intCutPos;
+			u32HH>>=p_intCutPos;
+
+			if((u32LH>>16))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					u32LH=0xffff;
+				}
+			}
+
+			if((u32HH>>16))
+			{
+				SetFlag(*p_pStatReg,Mult_OverFlow);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow);
+				SetFlag(*p_pStatReg,Mult_MOS);
+				SetFlag(*p_pStatReg,Mult_16_OverFlow_S);
+				if(bolSatu)
+				{
+					u32HH=0xffff;
+				}
+			}
+
+			u32LH&=0xffff;
+			u32HH<<=16;
+			u32HH|=u32LH;
+
+			uRe=u32HH;
+		}
+	}
+	return uRe;
+}
+
+
+
+/*found*****************************************************************
+	函数名：		OMACCTo32
+
+	对应指令形式: Rs=LLOMACCn(U,cut=C)
+                Rs=LHOMACCn(U,cut=C)
+                Rs=HLOMACCn(U,cut=C)
+                Rs=HHOMACCn(U,cut=C)
+
+	描述:				将累加结果寄存器MACC[19:0]或MACC[39:20]或MACC[59:40]或MACC[79:60]按照截位控制截位后输出至目的寄存器Rs，如果不满32位，则高位补零。
+
+	参数:				DSP_BIT80 -- 80位MACC。
+							p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+							p_u32MULCR -- 乘法器控制寄存器。
+							p_u32PartSel -- 源操作数位置选择
+							    0 -- 将MACC[19:0]按照截位控制截位后输出
+							    1 -- 将MACC[39:20]按照截位控制截位后输出
+							    2 -- 将MACC[59:40]按照截位控制截位后输出
+							    3 -- 将MACC[79:60]按照截位控制截位后输出
+							p_intCutPos -- 截位信息。
+							p_bolUseCutPos -- 截位信号选择。
+							    true: 使用p_intCutPos作为截位信号；
+					  			false：使用p_u32MULCR中的截位信号。
+
+	返回值：		计算结果。
+
+	注意事项:		根据计算结果设置相关标志位；
+							根据p_bolUseCutPos选择截位信号来源。
+
+	修改记录
+	--------------------------------------
+	日期			作者				修改处
+	2012-8-22		linguangdong		new
+	2013-6-30		林广栋				修改了截位的处理。
+	2013-12-31		林广栋				根据指令集修改，修改了本函数的接口与实现，修改了MACC
+										的位宽为128位。
+	*******************************************************************/
+DSPU32 OMACCTo32(const DSP_BIT128 &p_u128MACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32PartSel, int p_intCutPos, bool p_bolUseCutPos)
+{
+	if(!p_bolUseCutPos)
+	{
+	       p_intCutPos = p_u32MULCUTR&0x3f;      //提取截位控制字 
+	}
+
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+
+	if(p_intCutPos>40)
+	{
+		p_intCutPos=40;
+	}
+
+	DSPU32 uRe=0;
+	if(bolSigned)
+	{
+		DSPI32 i32LL=(DSPI32 &)(p_u128MACC.u32LL);
+		DSPI32 i32HL=(DSPI32 &)(p_u128MACC.u32HL);
+		DSPI32 i32LH=(DSPI32 &)(p_u128MACC.u32LH);
+		DSPI32 i32HH=(DSPI32 &)(p_u128MACC.u32HH);
+
+		DSPI64 i64LL=i32LL;
+		DSPI64 i64HL=i32HL;
+		DSPI64 i64LH=i32LH;
+		DSPI64 i64HH=i32HH;
+
+		switch(p_u32PartSel)
+		{
+		case 0:
+			i64LL>>=p_intCutPos;
+			uRe=(DSPU32 &)i64LL;
+			break;
+		case 1:
+			i64HL>>=p_intCutPos;
+			uRe=(DSPU32 &)i64HL;
+			break;
+		case 2:
+			i64LH>>=p_intCutPos;
+			uRe=(DSPU32 &)i64LH;
+			break;
+		case 3:
+			i64HH>>=p_intCutPos;
+			uRe=(DSPU32 &)i64HH;
+			break;
+		}
+	}
+	else
+	{
+		DSPU64 u64LL=p_u128MACC.u32LL;
+		DSPU64 u64HL=p_u128MACC.u32HL;
+		DSPU64 u64LH=p_u128MACC.u32LH;
+		DSPU64 u64HH=p_u128MACC.u32HH;
+
+		switch(p_u32PartSel)
+		{
+		case 0:
+			u64LL>>=p_intCutPos;
+			uRe=u64LL;
+			break;
+		case 1:
+			u64HL>>=p_intCutPos;
+			uRe=u64HL;
+			break;
+		case 2:
+			u64LH>>=p_intCutPos;
+			uRe=u64LH;
+			break;
+		case 3:
+			u64HH>>=p_intCutPos;
+			uRe=u64HH;
+			break;
+		}
+	}
+
+	return uRe;
+}
+
+/*found*****************************************************************
+	函数名：		MACC16MFix8
+
+	对应指令形式: CHMACCs=CHRm*LLORn
+                CHMACCs=CHRm*HLORn
+                CHMACCs=CHRm*LHORn
+                CHMACCs=CHRm*HHORn
+                CHMACCs+=CHRm*LLORn
+                CHMACCs+=CHRm*HLORn
+                CHMACCs+=CHRm*LHORn
+                CHMACCs+=CHRm*HHORn
+
+	描述:			16位定点复数和8位实数的乘法累加，占用一个乘法器，乘法结果输出实部/虚部到MACCs。
+
+	参数:		p_u32Rm -- 16位定点复数，对应Rm。
+					p_u32Rn -- 16位定点复数2，对应Rn。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Mode -- 模式选择
+					0 -- CHMACCs+=CHRm*LLORn
+					1 -- CHMACCs+=CHRm*LHORn
+					2 -- CHMACCs+=CHRm*HLORn
+					3 -- CHMACCs+=CHRm*HHORn
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-22		linguangdong	new
+*******************************************************************/
+void MACC16MFix8(DSPU32 p_u32Rm, DSPU32 p_u32Rn, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32Mode)
+//复数在MACC中的存放规则为：高40位为实部，低40位为虚部
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);      
+
+	DSPU16 A=p_u32Rm>>16;
+	DSPU16 B=p_u32Rm;
+
+	DSPI16 iA=(DSPI16 &)A;
+	DSPI16 iB=(DSPI16 &)B;
+
+	DSPU8 Rn=0;
+
+	switch(p_u32Mode)
+	{
+		case 0:
+			Rn=p_u32Rn;
+			break;
+		case 1:
+			Rn=p_u32Rn>>8;
+			break;
+		case 2:
+			Rn=p_u32Rn>>16;
+			break;
+		case 3:
+			Rn=p_u32Rn>>24;
+			break;
+	}
+
+	DSPI64 iRn=(DSPI8 &)Rn;
+	DSPI64 i64A=iA;
+	DSPI64 i64B=iB;
+
+	i64A*=iRn;
+	i64B*=iRn;
+
+	DSPU64 u64Mask=-1;
+	u64Mask<<=40;
+
+	DSPU64 uMacRe=(((DSPU64)(p_pACC->u16High))<<24)|((p_pACC->u64Low)>>40);
+	DSPU64 uMacImg=(p_pACC->u64Low)&(~u64Mask);
+
+	if(uMacImg>>39)
+		//Mac中虚部为负数
+	{
+		uMacImg|=u64Mask;
+	}
+
+	if(uMacRe>>39)
+		//Mac中实部为负数
+	{
+		uMacRe|=u64Mask;
+	}
+
+	i64A+=((DSPI64 &)uMacRe);
+	i64B+=((DSPI64 &)uMacImg);
+
+	DSPU64 u64SignMask=((DSPU64)(-1))<<39;
+
+	if(((i64A&u64SignMask)!=0)&&((i64A&u64SignMask)!=u64SignMask))
+	{
+       SetFlag(*p_pStatReg, Mult_OverFlow);
+       SetFlag(*p_pStatReg, Mult_MOS);
+	   SetFlag(*p_pStatReg, Mult_16_OverFlow);
+	   SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+	   if(bolSatu)
+	   {
+			if(uMacRe>>39)
+			{
+				i64A=0x8000000000ull;
+
+			}
+			else
+			{
+				i64A=0x7fffffffffull;
+			}
+	   }
+	}
+
+	if(((i64B&u64SignMask)!=0)&&((i64B&u64SignMask)!=u64SignMask))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(uMacImg>>39)
+			{
+				i64B=0x8000000000ull;
+			}
+			else
+			{
+				i64B=0x7fffffffffull;
+			}
+		}
+	}
+
+	i64A&=(~u64Mask);
+	i64B&=(~u64Mask);
+
+	p_pACC->u64Low=(i64A<<40)|i64B;
+	p_pACC->u16High=i64A>>24;
+}
+
+
+
+/*found*****************************************************************
+	函数名：		MACNegC16MFix8
+	
+	对应指令形式: CHMACCs-=CHRm*LLORn
+                CHMACCs-=CHRm*HLORn
+                CHMACCs-=CHRm*LHORn
+                CHMACCs-=CHRm*HHORn
+
+	描述:			16位定点复数和8位实数的乘法累减，占用一个乘法器，乘法结果输出实部/虚部到MACCs。
+
+	参数:		p_u32Rm -- 16位定点复数，对应Rm。
+					p_u32Rn -- 16位定点复数2，对应Rn。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+
+					p_u32Mode -- 模式选择
+					0 -- CHMACCs+=CHRm*LLORn
+					1 -- CHMACCs+=CHRm*LHORn
+					2 -- CHMACCs+=CHRm*HLORn
+					3 -- CHMACCs+=CHRm*HHORn
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2012-8-23		linguangdong		new
+	
+*******************************************************************/
+void MACNegC16MFix8(DSPU32 p_u32Rm, DSPU32 p_u32Rn, DSP_BIT80 *p_pACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32Mode)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);      
+
+	DSPU16 A=p_u32Rm>>16;
+	DSPU16 B=p_u32Rm;
+
+	DSPI16 iA=(DSPI16 &)A;
+	DSPI16 iB=(DSPI16 &)B;
+
+	DSPU8 Rn=0;
+
+	switch(p_u32Mode)
+	{
+	case 0:
+		Rn=p_u32Rn;
+		break;
+	case 1:
+		Rn=p_u32Rn>>8;
+		break;
+	case 2:
+		Rn=p_u32Rn>>16;
+		break;
+	case 3:
+		Rn=p_u32Rn>>24;
+		break;
+	}
+
+	DSPI64 iRn=(DSPI8 &)Rn;
+	DSPI64 i64A=iA;
+	DSPI64 i64B=iB;
+
+	i64A*=iRn;
+	i64B*=iRn;
+
+	DSPU64 u64Mask=0xffffff0000000000ull;
+
+	DSPU64 uMacRe=(((DSPU64)p_pACC->u16High)<<24)|((p_pACC->u64Low)>>40);
+	DSPU64 uMacImg=(p_pACC->u64Low)&0xffffffffffull;
+
+	bool bRealSign=false,bImgSign=false;
+	if(uMacImg>>39)
+		//Mac中虚部为负数
+	{
+		uMacImg|=u64Mask;
+		bImgSign=true;//虚部为负数
+	}
+
+	if(uMacRe>>39)
+		//Mac中实部为负数
+	{
+		uMacRe|=u64Mask;
+		bRealSign=true;//实部为负数
+	}
+
+	DSPI64 iMacRe=(DSPI64 &)uMacRe;
+	DSPI64 iMacImg=(DSPI64 &)uMacImg;
+
+	//bool bASign=false,bBSign=false;
+	//if(i64A<0)
+	//{
+	//	bASign=true;//减数A为负数
+	//}
+	//if(i64B<0)
+	//{
+	//	bBSign=true;//减数B为负数
+	//}
+	iMacRe=iMacRe-i64A;
+	iMacImg=iMacImg-i64B;
+
+	DSPU64 u64SignMask=0xffffff8000000000ull;
+
+	bool bRealOverflow=false,bImgOverflow=false;
+	if(((iMacRe&u64SignMask)!=0)&&((iMacRe&u64SignMask)!=u64SignMask))
+	{
+		bRealOverflow=true;
+	}
+
+	if(((iMacImg&u64SignMask)!=0)&&((iMacImg&u64SignMask)!=u64SignMask))
+	{
+		bImgOverflow=true;
+	}
+
+	//bool bRetReSign=false;
+	//if(iMacRe<0)
+	//{
+	//	bRetReSign=true;//实部结果为负数
+	//}
+	//bool bRetImgSign=false;
+	//if(iMacImg<0)
+	//{
+	//	bRetImgSign=true;//虚部结果为负数
+	//}
+
+	//if(bRealSign&&(!bASign)&&(!bRetReSign))//负的MACC减正的数，得到正的MACC，溢出
+	//{
+	//	bRealOverflow=true;
+	//}
+
+	//if((!bRealSign)&&bASign&&bRetReSign)//正的MACC减负的数，得到负的MACC，溢出
+	//{
+	//	bRealOverflow=true;
+	//}
+
+	//if(bImgSign&&(!bBSign)&&(!bRetImgSign))//负的MACC减正的数，得到正的MACC，溢出
+	//{
+	//	bImgOverflow=true;
+	//}
+
+	//if((!bImgSign)&&bBSign&&bRetImgSign)//正的MACC减负的数，得到负的MACC，溢出
+	//{
+	//	bImgOverflow=true;
+	//}
+
+	if(bRealOverflow)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(bRealSign)
+			{
+				iMacRe=0x8000000000ull;
+			}
+			else
+			{
+				iMacRe=0x7fffffffffull;
+			}
+		}
+	}
+
+	if(bImgOverflow)
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow);
+		SetFlag(*p_pStatReg, Mult_16_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(bImgSign)
+			{
+				iMacImg=0x8000000000ull;
+			}
+			else
+			{
+				iMacImg=0x7fffffffffull;
+			}
+		}
+	}
+
+	iMacRe&=0xffffffffffull;
+	iMacImg&=0xffffffffffull;
+
+	p_pACC->u64Low=(iMacRe<<40)|iMacImg;
+	p_pACC->u16High=iMacRe>>24;
+}
+
+/*found*****************************************************************
+	函数名：		LoadMACCQ8
+
+	对应指令形式: OMACCs=ORm(C)(z,s,p) (U) 
+
+	描述:			将寄存器Rm分成4个8位数，分别对应存入MACC的4个20位数据段。放置起始位置为c、c+20、c+40、c+60，
+	          具体位置为[(7+c):c]、[(27+c):c+20]、[(47+c):c+40]、[(67+c):c+60]。
+
+	参数:		DSP_BIT80 -- 80位MACC。
+					p_u32Src -- 源操作数，对应Rm。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+					p_u32Pos -- 放置起始位置，对应c。
+					p_u32Mode -- 模式选择
+					    0 -- 对于MACC中的其他位，高低位均补零，对应后缀z
+					    1 -- 对于MACC中的其他位，高位进行符号位扩展，低位补零，对应后缀s
+					    2 -- 对于MACC中的其他位，保持原值，对应后缀p
+
+	返回值：		
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者				修改处
+	2012-8-23		linguangdong		new
+	2013-6-26		林广栋				修改全部代码
+										1。先根据截位是否大于19，进行最基本的溢出判断，然后再进行其他操作。
+										2。修改了饱和处理过程。饱和处理时，对所有20位赋最大值或最小值。
+*******************************************************************/
+void LoadMACCQ8(DSP_BIT128 &p_u128MACC, DSPU32 p_u32Src, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 p_u32Pos, DSPU32 p_u32Mode, bool p_bolUseCutPos)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);    
+
+	if(!p_bolUseCutPos)
+	{
+		p_u32Pos=p_u32MULCUTR&0x1f;
+	}
+
+	DSPU8 uSrc1=(p_u32Src)&0xff;
+	DSPU8 uSrc2=(p_u32Src>>8)&0xff;
+	DSPU8 uSrc3=(p_u32Src>>16)&0xff;
+	DSPU8 uSrc4=(p_u32Src>>24)&0xff;
+
+	DSPU64 u64Src1=uSrc1;
+	DSPU64 u64Src2=uSrc2;
+	DSPU64 u64Src3=uSrc3;
+	DSPU64 u64Src4=uSrc4;
+
+	DSPI8 iSrc1=(DSPI8 &)uSrc1;
+	DSPI8 iSrc2=(DSPI8 &)uSrc2;
+	DSPI8 iSrc3=(DSPI8 &)uSrc3;
+	DSPI8 iSrc4=(DSPI8 &)uSrc4;
+
+	u64Src1<<=p_u32Pos;
+	u64Src2<<=p_u32Pos;
+	u64Src3<<=p_u32Pos;
+	u64Src4<<=p_u32Pos;
+
+	DSPI64 i64Src1=iSrc1;
+	DSPI64 i64Src2=iSrc2;
+	DSPI64 i64Src3=iSrc3;
+	DSPI64 i64Src4=iSrc4;
+
+	i64Src1<<=p_u32Pos;
+	i64Src2<<=p_u32Pos;
+	i64Src3<<=p_u32Pos;
+	i64Src4<<=p_u32Pos;
+
+	DSPU64 uHigh32Mask=0xffffffff;
+	uHigh32Mask=~uHigh32Mask;
+	DSPU64 uSatuMask=0xffffffff;
+	if(p_u32Mode==0)//高低位均补零
+	{
+		p_u128MACC.u32LL=u64Src1;
+		p_u128MACC.u32HL=u64Src2;
+		p_u128MACC.u32LH=u64Src3;
+		p_u128MACC.u32HH=u64Src4;
+		if(u64Src1&uHigh32Mask)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_u128MACC.u32LL=uSatuMask;
+			}
+		}
+		if(u64Src2&uHigh32Mask)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_u128MACC.u32HL=uSatuMask;
+			}
+		}
+		if(u64Src3&uHigh32Mask)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_u128MACC.u32LH=uSatuMask;
+			}
+		}
+		if(u64Src4&uHigh32Mask)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_u128MACC.u32HH=uSatuMask;
+			}
+		}
+	}
+	else if(p_u32Mode==1)//高位进行符号位扩展
+	{
+		p_u128MACC.u32LL=(DSPU64 &)i64Src1;
+		p_u128MACC.u32HL=(DSPU64 &)i64Src2;
+		p_u128MACC.u32LH=(DSPU64 &)i64Src3;
+		p_u128MACC.u32HH=(DSPU64 &)i64Src4;
+
+		if(((i64Src1>>31)!=0)&&((i64Src1>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64Src1<0)
+				{
+					p_u128MACC.u32LL=0x80000000;
+				}
+				else
+				{
+					p_u128MACC.u32LL=0x7fffffff;
+				}
+			}
+		}
+		if(((i64Src2>>31)!=0)&&((i64Src2>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64Src2<0)
+				{
+					p_u128MACC.u32HL=0x80000000;
+				}
+				else
+				{
+					p_u128MACC.u32HL=0x7fffffff;
+				}
+			}
+		}
+		if(((i64Src3>>31)!=0)&&((i64Src3>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64Src3<0)
+				{
+					p_u128MACC.u32LH=0x80000000;
+				}
+				else
+				{
+					p_u128MACC.u32LH=0x7fffffff;
+				}
+			}
+		}
+		if(((i64Src4>>31)!=0)&&((i64Src4>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64Src4<0)
+				{
+					p_u128MACC.u32HH=0x80000000;
+				}
+				else
+				{
+					p_u128MACC.u32HH=0x7fffffff;
+				}
+			}
+		}
+	}
+	else if(p_u32Mode==2)//高位保持不变
+	{
+		DSPU32 u32Mask=0xff;
+		u32Mask<<=p_u32Pos;
+		u32Mask=~u32Mask;
+
+		p_u128MACC.u32LL=(p_u128MACC.u32LL)&u32Mask;
+		p_u128MACC.u32HL=(p_u128MACC.u32HL)&u32Mask;
+		p_u128MACC.u32LH=(p_u128MACC.u32LH)&u32Mask;
+		p_u128MACC.u32HH=(p_u128MACC.u32HH)&u32Mask;
+
+		p_u128MACC.u32LL=(p_u128MACC.u32LL)|((DSPU32)u64Src1);
+		p_u128MACC.u32HL=(p_u128MACC.u32HL)|((DSPU32)u64Src2);
+		p_u128MACC.u32LH=(p_u128MACC.u32LH)|((DSPU32)u64Src3);
+		p_u128MACC.u32HH=(p_u128MACC.u32HH)|((DSPU32)u64Src4);
+	}
+}
+
+/******************************************************************
+	函数名：		MACC8
+	描述:			COMACCs=CORm*CORn
+					COMACCs+=CORm*CORn
+					8位定点复数乘累加。
+	参数:			p_u32Src1 -- Rm。
+					p_u32Src2 -- Rn。
+					p_pACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器。
+	返回值：		无。
+	注意事项:		根据计算结果设置相关标志位。
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年6月17日	林广栋			新建本函数。
+	2014年1月9日	林广栋			修改MACC的位宽为128位。
+*******************************************************************/
+void MACC8(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT128 *p_p128ACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSPU32 uMask=0xff;
+	DSPU32 A=p_u32Src1&uMask;
+	DSPU32 B=(p_u32Src1>>8)&uMask;
+	DSPU32 C=(p_u32Src1>>16)&uMask;
+	DSPU32 D=(p_u32Src1>>24)&uMask;
+
+	DSPU32 E=p_u32Src2&uMask;
+	DSPU32 F=(p_u32Src2>>8)&uMask;
+	DSPU32 G=(p_u32Src2>>16)&uMask;
+	DSPU32 H=(p_u32Src2>>24)&uMask;
+
+	DSPU32 uSign8=0x80;
+	DSPU32 uSign8Ext=0xffffff80;
+
+	if(A&uSign8)
+	{
+		A|=uSign8Ext;
+	}
+
+	if(B&uSign8)
+	{
+		B|=uSign8Ext;
+	}
+
+	if(C&uSign8)
+	{
+		C|=uSign8Ext;
+	}
+
+	if(D&uSign8)
+	{
+		D|=uSign8Ext;
+	}
+
+	if(E&uSign8)
+	{
+		E|=uSign8Ext;
+	}
+
+	if(F&uSign8)
+	{
+		F|=uSign8Ext;
+	}
+
+	if(G&uSign8)
+	{
+		G|=uSign8Ext;
+	}
+
+	if(H&uSign8)
+	{
+		H|=uSign8Ext;
+	}
+
+	DSPI32 iA=(DSPI32 &)A;
+	DSPI32 iB=(DSPI32 &)B;
+	DSPI32 iC=(DSPI32 &)C;
+	DSPI32 iD=(DSPI32 &)D;
+	DSPI32 iE=(DSPI32 &)E;
+	DSPI32 iF=(DSPI32 &)F;
+	DSPI32 iG=(DSPI32 &)G;
+	DSPI32 iH=(DSPI32 &)H;
+
+	DSPI64 hReal=((DSPI64)iD)*((DSPI64)iH)-((DSPI64)iC)*((DSPI64)iG);
+	DSPI64 hImg=((DSPI64)iC)*((DSPI64)iH)+((DSPI64)iD)*((DSPI64)iG);
+
+	DSPI64 lReal=((DSPI64)iB)*((DSPI64)iF)-((DSPI64)iA)*((DSPI64)iE);
+	DSPI64 lImg=((DSPI64)iA)*((DSPI64)iF)+((DSPI64)iB)*((DSPI64)iE);
+
+	DSPI32 iMac1=(DSPI32)(p_p128ACC->u32LL);
+	DSPI32 iMac2=(DSPI32)(p_p128ACC->u32HL);
+	DSPI32 iMac3=(DSPI32)(p_p128ACC->u32LH);
+	DSPI32 iMac4=(DSPI32)(p_p128ACC->u32HH);
+
+	hReal=hReal+((DSPI64)iMac4);
+	hImg=hImg+((DSPI64)iMac3);
+	lReal=lReal+((DSPI64)iMac2);
+	lImg=lImg+((DSPI64)iMac1);
+
+	if(((hReal>>31)!=0)&&((hReal>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(hReal<0)
+			{
+				p_p128ACC->u32HH=0x80000000;
+			}
+			else
+			{
+				p_p128ACC->u32HH=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_p128ACC->u32HH=hReal;
+		}
+	}
+	else
+	{
+		p_p128ACC->u32HH=hReal;
+	}
+
+	if(((hImg>>31)!=0)&&((hImg>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(hImg<0)
+			{
+				p_p128ACC->u32LH=0x80000000;
+			}
+			else
+			{
+				p_p128ACC->u32LH=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_p128ACC->u32LH=hImg;
+		}
+	}
+	else
+	{
+		p_p128ACC->u32LH=hImg;
+	}
+
+	if(((lReal>>31)!=0)&&((lReal>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(lReal<0)
+			{
+				p_p128ACC->u32HL=0x80000000;
+			}
+			else
+			{
+				p_p128ACC->u32HL=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_p128ACC->u32HL=lReal;
+		}
+	}
+	else
+	{
+		p_p128ACC->u32HL=lReal;
+	}
+
+	if(((lImg>>31)!=0)&&((lImg>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(lImg<0)
+			{
+				p_p128ACC->u32LL=0x80000000;
+			}
+			else
+			{
+				p_p128ACC->u32LL=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_p128ACC->u32LL=lImg;
+		}
+	}
+	else
+	{
+		p_p128ACC->u32LL=lImg;
+	}
+}
+
+
+/******************************************************************
+	函数名：	  MulDF64
+
+	对应指令形式: QMACCH=DFRm+1:m*DFRn+1:n
+								QMACCL=DFRm+1:m*DFRn+1:n
+
+	描述:		两个64位浮点数相乘。该指令用到四个乘法器，具体见指令集20130904版本。
+
+	参数:		
+					p_u80MACC -- 80位MACC结果。
+					p_u64Src1 -- 高32位为Rm+1,低32位为Rm。
+					p_u64Src2 -- 高32位为Rn+1,低32位为Rn。
+					MULIdx -- 乘法器索引号，与结果相对应。如MULIdx=0，则输出的MACC为MUL0的MACC结果。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0，四个乘法器的标志寄存器结果一样。	
+					p_u32MULCR -- 乘法器控制寄存器，四个乘法器的控制寄存器值一样。
+					
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置标志寄存器中的相关标志位；					
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年9月27日	林广栋			新建函数
+	
+	*******************************************************************/
+void MulDF64(DSP_BIT80 &p_u80MACC, DSP_BIT64 p_u64Src1, DSP_BIT64 p_u64Src2, DSPU32 MULIdx, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+	switch(MULIdx)
+	{
+	case 0:
+		{
+			DSPU64 u20High1=(p_u64Src1.u32High&0xfffff)|0x100000;
+			DSPU64 u20High2=(p_u64Src2.u32High&0xfffff)|0x100000;
+
+			DSPU64 u64Result=u20High1*u20High2;
+			p_u80MACC.u64Low=u64Result;
+			p_u80MACC.u16High=0;
+		}
+		break;
+	case 1:
+		{
+			DSPU64 u64Src1=p_u64Src1.u32Low;
+			DSPU64 u64Src2=p_u64Src2.u32Low;
+			DSPU64 u64Result=u64Src1*u64Src2;
+
+			DSPU64 u64Low18=0;
+			if(TestFlag(p_u32MULCR, Mul_Ctl_Saturation))//要做饱和处理
+			{
+				u64Low18|=1;
+			}
+			u64Low18<<=1;
+
+			DSPU64 u52Frac1=p_u64Src1.u32Low;
+			DSPU64 u52Frac2=p_u64Src2.u32Low;
+			DSPU64 u64FracHigh1=(p_u64Src1.u32High&0xfffff);
+			u64FracHigh1<<=32;
+
+			u52Frac1|=u64FracHigh1;
+
+			DSPU64 u64FracHigh2=(p_u64Src2.u32High&0xfffff);
+			u64FracHigh2<<=32;
+
+			u52Frac2|=u64FracHigh2;
+
+			DSPU32 u11Exp1=(p_u64Src1.u32High>>20)&(0x7ff);
+			DSPU32 u11Exp2=(p_u64Src2.u32High>>20)&(0x7ff);
+
+			if(((u11Exp1==0x7ff)&&(u52Frac1==0))||
+				((u11Exp2==0x7ff)&&(u52Frac2==0)))//有一个数为无穷
+			{
+				u64Low18|=1;
+			}
+			u64Low18<<=1;
+
+			if(((u11Exp1==0x7ff)&&(u52Frac1!=0))||
+				((u11Exp2==0x7ff)&&(u52Frac2!=0)))//有一个数为非数
+			{
+				u64Low18|=1;
+			}
+			u64Low18<<=1;
+
+			if(((u11Exp1==0)&&(u52Frac1==0))||
+				((u11Exp2==0)&&(u52Frac2==0)))//有一个数为0
+			{
+				u64Low18|=1;
+			}
+			u64Low18<<=1;
+
+			if(((u11Exp1==0)&&(u52Frac1!=0))||
+				((u11Exp2==0)&&(u52Frac2!=0)))//有一个数为非规格化数（无穷小）
+			{
+				u64Low18|=1;
+			}
+			u64Low18<<=1;
+
+			if((p_u64Src1.u32High>>31)!=(p_u64Src2.u32High>>31))//负数
+			{
+				u64Low18|=1;
+			}
+
+			u64Low18<<=13;
+
+			DSPI32 i13Exp=((DSPI32)u11Exp1)+((DSPI32)u11Exp2)-1023;
+
+			i13Exp&=(0x1fff);
+			u64Low18|=((DSPU64)((DSPU32 &)i13Exp));
+
+			u64Result&=0xffffffff00000000ull;
+			u64Result|=u64Low18;
+
+			p_u80MACC.u64Low=u64Result;
+			p_u80MACC.u16High=0;
+		}
+		break;
+	case 2:
+		{
+			DSPU64 u20High1=(p_u64Src1.u32High&0xfffff)|0x100000;
+			DSPU64 u20High2=(p_u64Src2.u32High&0xfffff)|0x100000;
+			DSPU64 u32Low1=p_u64Src1.u32Low;
+			DSPU64 u32Low2=p_u64Src2.u32Low;
+			DSPU64 u64Result=u20High1*u32Low2+u20High2*u32Low1;
+			p_u80MACC.u64Low=u64Result;
+			p_u80MACC.u16High=0;
+		}
+		break;
+	case 3:
+		{
+		}
+		break;
+	}
+
+}
+
+
+/******************************************************************
+	函数名：	  QMACCToDF64
+
+	对应指令形式: DFRs+1:s=QMACCH
+								DFRs+1:s=QMACCL
+
+	描述:		取出2个64位浮点数相乘的结果，存放于Rs+1和Rs中。该指令与QMACCH=DFRm+1:m*DFRn+1:n	QMACCL=DFRm+1:m*DFRn+1:n配对使用，用到四个乘法器，具体见指令集20130904版本。
+
+	参数:		
+					p_u64Res -- 输出的结果，高32位对应指令的Rs+1，低32位对应指令的Rs。
+					p_u80MACC0 -- 该指令用到的第0个乘法器的MACC。
+					p_u80MACC1 -- 该指令用到的第1个乘法器的MACC。
+					p_u80MACC2 -- 该指令用到的第2个乘法器的MACC。
+					p_u80MACC3 -- 该指令用到的第3个乘法器的MACC。		
+					p_pStatReg0 -- 乘法器0的标志寄存器结果,指向标志寄存器输出缓存的指针，所指内存区域初始为0。	
+					p_pStatReg1 -- 乘法器1的标志寄存器结果,指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_pStatReg2 -- 乘法器2的标志寄存器结果,指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_pStatReg3 -- 乘法器3的标志寄存器结果,指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器，四个乘法器的控制寄存器值一样。
+					
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置标志寄存器中的相关标志位；					
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013年9月27日	林广栋			新建函数
+	
+	*******************************************************************/
+void QMACCToDF64(DSP_BIT64 &p_u64Res, DSP_BIT80 p_u80MACC0, DSP_BIT80 p_u80MACC1, DSP_BIT80 p_u80MACC2, DSP_BIT80 p_u80MACC3, DSPU32 *p_pStatReg0, DSPU32 *p_pStatReg1, DSPU32 *p_pStatReg2, DSPU32 *p_pStatReg3, DSPU32 p_u32MULCR)
+{
+	bool bolSatu = false;
+	DSPU64 u64MC1=p_u80MACC1.u64Low;
+
+	if(TestBit(u64MC1,18))
+	{
+		bolSatu=true;
+	}
+
+	if(TestBit(u64MC1,16))//如果有一个数是非数
+	{
+		if(TestBit(u64MC1,13))//结果全1，但符号位仍然要置位
+		{
+			p_u64Res.u32Low=0xffffffff;
+			p_u64Res.u32High=0xffffffff;
+		}
+		else
+		{
+			p_u64Res.u32Low=0xffffffff;
+			p_u64Res.u32High=0x7fffffff;
+		}
+
+		SetFlag(*p_pStatReg0, Mult_Invalid);
+		SetFlag(*p_pStatReg0,Mult_MIS);
+		*p_pStatReg1=*p_pStatReg0;
+		*p_pStatReg2=*p_pStatReg0;
+		*p_pStatReg3=*p_pStatReg0;
+
+		return;
+	}
+
+	if(TestBit(u64MC1,17)&&TestBit(u64MC1,15))//无穷和零相乘
+	{
+		if(TestBit(u64MC1,13))//负数
+		{
+			p_u64Res.u32Low=0xffffffff;
+			p_u64Res.u32High=0xffffffff;
+		}
+		else//正数
+		{
+			p_u64Res.u32Low=0xffffffff;
+			p_u64Res.u32High=0x7fffffff;
+		}
+
+		SetFlag(*p_pStatReg0, Mult_Invalid);
+		SetFlag(*p_pStatReg0,Mult_MIS);
+		*p_pStatReg1=*p_pStatReg0;
+		*p_pStatReg2=*p_pStatReg0;
+		*p_pStatReg3=*p_pStatReg0;
+
+		return;
+	}
+
+	if(TestBit(u64MC1,17))//有一个数为无穷
+	{
+		SetFlag(*p_pStatReg0, Mult_FOverFlow);
+		SetFlag(*p_pStatReg0, Mult_MVS);
+	}
+
+	if(TestBit(u64MC1,15))//有一个数为0
+	{
+		if(TestBit(u64MC1,13))//负数
+		{
+			p_u64Res.u32Low=0;
+			p_u64Res.u32High=0x80000000;
+		}
+		else//正数
+		{
+			p_u64Res.u32Low=0;
+			p_u64Res.u32High=0;
+		}
+		return;
+	}
+
+	//非规格化数和正常数相乘
+	if(TestBit(u64MC1,14)&&(!TestBit(u64MC1,17))&&(!TestBit(u64MC1,15)))
+	{
+		SetFlag(*p_pStatReg0, Mult_UnderFlow);
+		SetFlag(*p_pStatReg0, Mult_MUS);
+	}
+
+	//尾数处理
+	DSPU64 ma2=p_u80MACC2.u64Low;//尾数中间//最多54位（53=21+32，再乘2）
+	DSPU64 ma1=p_u80MACC1.u64Low;//高32位存尾数最低位
+	DSPU64 ma0=p_u80MACC0.u64Low;//尾数最高位//最多42位
+
+	DSPI64 exp=ma1&0x1fff;//MACC1的低13位存的是源操作数指数相加的结果
+
+	if(exp&0x1000)//对指数进行符号位扩展
+	{
+		DSPU64 u64ExpMask=0x1fff;
+		u64ExpMask=~u64ExpMask;
+		exp|=u64ExpMask;
+	}
+
+	ma1>>=32;//此时MA1高32位为0
+
+	ma2&=0x3fffffffffffffull;//只取MACC2的低54位。
+
+	DSPU80 macc1(ma1);
+	DSPU80 macc2(ma2);
+
+	macc2=macc2+macc1;
+
+	ma2=macc2.u64Low;
+
+	ma2>>=10;
+
+
+	ma0<<=22;
+
+	//即使高32位中的尾数全为1，则高32位中的尾数部分为0x1fffff，两个0x1fffff相乘，
+	//结果为0x3FFFFC00001，42位，左移22位后，为0xfffff00004000000ull，这样，和32位
+	//（或33位）的低位数据相加，无论如何不会产生溢出，所以此处不用再判断是否溢出。
+	ma0+=ma2;
+
+	if(ma0&u64MSBMask)
+	{
+		exp+=1;
+		ma0>>=11;
+	}
+	else
+	{
+		ma0>>=10;
+	}
+
+	if(exp&0x1000)//对指数进行符号位扩展
+	{
+		DSPU64 u64ExpMask=0x1fff;
+		u64ExpMask=~u64ExpMask;
+		exp|=u64ExpMask;
+	}
+
+	if(!(TestFlag(*p_pStatReg0, Mult_UnderFlow)||TestFlag(*p_pStatReg0, Mult_FOverFlow)))
+	{
+		if(exp<=0)
+		{
+			SetFlag(*p_pStatReg0, Mult_UnderFlow);
+			SetFlag(*p_pStatReg0, Mult_MUS);
+		}
+		else if(exp>2046)
+		{
+			SetFlag(*p_pStatReg0, Mult_FOverFlow);
+			SetFlag(*p_pStatReg0, Mult_MVS);
+		}
+	}
+
+	DSPU64 u64Bit53=0xfff;
+	u64Bit53<<=52;
+	u64Bit53=~u64Bit53;
+	ma0&=u64Bit53;
+
+	exp&=0x7ff;
+
+	DSPU64 u64Result;
+
+	u64Result=ma0|(exp<<52);
+
+	if(((p_u80MACC1.u64Low)&0x2000))//负数
+	{
+		u64Result|=u64MSBMask;
+	}
+
+	*p_pStatReg1=*p_pStatReg0;
+	*p_pStatReg2=*p_pStatReg0;
+	*p_pStatReg3=*p_pStatReg0;
+
+	if(TestFlag(*p_pStatReg0,Mult_FOverFlow))
+	{
+		if(bolSatu)
+		{
+			if( (p_u80MACC1.u64Low)&0x2000 )//负数，64位浮点数能表示的最小值 
+			{
+				p_u64Res.u32Low=0xffffffff;
+				p_u64Res.u32High=0xffefffff;
+			}
+			else//正数，64位浮点数能表示的最大值
+			{
+				p_u64Res.u32Low=0xffffffff;
+				p_u64Res.u32High=0x7fefffff;
+			}
+		}
+		else
+		{
+			if((p_u80MACC1.u64Low)&0x2000)//负数，负无穷
+			{
+				p_u64Res.u32Low=0;
+				p_u64Res.u32High=0xfff00000;
+			}
+			else//正数，正无穷
+			{
+				p_u64Res.u32Low=0;
+				p_u64Res.u32High=0x7ff00000;
+			}
+		}
+		return;
+	}
+
+	if(TestFlag(*p_pStatReg0,Mult_UnderFlow))
+	{
+		if((p_u80MACC1.u64Low)&0x2000)//负数，负0
+		{
+			p_u64Res.u32Low=0;
+			p_u64Res.u32High=0x80000000;
+		}
+		else//正数，正0
+		{
+			p_u64Res.u32Low=0;
+			p_u64Res.u32High=0;
+		}
+		return;
+	}
+
+	p_u64Res.u32Low=u64Result;
+	p_u64Res.u32High=u64Result>>32;
+}
+
+
+/******************************************************************
+	函数名：	  MAC8Mult16
+	对应指令形式: 
+	OMACC+=ORm*HHRn(U)
+	OMACC+=ORm*HHRn
+
+	OMACC+=ORm*LHRn(U)
+	OMACC+=ORm*LHRn
+
+	OMACCs=ORm*LHRn(U)
+	OMACCs=ORm*LHRn
+
+	OMACC=ORm*HHRn(U)
+	OMACC=ORm*HHRn
+
+	描述:		8位数与16位数相加，累加到MACC中。对于向MACC中赋值的指令，先把
+	MACC清零，再调用本函数，把数据累加到MACC中。MULCR第[0]位为0时，表示无符号数，
+	第[0]位为1时，表示有符号数。p_HLSel为true时，表示8位数据p_u32Src1与p_u32Src2的低16位相乘，
+	为false时，表示8位数据p_u32Src1与p_u32Src2的高16位相乘。
+
+	参数:		
+	返回值：		无。
+	注意事项:		根据计算结果设置标志寄存器中的相关标志位；
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	*******************************************************************/
+void MACD8Mult16(DSP_BIT128 &p_OMACC, DSPU32 p_u32Src1, DSPU32 p_u32Src2,DSPU32 p_u32MULCR, DSPU32 *p_pStatReg, bool p_HLSel)
+{
+	bool bolSigned = TestFlag(p_u32MULCR, Mul_Ctl_Signed); 
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);      
+
+	DSPU32 u32LL=0,u32HL=0,u32LH=0,u32HH=0;
+	DSPU32 u32Src16=0;
+	DSPU32 u32Result=0;
+	if(p_HLSel)
+	{
+		u32Src16=p_u32Src2>>16;
+	}
+	else
+	{
+		u32Src16=p_u32Src2&0x0000ffff;
+	}
+
+	u32LL=p_u32Src1&0xff;
+	u32HL=(p_u32Src1>>8)&0xff;
+	u32LH=(p_u32Src1>>16)&0xff;
+	u32HH=(p_u32Src1>>24)&0xff;
+
+	if(bolSigned)
+	{
+		DSPI32 i32LL=0,i32HL=0,i32LH=0,i32HH=0;
+		if(u32LL&0x80)
+		{
+			i32LL=u32LL|0xffffff00;
+		}
+		else
+		{
+			i32LL=u32LL;
+		}
+		if(u32HL&0x80)
+		{
+			i32HL=u32HL|0xffffff00;
+		}
+		else
+		{
+			i32HL=u32HL;
+		}
+		if(u32LH&0x80)
+		{
+			i32LH=u32LH|0xffffff00;
+		}
+		else
+		{
+			i32LH=u32LH;
+		}
+		if(u32HH&0x80)
+		{
+			i32HH=u32HH|0xffffff00;
+		}
+		else
+		{
+			i32HH=u32HH;
+		}
+
+		DSPI32 i32Src16=0;
+		if(u32Src16&0x8000)
+		{
+			i32Src16=u32Src16|0xffff0000;
+		}
+		else
+		{
+			i32Src16=u32Src16;
+		}
+
+		DSPI32 i32Result=0;
+		i32LL=i32LL*i32Src16;
+		i32HL=i32HL*i32Src16;
+		i32LH=i32LH*i32Src16;
+		i32HH=i32HH*i32Src16;
+
+		DSPI64 i64LL=((DSPI32)(p_OMACC.u32LL));
+		DSPI64 i64HL=((DSPI32)(p_OMACC.u32HL));
+		DSPI64 i64LH=((DSPI32)(p_OMACC.u32LH));
+		DSPI64 i64HH=((DSPI32)(p_OMACC.u32HH));
+
+
+		i64LL+=i32LL;
+		i64HL+=i32HL;
+		i64LH+=i32LH;
+		i64HH+=i32HH;
+
+		if(((i64LL>>31)!=0)&&((i64LL>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+			if(bolSatu)
+			{
+				if(i64LL>0)
+				{
+					p_OMACC.u32LL=0x7fffffff;
+				}
+				else
+				{
+					p_OMACC.u32LL=0x80000000;
+				}
+			}
+			else
+			{
+				p_OMACC.u32LL=i64LL;
+			}
+		}
+		else
+		{
+			p_OMACC.u32LL=i64LL;
+		}
+
+		if(((i64HL>>31)!=0)&&((i64HL>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64HL>0)
+				{
+					p_OMACC.u32HL=0x7fffffff;
+				}
+				else
+				{
+					p_OMACC.u32HL=0x80000000;
+				}
+			}
+			else
+			{
+				p_OMACC.u32HL=i64HL;
+			}
+		}
+		else
+		{
+			p_OMACC.u32HL=i64HL;
+		}
+
+		if(((i64LH>>31)!=0)&&((i64LH>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64LH>0)
+				{
+					p_OMACC.u32LH=0x7fffffff;
+				}
+				else
+				{
+					p_OMACC.u32LH=0x80000000;
+				}
+			}
+			else
+			{
+				p_OMACC.u32LH=i64LH;
+			}
+		}
+		else
+		{
+			p_OMACC.u32LH=i64LH;
+		}
+
+		if(((i64HH>>31)!=0)&&((i64HH>>31)!=-1))
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				if(i64HH>0)
+				{
+					p_OMACC.u32HH=0x7fffffff;
+				}
+				else
+				{
+					p_OMACC.u32HH=0x80000000;
+				}
+			}
+			else
+			{
+				p_OMACC.u32HH=i64HH;
+			}
+		}
+		else
+		{
+			p_OMACC.u32HH=i64HH;
+		}
+	}
+	else
+	{
+		u32LL=u32LL*u32Src16;
+		u32HL=u32HL*u32Src16;
+		u32LH=u32LH*u32Src16;
+		u32HH=u32HH*u32Src16;
+
+		DSPU64 u64LL=p_OMACC.u32LL;
+		DSPU64 u64HL=p_OMACC.u32HL;
+		DSPU64 u64LH=p_OMACC.u32LH;
+		DSPU64 u64HH=p_OMACC.u32HH;
+
+		u64LL+=u32LL;
+		u64HL+=u32HL;
+		u64LH+=u32LH;
+		u64HH+=u32HH;
+
+		if(u64LL>>32)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_OMACC.u32LL=0xffffffff;
+			}
+			else
+			{
+				p_OMACC.u32LL=u64LL;
+			}
+		}
+		else
+		{
+			p_OMACC.u32LL=u64LL;
+		}
+
+		if(u64HL>>32)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_OMACC.u32HL=0xffffffff;
+			}
+			else
+			{
+				p_OMACC.u32HL=u64HL;
+			}
+		}
+		else
+		{
+			p_OMACC.u32HL=u64HL;
+		}
+
+		if(u64LH>>32)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_OMACC.u32LH=0xffffffff;
+			}
+			else
+			{
+				p_OMACC.u32LH=u64LH;
+			}
+		}
+		else
+		{
+			p_OMACC.u32LH=u64LH;
+		}
+
+		if(u64HH>>32)
+		{
+			SetFlag(*p_pStatReg, Mult_OverFlow);
+			SetFlag(*p_pStatReg, Mult_MOS);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow);
+			SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+			if(bolSatu)
+			{
+				p_OMACC.u32HH=0xffffffff;
+			}
+			else
+			{
+				p_OMACC.u32HH=u64HH;
+			}
+		}
+		else
+		{
+			p_OMACC.u32HH=u64HH;
+		}
+	}
+}
+
+
+/******************************************************************
+	函数名：	  MACDC8MultC16
+
+	对应指令形式: 
+	COMACC=CORm*CHRn
+	COMACC+=CORm*CHRn
+
+	描述:		8位复数与16位复数相加，累加到MACC中。对于向MACC中赋值的指令，先把
+	MACC清零，再调用本函数，把数据累加到MACC中。
+
+	参数:		
+	返回值：		无。
+	注意事项:		根据计算结果设置标志寄存器中的相关标志位；					
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+	*******************************************************************/
+void MACDC8MultC16(DSP_BIT128 &p_OMACC, DSPU32 p_u32Src1, DSPU32 p_u32Src2,DSPU32 p_u32MULCR, DSPU32 *p_pStatReg)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation);
+
+	DSPI32 i32Real16=0,i32Img16=0;
+	DSPI32 i32HReal8=0,i32HImg8=0,i32LReal8=0,i32LImg8=0;
+
+	i32Real16=p_u32Src2>>16;
+	i32Img16=p_u32Src2&0xffff;
+
+	if(i32Real16&0x8000)
+	{
+		i32Real16|=0xffff0000;
+	}
+
+	if(i32Img16&0x8000)
+	{
+		i32Img16|=0xffff0000;
+	}
+
+	i32HReal8=(p_u32Src1>>24)&0xff;
+	i32HImg8=(p_u32Src1>>16)&0xff;
+	i32LReal8=(p_u32Src1>>8)&0xff;
+	i32LImg8=p_u32Src1&0xff;
+
+	if(i32HReal8&0x80)
+	{
+		i32HReal8|=0xffffff00;
+	}
+
+	if(i32HImg8&0x80)
+	{
+		i32HImg8|=0xffffff00;
+	}
+
+	if(i32LReal8&0x80)
+	{
+		i32LReal8|=0xffffff00;
+	}
+
+	if(i32LImg8&0x80)
+	{
+		i32LImg8|=0xffffff00;
+	}
+
+	DSPI32 iHReal32=0,iHImg32=0,iLReal32=0,iLImg32=0;
+	iHReal32=i32HReal8*i32Real16-i32HImg8*i32Img16;
+	iHImg32=i32HReal8*i32Img16+i32HImg8*i32Real16;
+
+	iLReal32=i32LReal8*i32Real16-i32LImg8*i32Img16;
+	iLImg32=i32LReal8*i32Img16+i32LImg8*i32Real16;
+
+	DSPI64 i64LL=((DSPI32)p_OMACC.u32LL);
+	DSPI64 i64HL=((DSPI32)p_OMACC.u32HL);
+	DSPI64 i64LH=((DSPI32)p_OMACC.u32LH);
+	DSPI64 i64HH=((DSPI32)p_OMACC.u32HH);
+
+	i64LL+=iLImg32;
+	i64HL+=iLReal32;
+	i64LH+=iHImg32;
+	i64HH+=iHReal32;
+
+	if(((i64LL>>31)!=0)&&((i64LL>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(i64LL<0)
+			{
+				p_OMACC.u32LL=0x80000000;
+			}
+			else
+			{
+				p_OMACC.u32LL=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_OMACC.u32LL=i64LL;
+		}
+	}
+	else
+	{
+		p_OMACC.u32LL=i64LL;
+	}
+
+	if(((i64HL>>31)!=0)&&((i64HL>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(i64HL<0)
+			{
+				p_OMACC.u32HL=0x80000000;
+			}
+			else
+			{
+				p_OMACC.u32HL=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_OMACC.u32HL=i64HL;
+		}
+	}
+	else
+	{
+		p_OMACC.u32HL=i64HL;
+	}
+
+	if(((i64LH>>31)!=0)&&((i64LH>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(i64LH<0)
+			{
+				p_OMACC.u32LH=0x80000000;
+			}
+			else
+			{
+				p_OMACC.u32LH=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_OMACC.u32LH=i64LH;
+		}
+	}
+	else
+	{
+		p_OMACC.u32LH=i64LH;
+	}
+
+	if(((i64HH>>31)!=0)&&((i64HH>>31)!=-1))
+	{
+		SetFlag(*p_pStatReg, Mult_OverFlow);
+		SetFlag(*p_pStatReg, Mult_MOS);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow);
+		SetFlag(*p_pStatReg, Mult_8_OverFlow_S);
+
+		if(bolSatu)
+		{
+			if(i64HH<0)
+			{
+				p_OMACC.u32HH=0x80000000;
+			}
+			else
+			{
+				p_OMACC.u32HH=0x7fffffff;
+			}
+		}
+		else
+		{
+			p_OMACC.u32HH=i64HH;
+		}
+	}
+	else
+	{
+		p_OMACC.u32HH=i64HH;
+	}
+}
+
+
+/******************************************************************
+	函数名：	  LoadHOMACC
+
+	对应指令形式: 
+	HOMACCs=Rm(C,p)
+	HOMACCs=Rm+1:m(C,p)
+
+	描述:		把32位或64位数据存入到MACC[127:64]位中。
+
+	参数:		p_bol32 为true时表示把p_u32Src1放入MACC中，对应HOMACCs=Rm(C,p)
+				p_bol32 为false时表示把p_u32Src1、p_u32Src2放入MACC中，
+				对应HOMACCs=Rm+1:m(C,p)，其中p_u32Src2放高位,p_u32Src1放低位。
+
+				p_bolUseCutPos为true时，使用p_u32Pos截位信息
+				p_bolUseCutPos为false时，使用MULCR中的[24:20]位作为截位信息。
+	返回值：		无。
+	注意事项:		根据计算结果设置标志寄存器中的相关标志位；
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2014-1-2		林广栋			新建函数
+	*******************************************************************/
+void LoadHOMACC(DSP_BIT128 &p_OMACC, DSPU32 p_u32Src1, DSPU32 p_u32Src2,DSPU32 p_u32MULCR, DSPU32 p_u32MULCUTR, DSPU32 *p_pStatReg,DSPU32 p_u32Pos,bool p_bol32,bool p_bolUseCutPos)
+{
+	if(!p_bolUseCutPos)
+	{
+		p_u32Pos=p_u32MULCUTR&0x3f;
+	}
+
+	if(p_bol32)
+	{
+		DSPU64 u64Mask=0xffffffff;
+		u64Mask<<=p_u32Pos;
+		u64Mask=~u64Mask;
+
+		DSPU64 u64Mac=p_OMACC.u32HH;
+		u64Mac<<=32;
+		u64Mac|=((DSPU64)(p_OMACC.u32LH));
+
+		u64Mac&=u64Mask;
+
+		DSPU64 u64Src=p_u32Src1;
+		u64Src<<=p_u32Pos;
+
+		u64Mac|=u64Src;
+
+		p_OMACC.u32HH=u64Mac>>32;
+		p_OMACC.u32LH=u64Mac;
+	}
+	else
+	{
+		DSPU64 u64Src=p_u32Src2;
+		u64Src<<=32;
+		u64Src|=((DSPU64)p_u32Src1);
+		u64Src<<=p_u32Pos;
+
+		DSPU64 u64Mask=u64AllOne;
+		u64Mask<<=p_u32Pos;
+		u64Mask=~u64Mask;
+
+		DSPU64 u64Mac;
+		u64Mac=p_OMACC.u32HH;
+		u64Mac<<=32;
+		u64Mac|=(p_OMACC.u32LH);
+
+		u64Mac&=u64Mask;
+		u64Mac|=u64Src;
+
+		p_OMACC.u32HH=u64Mac>>32;
+		p_OMACC.u32LH=u64Mac;
+	}
+}
+
+
+/******************************************************************
+	函数名：		AMACCF32
+
+	描述:			两个32位浮点数相乘，结果存在40位AMACC中。
+	                AMACCs=FRm*FRn
+
+	参数:			p_u32Src1 -- 源操作数Rm。
+					p_u32Src2 -- 源操作数Rn。
+					p_pAMACC -- 指向80位乘累加结果寄存器的指针。
+					p_pStatReg -- 指向标志寄存器输出缓存的指针，所指内存区域初始为0。
+					p_u32MULCR -- 乘法器控制寄存器，其中包含有无符号等控制信息。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	
+*******************************************************************/
+void AMACCF32(DSPU32 p_u32Src1, DSPU32 p_u32Src2, DSP_BIT40 *p_pAMACC, DSPU32 *p_pStatReg, DSPU32 p_u32MULCR)
+{
+	bool bolSatu = TestFlag(p_u32MULCR, Mul_Ctl_Saturation); 
+
+	DSPU64 u40result = 0 ;
+	CUSTOM_F32 su32src1, su32src2;
+	su32src1.u32Value = p_u32Src1;
+	su32src2.u32Value = p_u32Src2;
+
+	DSPI32 exp = 0 ;
+	DSPU64 u48 = 0 ;
+	DSPU32 u31 = 0 ;
+
+	Cfloat32 u32Src1(p_u32Src1);
+	Cfloat32 u32Src2(p_u32Src2);
+
+	if ( u32Src1.IsNAN()        //当任一输入数为非数时,或者当其中一个输入数为∞，另一个为0时 
+		|| u32Src2.IsNAN() 
+		|| (u32Src1.IsZero() && u32Src2.IsINF())
+		|| (u32Src2.IsZero() && u32Src1.IsINF()) )
+	{
+		SetFlag(*p_pStatReg, Mult_Invalid);
+		SetFlag(*p_pStatReg, Mult_MIS);
+		if(u32Src1.GetNega()==u32Src2.GetNega())
+		{
+			u40result = 0x7fffffffffull;
+		}
+		else
+		{
+			u40result = 0xffffffffffull;
+		}
+	}
+
+	else if( (u32Src1.IsDNORM() && u32Src2.IsINF())//当任一输入为非规格化数,另一为无穷大 
+		|| (u32Src2.IsDNORM() && u32Src1.IsINF()) )
+	{
+		SetFlag(*p_pStatReg, Mult_FOverFlow);
+		SetFlag(*p_pStatReg, Mult_MVS);
+	}
+	else if((u32Src1.IsNORM() && u32Src2.IsINF())//当任一输入数为∞且另一个为正常值时
+		|| (u32Src2.IsNORM() && u32Src1.IsINF())
+		|| (u32Src1.IsINF() && u32Src2.IsINF()))
+	{
+		SetFlag(*p_pStatReg, Mult_FOverFlow);
+		SetFlag(*p_pStatReg, Mult_MVS);
+	}
+	else if  ( (u32Src1.IsDNORM())||(u32Src2.IsDNORM())
+		|| (u32Src1.IsZero() || u32Src2.IsZero()) )     //当任一输入为非规格化数 
+	{
+		if( (u32Src1.IsNega() == u32Src2.IsNega()) )
+		{
+			u40result = 0;//正0
+		}
+		else
+		{
+			u40result = 0x8000000000ull;//负0
+		}
+
+		if((!u32Src1.IsZero())&&(!u32Src2.IsZero()))
+		{
+			SetFlag(*p_pStatReg, Mult_UnderFlow);
+			SetFlag(*p_pStatReg, Mult_MUS);
+		}
+	}
+	else
+	{
+		exp = su32src1.split_f32.u8Exp + su32src2.split_f32.u8Exp - 127 ;
+		//尾数相乘得到48位结果     尾数|0x800000表示1.xxxx 
+		u48 = ((DSPU64)((DSPU64)(su32src1.split_f32.u23Frac | 0x800000) * (DSPU64)(su32src2.split_f32.u23Frac | 0x800000)))<<16 ;
+		//48位结果在64位数的最高48位。
+
+		if(u48 & u64MSBMask)
+		{
+			u48 = u48<<1 ;
+			exp = exp + 1 ;
+
+			u31 = (DSPU32)(u48 >> 33);
+		}
+		else
+		{
+			u48 = u48 << 2;
+			u31 = (DSPU32)(u48 >> 33);
+		}
+
+		if(exp<=0)   //表示指数小于等于0 
+		{
+			SetFlag(*p_pStatReg, Mult_UnderFlow);
+			SetFlag(*p_pStatReg, Mult_MUS);
+		}
+		else if ( exp > 254 )
+		{
+			SetFlag(*p_pStatReg, Mult_FOverFlow);
+			SetFlag(*p_pStatReg, Mult_MVS);
+		}
+		else//指数在正常范围内，表示未溢出
+		{
+			if(u32Src1.IsNega()==u32Src2.IsNega())        //置结果的符号位 
+			{
+				u40result = (((DSPI64)exp)<<31) | u31;
+			}
+			else
+			{
+				u40result = 0x8000000000ull| (((DSPI64)exp)<<31) | u31 ;
+			}
+		}
+	}
+
+
+	if( TestFlag(*p_pStatReg, Mult_FOverFlow) )
+	{
+		if(bolSatu)
+		{
+			if( u32Src1.IsNega() == u32Src2.IsNega() ) 
+			{
+				u40result = 0x7f7fffffffull;//浮点数能够表示的最大正数
+			}
+			else
+			{
+				u40result = 0xff7fffffffull;//浮点数能够表示的最小负数
+			}
+		}
+		else
+		{
+			if( u32Src1.IsNega() == u32Src2.IsNega() ) 
+			{
+				u40result = 0x7f80000000ull;//正无穷的浮点数表示
+			}
+			else
+			{
+				u40result = 0xff80000000ull;//负无穷的浮点数表示
+			}
+		}
+	}
+
+	if( TestFlag(*p_pStatReg, Mult_UnderFlow) )
+	{
+		if( u32Src1.IsNega() == u32Src2.IsNega() ) 
+		{
+			u40result = 0x0ull;
+		}
+		else
+		{
+			u40result = 0x8000000000ull;
+		}
+	}
+
+	p_pAMACC->u8High=u40result>>32;
+	p_pAMACC->u32Low=u40result;
+}

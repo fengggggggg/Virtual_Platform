@@ -1,0 +1,631 @@
+
+#include "sc_iss.h"
+
+#ifdef ICMA_TESTING
+
+//----------------------------------------------------
+// ICMA响应结构体清零
+void sc_iss::reset_icma_resp()
+{
+	memset(&m_icma_resp, 0, sizeof(m_icma_resp));
+}
+//-----------------------------------------------------
+// ICMA请求结构体清零
+void sc_iss::reset_icma_req()
+{
+	memset(&m_icma_req, 0, sizeof(ICMA_REQ_T));
+}
+
+//-----------------------------------------------------
+// ICMA延迟服务：DC2->DC3->SrvICMA_DC4
+void sc_iss::icma_resp_delay_countdown()
+{
+/*
+	if(!m_icma_resp[0].bolInUse || !m_icma_resp[1].bolInUse)
+	{
+		if(m_icma_resp[1].bolInUse)
+		{
+			memcpy(&m_icma_resp[0], &m_icma_resp[1], sizeof(ICMA_RESP_T));
+			m_icma_resp[1].bolInUse = false;
+		}
+		if(m_icma_resp[2].bolInUse)
+		{
+			memcpy(&m_icma_resp[1], &m_icma_resp[2], sizeof(ICMA_RESP_T));			
+			m_icma_resp[2].bolInUse = false;
+		}
+	}
+	*/
+	if(m_icma_resp.u32DelaySrv > 0)
+	{
+		m_icma_resp.u32DelaySrv--;
+	}
+
+	m_icma_req.bolro_Served = m_icma_req.bolri_Served;
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------
+// 产生ICMA相关的stall信号
+void sc_iss::GenICMAStall()
+{
+	if ( m_icma_req.bolInUse && (!m_icma_req.bolInServe) )
+	{
+		m_AC_bolICMAStall_ACEX = true;
+	}
+	
+	else if (m_icma_req.bolInServe && (!m_icma_req.bolro_Served))
+	{
+		m_AC_bolICMAStall_ACEX = true;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------
+void sc_iss::PutICMAReq_AC()
+{
+	DSPU32 u32SLKIdx, u32AddrMask, u32AddrType, u32BlkIdx, u32SrcPageIdx;
+	DSPU32 *pSlotRes = PIPE_EX.DC4_AC.m_right.u32r_slot_res;
+	SLOT_RES_USED *pSlotResUsed;
+	DSPU32 rdBusID = RD_BUS0;
+	DSPU32 wrBusID = WR_BUS0;
+	RD_BUS_T *pRdBus;
+	WR_BUS_T *pWrBus;
+
+	ICMA_MEM *pIcmaMem = &(m_icma_req.icma_mem);
+	pIcmaMem->bolAllWrReq = true;
+	
+	for (int intSlot = 0; intSlot < PIPE_EX.DC4_AC.m_right.u32r_SlotNum; intSlot++)
+	{
+		u32SLKIdx = pSlotRes[intSlot];
+		pSlotResUsed = &(m_arrResSLK[u32SLKIdx].slot_res_used);
+		u32AddrType = pSlotResUsed->u32AddrType;
+		
+		if( !CondPermitted(u32SLKIdx) || !pSlotResUsed->bolMemAcs || 
+			!IS_ICMA_REQ(u32AddrType) || TYPE_FAULT_CODE(u32AddrType) != 0)
+		{
+			continue;
+		}
+
+		u32AddrMask = pSlotResUsed->u32AddrMask;
+		u32BlkIdx	= TYPE_BLK_IDX(u32AddrType);
+
+		u32SrcPageIdx = pSlotResUsed->u32SrcPageIdx;
+		if( pSlotResUsed->bolAtom )
+		{
+			pIcmaMem->bolAllWrReq = false;
+			pIcmaMem->bolAtom = true;
+			pRdBus = &(m_icma_req.icma_mem.icma_rbus[rdBusID]);
+			pWrBus = &(m_icma_req.icma_mem.icma_wbus[wrBusID]);
+		
+			pRdBus->u32Block = u32BlkIdx;
+			pRdBus->bolAtom = true;
+			pRdBus->bolInUse = true;
+
+			pWrBus->u32Block = u32BlkIdx;
+			pWrBus->bolIsSpecWr = false;
+			pWrBus->bolAtom = true;
+			pWrBus->u32PageIdx = u32SrcPageIdx;
+			pWrBus->bolInUse = true;
+
+			for(int k = 0; k < NUM_OF_UNITS; k++)
+			{
+				if(GIsBitSet(pSlotResUsed->u32AtomUnit, k))
+				{
+					fill_rd_bus(pRdBus, pSlotResUsed->u32AtomAddr);
+					fill_wr_bus(pWrBus, pSlotResUsed->u32AtomAddr, 0, k, pSlotResUsed->u32AtomSrcIdx);
+					pIcmaMem->u32ElemNum = 2;
+					break;
+				}
+			}
+			return;
+		}
+
+		if ( pSlotResUsed->bolRead )
+		{	
+			pIcmaMem->bolAllWrReq = false;
+			pRdBus = &(m_icma_req.icma_mem.icma_rbus[rdBusID]);
+		
+			pRdBus->u32Block = u32BlkIdx;
+			pRdBus->bolAtom = false;
+			pRdBus->bolInUse = true;
+
+			for (int k = 0; k < NUM_OF_UNITS; k++)
+			{
+				if ( GIsBitSet(u32AddrMask, k * 2) ) // 同GIsBitSet(u32Units, j)
+				{          
+					fill_rd_bus(pRdBus, pSlotResUsed->arrAddrs[k][0]);
+					if ( GIsBitSet(u32AddrMask, k * 2 + 1) ) // 是否为双字访存请求
+					{		
+						fill_rd_bus(pRdBus, pSlotResUsed->arrAddrs[k][1]);
+					}
+				}
+			}
+			pIcmaMem->u32ElemNum += pRdBus->u32ElemNum;
+			rdBusID++;
+		}
+		else
+		{
+			pWrBus = &(m_icma_req.icma_mem.icma_wbus[wrBusID]);
+			
+			pWrBus->u32Block = u32BlkIdx;
+			pWrBus->bolIsSpecWr = pSlotResUsed->bolSpecWr;
+			pWrBus->bolAtom = false;
+			pWrBus->u32PageIdx = u32SrcPageIdx;
+			pWrBus->bolInUse = true;
+
+			for (int k = 0; k < NUM_OF_UNITS; k++)
+			{
+				if ( GIsBitSet(u32AddrMask, k * 2) ) // 同GIsBitSet(u32Units, j)
+				{
+					fill_wr_bus(pWrBus, pSlotResUsed->arrAddrs[k][0], pSlotResUsed->arrValues[k][0], k, pSlotResUsed->arrMemSrcReg[k]);
+					if ( GIsBitSet(u32AddrMask, k * 2 + 1) ) // 是否为双字访存请求
+					{
+						fill_wr_bus(pWrBus, pSlotResUsed->arrAddrs[k][1], pSlotResUsed->arrValues[k][1], k, pSlotResUsed->arrMemSrcReg[k] + 1);
+					}
+				}
+			}
+			pIcmaMem->u32ElemNum += pWrBus->u32ElemNum;
+			wrBusID++;
+		}
+			
+	}
+}
+//-----------------------------------------------------------------------------------------------
+// AC级取得源操作数，并发出ICMA请求send_req_icma
+void sc_iss::SrvICMAReq_AC()
+{
+	DSPU32 u32ElemIdx, u32Macro, u32SrcRegIdx, u32PageIdx, u32SrcValue;
+	bool bolAllWrReq = true;
+	WR_BUS_T *pWrBus;
+	WR_BUS_BANK *pWrBank;
+
+	if((!m_AC_bolHazardStall_ACEX) && m_icma_req.bolInUse && (!m_icma_req.bolInServe))
+	{
+		if(m_bolAbandon_AC)
+		{
+			m_icma_req.bolInServe = true;
+			m_icma_req.bolri_Served = true;
+			return ;
+		}
+		for(DSPU32 u32Bus = WR_BUS0; u32Bus < WR_BUS_MAX; u32Bus++)
+		{
+			pWrBus = &(m_icma_req.icma_mem.icma_wbus[u32Bus]);
+			if ( pWrBus->bolInUse && !pWrBus->bolIsSpecWr )
+			{
+				u32PageIdx = pWrBus->u32PageIdx;
+				for(DSPU32 u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+				{
+					pWrBank = &(pWrBus->arrBanks[u32Bank]);
+					u32ElemIdx = pWrBank->u32ElemNum;
+					while(u32ElemIdx)
+					{
+						u32ElemIdx--;
+						u32Macro = pWrBank->arrElems[u32ElemIdx].u32RegUnit;
+						u32SrcRegIdx = pWrBank->arrElems[u32ElemIdx].u32RegIdx;
+						u32SrcValue = ReadGPR_Page(u32Macro, u32SrcRegIdx, u32PageIdx);
+						pWrBank->arrElems[u32ElemIdx].u32Value = u32SrcValue;
+					}
+				}
+			}
+		}
+		// send the message
+		if ( send_req_icma(&m_icma_req.icma_mem) )
+		{
+			m_icma_req.bolInServe = true;
+		}	
+	
+	}
+}
+
+//-----------------------------------------
+bool sc_iss::send_req_icma(ICMA_MEM *p_icma_mem)
+{
+	tlm::tlm_generic_payload trans;
+	tlm::tlm_phase phase;
+	sc_time delay;
+	ICMA_MEM icma_mem;
+	bool bolOK = true;
+
+	memcpy(&icma_mem, p_icma_mem, sizeof(ICMA_MEM));
+
+	trans.set_address(CMD_ICMA_REQ);
+	trans.set_data_ptr( (unsigned char *)(&icma_mem) );
+	trans.set_data_length(sizeof(ICMA_MEM));
+	phase = tlm::BEGIN_REQ;
+		
+	m_iICMASocket->nb_transport_fw(trans, phase, delay);
+
+	if (trans.get_response_status() != tlm::TLM_OK_RESPONSE)
+	{
+		PrintToCerr("%s: nb_transport_fw failed", __FUNCTION__);
+		bolOK = false;
+	}
+
+	return bolOK;
+}
+//-------------------------------------------------------------------
+bool sc_iss::PermitICMA()
+{
+	DSPU32 u32MPSLKIdx_AC, u32MPSLKIdx_EX, u32MPSLKIdx_WB, u32BlkMask, u32Bus;
+	bool bolAtom;
+	RD_BUS_T *pRdBus;
+	WR_BUS_T *pWrBus;
+	ICMA_MEM *pICMAMem = &(m_icma_resp.icma_mem);
+
+	if ( !ICMA_ARRIVED())
+	{
+		// 以下情况不需提供服务
+		// 1. m_icma_resp中数据无效
+		// 2. m_icma_resp中的访存请求已经被服务
+		// 3. 未延时两拍
+		return false;
+	}
+	if ( ICMA_RD_DONE() && ICMA_WR_DONE() )
+	{
+		return false;
+	}
+
+	u32BlkMask = 0;
+	bolAtom = m_icma_resp.icma_mem.bolAtom;
+	//----------------------------------------------
+	// 本核原子访存会在DC4~WB阻塞来自核外的访存请求
+	// 本核普通访存会在DC4~WB阻塞来自核外的原子访存
+	u32MPSLKIdx_AC = PIPE_EX.DC4_AC.m_right.u32_MPSLKIdx;
+	if (u32MPSLKIdx_AC != 0)
+	{
+		for (int i = 0; i < m_arrMemPipeSLK[u32MPSLKIdx_AC].u32WrElemNum; i++)
+		{
+			if (bolAtom || m_arrMemPipeSLK[u32MPSLKIdx_AC].arrAtom[i])
+			{
+				CloseOutPort(m_arrMemPipeSLK[u32MPSLKIdx_AC].arrBlkIdx[i]);
+			}
+		}
+	}
+
+	u32MPSLKIdx_EX = PIPE_EX.AC_EX.m_right.u32_MPSLKIdx;
+	if (u32MPSLKIdx_EX != 0) 
+	{
+		for (int i = 0; i < m_arrMemPipeSLK[u32MPSLKIdx_EX].u32WrElemNum; i++)
+		{
+			if (bolAtom || m_arrMemPipeSLK[u32MPSLKIdx_EX].arrAtom[i])
+			{
+				CloseOutPort(m_arrMemPipeSLK[u32MPSLKIdx_EX].arrBlkIdx[i]);
+			}
+		}
+	}
+	
+	u32Bus = RD_BUS0;
+	while(u32Bus < RD_BUS_MAX)
+	{
+		pRdBus = &(pICMAMem->icma_rbus[u32Bus]);
+		if ( pRdBus->bolInUse && !IsOutPortValid(pRdBus->u32Block) )
+		{
+			return false;
+		}
+		u32Bus++;
+	}
+	u32Bus = WR_BUS0;
+	while(u32Bus < WR_BUS_MAX)
+	{
+		pWrBus = &(pICMAMem->icma_wbus[u32Bus]);
+		if ( pWrBus->bolInUse && !IsOutPortValid(pWrBus->u32Block) )
+		{
+			return false;
+		}
+		u32Bus++;
+	}
+
+	return true;
+}
+//-------------------------------------------------------------------
+void sc_iss::RespICMA()
+{
+	bool bolAllWrReq = m_icma_resp.icma_mem.bolAllWrReq;
+
+	// 只要完成ICMA，就可以直接设置完成标识
+	if ( ICMA_RD_DONE() && ICMA_WR_DONE() )
+	{
+		bolri_AtomO = false;
+	}
+	if ( ICMA_RD_DONE() )
+	{
+		if ( m_icma_resp.u32DelayResp != 0 )
+		{
+			m_icma_resp.u32DelayResp--;
+		}
+
+		else	if ( ICMA_WR_DONE() )
+		{
+			if(bolAllWrReq)	send_resp_icma();
+			else				send_resp_icma(&m_icma_resp.icma_rd_result);
+			memset(&m_icma_resp, 0, sizeof(m_icma_resp));
+			m_icma_resp.bolServed = true;			
+		}
+	}
+}
+//-------------------------------------------------------------------
+void sc_iss::SrvICMA_DC4()
+{
+	DSPU32 u32Block;
+	RD_BUS_T *pRdBus;
+	WR_BUS_T *pWrBus;
+
+	if ( m_icma_resp.icma_mem.bolAtom )
+	{
+		bolri_AtomO = true;
+	}
+
+	for(DSPU32 u32Bus = RD_BUS0; u32Bus < RD_BUS_MAX; u32Bus++)
+	{
+		pRdBus = &(m_icma_resp.icma_mem.icma_rbus[u32Bus]);
+		if(pRdBus->bolInUse)
+		{
+			u32Block = pRdBus->u32Block;
+			if(IsOutPortValid(u32Block))
+			{
+				SrvICMA_RdBus(pRdBus);
+				CloseOutPort(u32Block);
+			}
+		}
+	}
+	for(DSPU32 u32Bus = WR_BUS0; u32Bus < WR_BUS_MAX; u32Bus++)
+	{
+		pWrBus = &(m_icma_resp.icma_mem.icma_wbus[u32Bus]);
+		if(pWrBus->bolInUse)
+		{
+			u32Block = pWrBus->u32Block;
+			if(IsOutPortValid(u32Block))
+			{
+				SrvICMA_WrBus(pWrBus);
+				CloseOutPort(u32Block);
+			}
+		}
+	}
+
+}
+//-------------------------------------------------------
+void sc_iss::SrvICMA_RdBus(RD_BUS_T *p_RdBus)
+{
+	DSPU32 u32ElemNum, u32MemAddr, u32Value, u32Idx;
+	RD_BUS_ELEM *pRdBusElem;
+
+	DSPU32 &u32RdIdx = m_icma_resp.icma_rd_result.u32ElemNum;
+	
+	for(DSPU32 u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+	{
+		u32ElemNum = p_RdBus->arrBanks[u32Bank].u32ElemNum;
+		if(u32ElemNum != 0)
+		{
+			for(int i = 0; i < 8; i++)
+			{
+				if(p_RdBus->arrBanks[u32Bank].arrElems[i].bolInUse)
+				{
+					u32MemAddr = p_RdBus->arrBanks[u32Bank].arrElems[i].u32MemAddr;
+					u32Idx = i;
+					break;
+				}
+			}
+			/*
+			u32MinAddr = ~0U;
+			u32Idx = BANK_DEPTH;
+			pRdBusElem = &(p_RdBus->arrBanks[u32Bank].arrElems[0]);
+			for(int i = 0; i < BANK_DEPTH; i++)
+			{								
+				if( (pRdBusElem->bolInUse) && (pRdBusElem->u32MemAddr < u32MinAddr) )
+				{
+					u32MinAddr = pRdBusElem->u32MemAddr;
+					u32Idx = i;
+				}
+				pRdBusElem++;
+			}
+			ISS_ASSERT(u32Idx < BANK_DEPTH);
+			*/
+			
+			ReadCoreDataMem(u32MemAddr, &u32Value);
+			
+			m_icma_resp.icma_rd_result.u32RdAddr[u32RdIdx] = u32MemAddr;
+			m_icma_resp.icma_rd_result.u32RdValue[u32RdIdx] = u32Value;
+			u32RdIdx++;
+			
+			p_RdBus->arrBanks[u32Bank].arrElems[u32Idx].bolInUse = false;
+			p_RdBus->arrBanks[u32Bank].u32ElemNum--;
+			p_RdBus->u32ElemNum--;
+			
+			m_icma_resp.icma_mem.u32ElemNum--;
+
+			if(p_RdBus->u32ElemNum == 0)
+			{
+				p_RdBus->bolInUse = false;
+				break;
+			}
+		}
+	}	
+}
+
+void sc_iss::SrvICMA_WrBus(WR_BUS_T *p_WrBus)
+{
+	DSPU32 u32ElemNum, u32MemAddr, u32Value, u32Idx;
+	WR_BUS_ELEM *pRdBusElem;
+	
+	for(DSPU32 u32Bank = 0; u32Bank < BANK_NUM_PERBLK; u32Bank++)
+	{
+		u32ElemNum = p_WrBus->arrBanks[u32Bank].u32ElemNum;
+		if(u32ElemNum != 0)
+		{
+			for(int i = 0; i < 8; i++)
+			{
+				if(p_WrBus->arrBanks[u32Bank].arrElems[i].bolInUse)
+				{
+					u32MemAddr = p_WrBus->arrBanks[u32Bank].arrElems[i].u32MemAddr;
+					u32Idx = i;
+					break;
+				}
+			}
+			/*
+			u32MinAddr = ~0U;
+			u32Idx = BANK_DEPTH;
+			pRdBusElem = &(p_WrBus->arrBanks[u32Bank].arrElems[0]);
+			for(int i = 0; i < BANK_DEPTH; i++)
+			{								
+				if( pRdBusElem->bolInUse && pRdBusElem->u32MemAddr < u32MinAddr)
+				{
+					u32MinAddr = pRdBusElem->u32MemAddr;
+					u32Idx = i;
+				}
+				pRdBusElem++;
+			}
+			ISS_ASSERT(u32Idx < BANK_DEPTH);
+			*/
+			
+			u32Value = p_WrBus->arrBanks[u32Bank].arrElems[u32Idx].u32Value;			
+			WriteCoreDataMem(u32MemAddr, u32Value);
+			
+			p_WrBus->arrBanks[u32Bank].arrElems[u32Idx].bolInUse = false;
+			p_WrBus->arrBanks[u32Bank].u32ElemNum--;
+			p_WrBus->u32ElemNum--;
+
+			m_icma_resp.icma_mem.u32ElemNum--;
+			
+			if(p_WrBus->u32ElemNum == 0)
+			{
+				p_WrBus->bolInUse = false;
+				break;
+			}
+		}
+	}	
+}
+//-----------------------------------------
+bool sc_iss::send_resp_icma()
+{
+	tlm::tlm_generic_payload trans;
+	tlm::tlm_phase phase;
+	sc_time delay;
+	bool bolOK = true;
+
+	trans.set_address(CMD_ICMA_WR_RESP); 
+	trans.set_data_ptr( NULL );
+	trans.set_data_length(0);
+	phase = tlm::BEGIN_RESP;
+	
+	m_tICMASocket->nb_transport_bw(trans, phase, delay);
+
+	if (trans.get_response_status() != tlm::TLM_OK_RESPONSE)
+	{
+		PrintToCerr("%s: nb_transport_bw failed", __FUNCTION__);
+		bolOK = false;
+	}		
+
+	return bolOK;
+}
+//-----------------------------------------
+bool sc_iss::send_resp_icma(ICMA_RD_RESULT *p_icma_rd_result)
+{
+	tlm::tlm_generic_payload trans;
+	tlm::tlm_phase phase;
+	sc_time delay;
+	ICMA_RD_RESULT icma_rd_result;
+	bool bolOK = true;
+
+	memcpy(&icma_rd_result, p_icma_rd_result, sizeof(ICMA_RD_RESULT));
+
+	trans.set_address(CMD_ICMA_RD_RESP); 
+	trans.set_data_ptr( (unsigned char *)(&icma_rd_result) );
+	trans.set_data_length(sizeof(ICMA_RD_RESULT));
+	phase = tlm::BEGIN_RESP;
+		
+	m_tICMASocket->nb_transport_bw(trans, phase, delay);
+
+	if (trans.get_response_status() != tlm::TLM_OK_RESPONSE)
+	{
+		PrintToCerr("%s: nb_transport_bw failed", __FUNCTION__);
+		bolOK = false;
+	}		
+
+	return bolOK;
+}
+
+
+//------------------------------------------------------
+// 服务于: 内核以指令方式读/写核外存储空间(点到点直接发送请求)
+// 核外发送过来访存请求(send_resp_icma)，调用该接口
+//
+tlm::tlm_sync_enum sc_iss::nb_transport_bw_icma(tlm::tlm_generic_payload &trans, tlm::tlm_phase &phase, sc_time &delay)
+{
+	DSPU32 u32CMD = trans.get_address();
+	if ( (phase == tlm::BEGIN_RESP) && (u32CMD == CMD_ICMA_RD_RESP || u32CMD == CMD_ICMA_WR_RESP) )
+	{
+		//如果本核没有提交核外访存请求或者提交的访存请求已经被服务完毕
+		if ( !m_icma_req.bolInUse || m_icma_req.bolro_Served ) 
+		{
+			trans.set_response_status(tlm::TLM_GENERIC_ERROR_RESPONSE);
+			phase = tlm::END_RESP;
+			return tlm::TLM_COMPLETED;
+		}
+		if (u32CMD == CMD_ICMA_RD_RESP)
+		{			
+			memcpy(&(m_icma_req.icma_rd_result), trans.get_data_ptr(), sizeof(ICMA_RD_RESULT));
+		}
+		m_icma_req.bolri_Served = true; 
+		trans.set_response_status(tlm::TLM_OK_RESPONSE);
+		phase = tlm::END_RESP;
+		return tlm::TLM_COMPLETED;
+	}
+	else
+	{
+		PrintToCerr("%s: invalid command", __FUNCTION__);
+	}
+
+	return tlm::TLM_ACCEPTED;
+}
+//------------------------------------------------------
+// 本核响应来自核外的访存请求(send_req_icma)
+//
+tlm::tlm_sync_enum sc_iss::nb_transport_fw_icma(tlm::tlm_generic_payload &trans, tlm::tlm_phase &phase, sc_time &delay)
+{
+	DSPU32 u32CMD = trans.get_address();
+	
+	if((u32CMD == CMD_ICMA_REQ) && (phase == tlm::BEGIN_REQ))
+	{
+		// 目的核正在服务其它核外请求
+		if( m_icma_resp.bolInUse && !m_icma_resp.bolServed )
+		{
+			trans.set_response_status(tlm::TLM_COMMAND_ERROR_RESPONSE);
+			phase = tlm::END_REQ;
+			return tlm::TLM_UPDATED;
+		}
+		
+		DSPU32 u32Addr, u32Block, u32Bank, u32PAddr;
+		DSPU32 u32ElemNum;
+		ICMA_MEM *pICMAMem = &(m_icma_resp.icma_mem);
+
+		memset(&m_icma_resp, 0, sizeof(ICMA_RESP_T));
+		memcpy(pICMAMem, trans.get_data_ptr(), sizeof(ICMA_MEM));		
+		// 目的核接受这次访存请求
+		m_icma_resp.bolInUse = true;
+		m_icma_resp.u32DelaySrv = 2;
+		if(pICMAMem->bolAllWrReq)
+		{
+			m_icma_resp.u32DelayResp = 0;
+		}
+		else
+		{
+			m_icma_resp.u32DelayResp = 3;			
+		}
+		
+		trans.set_response_status(tlm::TLM_OK_RESPONSE);
+		phase = tlm::END_REQ;
+		return tlm::TLM_UPDATED;
+	}
+	else if(u32CMD == CMD_SWI_REQ)
+	{
+		trans.set_response_status(tlm::TLM_OK_RESPONSE);
+		phase = tlm::END_REQ;
+		SetILAT(0x26);
+		return tlm::TLM_UPDATED;
+	}
+	else
+	{
+		PrintToCerr("%s: invalid command", __FUNCTION__);
+	}
+	
+	return tlm::TLM_ACCEPTED;
+}
+#endif

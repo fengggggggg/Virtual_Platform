@@ -1,0 +1,2058 @@
+/******************************************************************************
+Copyright (C), CETE38
+文件名  :    jtag.cpp
+作者    :    林广栋
+版本    :    v0.0.1       
+完成日期:    2013-03-30
+描述    :    实现JTAG通信控制
+其它    :          
+历史记录:       
+1. 
+修改日期:2013-3-30
+作者    :林广栋
+修改内容:1.整理代码，使代码更容易理解。
+		 2.规范了数据通信的流程，使其更方便调试。
+		 3.整理了对内核进行控制的过程，使控制过程更安全。
+******************************************************************************/
+#include "../dsp_top.h"
+#include "JtagError.h"
+#include "PackCommandID.h"
+#include <vector>
+#include "jtag.h"
+#ifdef DSP_WIN32
+#include <windows.h>
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <errno.h>
+#endif
+
+#include "CommProtocol.h"
+using namespace std;
+static sc_iss* p_iss[ISS_NUM_DEF];
+static pmem *pm;
+
+const unsigned int SIM_DEFAULT_PORT = 5688;
+const string  SIM_DEFAULT_IP = "127.0.0.1";
+
+boost::mutex jtagMutex;
+boost::mutex ntfyMutex;
+
+bool bCommSetup=false;
+CommProtocol jtagComm;
+
+unsigned int jtagPort=SIM_DEFAULT_PORT;
+string jtagIPAdr=SIM_DEFAULT_IP;
+static dsp_top * pJtagTop=NULL;
+static share_sram *pram=NULL;
+static SystemConfigReg *psysreg=NULL;
+static ddr *ddr0=NULL;
+static ddr *ddr1=NULL;
+static DDR_MODULE *ddrmodule=NULL;
+queue<ntfyMsg> ntfyMsgQ;
+
+boost::thread * timerThread=NULL;
+unsigned int timeTick=0;
+bool bTerminateSelf=false;
+bool bCodeCoverTest = false;
+string CodeCoverDir;
+string ABICheckDir;
+boost::mutex timerMutex;
+static unsigned int abi_check_main_addr;
+static unsigned int abi_check_exit_addr;
+#ifdef DSP_WIN32
+/******************************************************************************
+*函数名称:				timerCheckTarget
+*修改者                修改时间                		说明
+*林广栋                2016年9月5日         		新建函数
+******************************************************************************/
+void timerCheckTarget()
+{
+	HANDLE hTimer = NULL;
+	LARGE_INTEGER liDueTime;
+
+	liDueTime.QuadPart=-10;
+
+	// Create a waitable timer.
+	hTimer = CreateWaitableTimer(NULL, FALSE, NULL);
+	if (NULL == hTimer)
+	{
+		return;
+	}
+
+	// Set a timer to wait for 10 seconds.
+	if (!SetWaitableTimer(hTimer, &liDueTime, 1000, NULL, NULL, 0))
+	{
+		return;
+	}
+	// Wait for the timer.
+
+	while (bCommSetup)
+	{
+		if (WaitForSingleObject(hTimer, INFINITE) != WAIT_OBJECT_0)
+		{
+			return;
+		}
+		else 
+		{
+			timeTick++;
+			if (timeTick>10)
+			{
+				if (bTerminateSelf)
+				{
+					JTAGLog(0,"timer connect pack not received, exit\n",0);
+					CancelWaitableTimer(hTimer);
+					CloseHandle(hTimer);
+					exit(0);
+				}
+				else
+				{
+					bCommSetup=false;
+				}
+				
+			}
+		}
+	}
+	CancelWaitableTimer(hTimer);
+	CloseHandle(hTimer);
+
+	{
+		boost::mutex::scoped_lock lk(timerMutex);
+		if (timerThread)
+		{
+			delete timerThread;
+			timerThread=NULL;
+		}
+	}
+}
+#endif
+/******************************************************************************
+*函数名称:				AnswerConnectRequest
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerConnectRequest(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	//执行结果：result
+	respDataText.push_back(JTAG_SUCCESS);
+
+	//DCS类型：DCS type
+	respDataText.push_back(Ethernet_TCP);
+
+	//调试器版本号
+	respDataText.push_back(0x00);//30日
+	respDataText.push_back(0x00);//3月
+	respDataText.push_back(0x00);//2013年
+	respDataText.push_back(0x00);//第0版
+
+#ifdef DSP_WIN32
+	if (bTerminateSelf)
+	{
+		timeTick=0;
+		{
+			boost::mutex::scoped_lock lk(timerMutex);
+			if (timerThread==NULL)
+			{
+				timerThread=new boost::thread(timerCheckTarget);
+			}
+		}
+	}
+	
+#endif
+}
+
+/******************************************************************************
+*函数名称:				AnswerDisconnect
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerDisconnect(DataPack rqtDataPack, vector<char> &respDataText)
+{
+#ifdef LIBTESTCODE
+
+	JTAGLog(0,"code cover dir %s\n",CodeCoverDir.c_str());
+	if (bCodeCoverTest)
+	{
+		p_iss[0]->PrintCodeCoverage((char *)CodeCoverDir.c_str());
+		p_iss[1]->PrintCodeCoverage((char *)CodeCoverDir.c_str());
+	}
+#endif
+	respDataText.push_back(JTAG_SUCCESS);
+
+	/*{
+		boost::mutex::scoped_lock lk(jtagMutex);
+		for(int i=0;i<ISS_NUM_DEF;i++)
+		{
+			p_iss[i]->bDSPEnable=false;
+			p_iss[i]->bRunFirstCycle=false;
+			p_iss[i]->bDSPRunning=false;
+			p_iss[i]->bStepInst=false;
+			p_iss[i]->InstCnt=0;
+			p_iss[i]->InstPassed=0;
+			p_iss[i]->bStepCycle=false;
+			p_iss[i]->CycleCnt=0;
+			p_iss[i]->CyclePassed=0;
+			p_iss[i]->StopReason=0;
+			p_iss[i]->cycleStopRsn=0;
+		}
+	}*/
+	//发出信号，使主动上报线程结束
+	
+	bCommSetup=false;
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerTargetCheck
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerTargetCheck(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	respDataText.push_back(JTAG_SUCCESS);
+
+	NetworkShort tt;
+	tt.st=BWDSP1042;
+
+	//处理器类型
+	respDataText.push_back(tt.Buf[0]);
+	respDataText.push_back(tt.Buf[1]);
+
+	//处理器数量
+	respDataText.push_back(1);
+
+	//处理器标识
+	respDataText.push_back(0);
+	respDataText.push_back(0);
+}
+
+/******************************************************************************
+*函数名称:				AnswerLinkTest
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerLinkTest(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	timeTick=0;
+	respDataText.push_back(JTAG_SUCCESS);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerTargetSelect
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerTargetSelect(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned short dspN=rqtDataPack.textPart->reqsPack.reqsPara[0];
+	vector<unsigned short> dspID;
+	for(int i=0;i<dspN;i++)
+	{
+		unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[2+i];
+		dspID.push_back(id);
+	}
+
+	//目前，只有一个处理器，所以不管请求包是什么，都返回该处理器的信息。
+	respDataText.push_back(JTAG_SUCCESS);//result:成功
+	respDataText.push_back(1);//共一个处理器
+	respDataText.push_back(ISS_NUM_DEF);//共ISS_NUM_DEF个核
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		respDataText.push_back(p_iss[i]->GetID());
+		if(p_iss[i]->bDSPRunning)
+		{
+			JTAGLog(0,"core %d is running in target select command\n",i);
+			respDataText.push_back(RUNNING_STATE);
+			for(int j=0;j<12;j++)
+			{
+				respDataText.push_back(0);
+			}
+		}
+		else
+		{
+			JTAGLog(0,"core %d is halt in target select command\n",i);
+			respDataText.push_back(STOP_STATE);
+
+			NetworkInt sr,pc,wp;
+			sr.i=p_iss[i]->StopReason;
+			pc.i=p_iss[i]->GetPC();
+			wp.i=p_iss[i]->GetWPTriggerReg();
+			respDataText.push_back(sr.Buf[0]);
+			respDataText.push_back(sr.Buf[1]);
+			respDataText.push_back(sr.Buf[2]);
+			respDataText.push_back(sr.Buf[3]);
+			respDataText.push_back(pc.Buf[0]);
+			respDataText.push_back(pc.Buf[1]);
+			respDataText.push_back(pc.Buf[2]);
+			respDataText.push_back(pc.Buf[3]);
+			respDataText.push_back(wp.Buf[0]);
+			respDataText.push_back(wp.Buf[1]);
+			respDataText.push_back(wp.Buf[2]);
+			respDataText.push_back(wp.Buf[3]);
+		}
+	}
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerStepCycle
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerStepCycle(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+	NetworkInt si;
+	si.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	si.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+	si.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3];
+	si.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[4];
+	unsigned short cycle=si.i;
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+
+			JTAGLog(0,"I am going to set core %d bDSPEnable to true in step cycle, PC: 0x%x, step %d\n",p_iss[i]->GetID(),p_iss[i]->GetPC(),cycle);
+
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[i]->InstCnt=0;
+				p_iss[i]->InstPassed=0;
+				p_iss[i]->StepInstCycles=0;
+				p_iss[i]->bStepInst=false;
+				p_iss[i]->CycleCnt=cycle;
+				p_iss[i]->CyclePassed=0;
+				p_iss[i]->bStepCycle=true;
+				p_iss[i]->StopReason=0;
+				p_iss[i]->bDSPRunning=true;
+				p_iss[i]->bRunFirstCycle=true;
+				p_iss[i]->bDSPEnable=true;
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+/******************************************************************************
+*函数名称:				AnswerStepInst
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerStepInst(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+	NetworkInt ii;
+	ii.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	ii.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+	ii.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3];
+	ii.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[4];
+	unsigned short insts=ii.i;
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+
+			JTAGLog(0,"I am going to set core %d bDSPEnable to true in single core step inst, 0x%x\n",p_iss[i]->GetID(),p_iss[i]->GetPC());
+
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[i]->InstCnt=insts;
+				p_iss[i]->InstPassed=0;
+				p_iss[i]->StepInstCycles=0;
+				p_iss[i]->bStepInst=true;
+				p_iss[i]->CycleCnt=0;
+				p_iss[i]->CyclePassed=0;
+				p_iss[i]->bStepCycle=false;
+				p_iss[i]->StopReason=0;
+				p_iss[i]->bDSPRunning=true;
+				p_iss[i]->bRunFirstCycle=true;
+				p_iss[i]->bDSPEnable=true;
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+/******************************************************************************
+*函数名称:				AnswerRun
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerRun(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+
+			JTAGLog(0,"I am going to set core %d bDSPEnable to true in single core run, PC 0x%x\n",
+				p_iss[i]->GetID(),p_iss[i]->GetPC());
+
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[i]->InstCnt=0;
+				p_iss[i]->InstPassed=0;
+				p_iss[i]->StepInstCycles=0;
+				p_iss[i]->bStepInst=false;
+				p_iss[i]->CycleCnt=0;
+				p_iss[i]->CyclePassed=0;
+				p_iss[i]->bStepCycle=false;
+				p_iss[i]->StopReason=0;
+				p_iss[i]->bDSPRunning=true;
+				p_iss[i]->bRunFirstCycle=true;
+				p_iss[i]->bDSPEnable=true;
+
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+/******************************************************************************
+*函数名称:				AnswerPause
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerPause(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				ntfyMsg nt;
+				{
+					boost::mutex::scoped_lock lk(jtagMutex);
+
+					JTAGLog(0,"I am going to set bDSPEnable to false in single core pause, core %d, PC 0x%x\n",
+						p_iss[i]->GetID(),p_iss[i]->GetPC());
+
+					p_iss[i]->bDSPEnable=false;
+					p_iss[i]->bRunFirstCycle=false;
+					p_iss[i]->bDSPRunning=false;
+					p_iss[i]->bStepInst=false;
+					p_iss[i]->InstCnt=0;
+					p_iss[i]->InstPassed=0;
+					p_iss[i]->StepInstCycles=0;
+					p_iss[i]->bStepCycle=false;
+					p_iss[i]->CycleCnt=0;
+					p_iss[i]->CyclePassed=0;
+
+					nt.coreIdx=p_iss[i]->GetID();
+					nt.pc=p_iss[i]->GetPC();
+					nt.wp=p_iss[i]->GetWPTriggerReg();
+					nt.stopRsn=(1<<PAUSE_COMMAND);
+				}
+
+				{
+					boost::mutex::scoped_lock lk(ntfyMutex);
+					ntfyMsgQ.push(nt);
+				}
+			}
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerReset
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerReset(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+
+			p_iss[i]->Reset();
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerJtagReset
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerJtagReset(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	respDataText.push_back(JTAG_SUCCESS);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerMultRun
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerMultRun(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	NetworkInt ni;
+	bool bOneCoreFound=false;
+	for(int i=0;i<4;i++)
+	{
+		ni.Buf[i]=rqtDataPack.textPart->reqsPack.reqsPara[i];
+	}
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(ni.i,p_iss[i]->GetID()))
+		{
+			bOneCoreFound=true;
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(ONE_CORE_IS_RUNNING);
+				return;
+			}
+		}
+	}
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(ni.i,p_iss[i]->GetID()))
+		{
+			JTAGLog(0,"I am going to set core %d bDSPEnable to true in mult core run, 0x%x\n",p_iss[i]->GetID(),p_iss[i]->GetPC());
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[i]->InstCnt=0;
+				p_iss[i]->InstPassed=0;
+				p_iss[i]->StepInstCycles=0;
+				p_iss[i]->bStepInst=false;
+				p_iss[i]->CycleCnt=0;
+				p_iss[i]->CyclePassed=0;
+				p_iss[i]->bStepCycle=false;
+				p_iss[i]->StopReason=0;
+				p_iss[i]->bDSPRunning=true;
+				p_iss[i]->bRunFirstCycle=true;
+				p_iss[i]->bDSPEnable=true;
+			}
+		}
+	}
+
+	if(!bOneCoreFound)
+	{
+		respDataText.push_back(CORE_GROUP_NO_ONE_FOUND);
+	}
+	else
+	{
+		respDataText.push_back(JTAG_SUCCESS);
+	}
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerMultPause
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerMultPause(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	NetworkInt ni;
+	for(int i=0;i<4;i++)
+	{
+		ni.Buf[i]=rqtDataPack.textPart->reqsPack.reqsPara[i];
+	}
+
+	bool bOneCoreFound=false;
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(ni.i,p_iss[i]->GetID()))
+		{
+			bOneCoreFound=true;
+
+			if(p_iss[i]->bDSPRunning)
+			{
+				ntfyMsg nt;
+				{
+					boost::mutex::scoped_lock lk(jtagMutex);
+					JTAGLog(0,"I am going to set core %d bDSPEnable to false in mult core pause, PC 0x%x\n",
+						p_iss[i]->GetID(),p_iss[i]->GetPC());
+
+					p_iss[i]->bDSPEnable=false;
+					p_iss[i]->bRunFirstCycle=false;
+					p_iss[i]->bDSPRunning=false;
+					p_iss[i]->bStepInst=false;
+					p_iss[i]->InstCnt=0;
+					p_iss[i]->InstPassed=0;
+					p_iss[i]->StepInstCycles=0;
+					p_iss[i]->bStepCycle=false;
+					p_iss[i]->CycleCnt=0;
+					p_iss[i]->CyclePassed=0;
+
+					nt.coreIdx=p_iss[i]->GetID();
+					nt.pc=p_iss[i]->GetPC();
+					nt.wp=p_iss[i]->GetWPTriggerReg();
+					nt.stopRsn=(1<<PAUSE_COMMAND);
+				}
+				{
+					boost::mutex::scoped_lock lk(ntfyMutex);
+					ntfyMsgQ.push(nt);
+				}
+			}
+		}
+	}
+
+	if(!bOneCoreFound)
+	{
+		respDataText.push_back(CORE_GROUP_NO_ONE_FOUND);
+	}
+
+	respDataText.push_back(JTAG_SUCCESS);
+}
+
+/******************************************************************************
+*函数名称:				AnswerMultReset
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerMultReset(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	NetworkInt ni;
+	for(int i=0;i<4;i++)
+	{
+		ni.Buf[i]=rqtDataPack.textPart->reqsPack.reqsPara[i];
+	}
+
+	bool bOneCoreFound=false;
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(ni.i,p_iss[i]->GetID()))
+		{
+			bOneCoreFound=true;
+
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+		}
+	}
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(ni.i,p_iss[i]->GetID()))
+		{
+			p_iss[i]->Reset();
+		}
+	}
+
+	if(!bOneCoreFound)
+	{
+		respDataText.push_back(CORE_GROUP_NO_ONE_FOUND);
+	}
+	else
+	{
+		respDataText.push_back(JTAG_SUCCESS);
+	}
+}
+
+/******************************************************************************
+*函数名称:				AnswerMultStepCycle
+*修改者                修改时间                		说明
+*林广栋                2014年5月15日         	修改确认
+******************************************************************************/
+void AnswerMultStepCycle(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	NetworkInt ni;
+	for(int i=0;i<4;i++)
+	{
+		ni.Buf[i]=rqtDataPack.textPart->reqsPack.reqsPara[i];
+	}
+
+	unsigned int CoreGrp=ni.i;
+
+	for(int i=0;i<4;i++)
+	{
+		ni.Buf[i]=rqtDataPack.textPart->reqsPack.reqsPara[4+i];
+	}
+	unsigned int cycle=ni.i;
+
+	bool bOneCoreFound=false;
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(CoreGrp,p_iss[i]->GetID()))
+		{
+			bOneCoreFound=true;
+
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+		}
+	}
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(JtagTestBit(CoreGrp,p_iss[i]->GetID()))
+		{
+
+			JTAGLog(0,"I am going to set core %d bDSPEnable to true in mult step cycle, PC: 0x%x, step: %d\n",
+				p_iss[i]->GetID(),p_iss[i]->GetPC(),cycle);
+			{
+				boost::mutex::scoped_lock lk(jtagMutex);
+				p_iss[i]->InstCnt=0;
+				p_iss[i]->InstPassed=0;
+				p_iss[i]->StepInstCycles=0;
+				p_iss[i]->bStepInst=false;
+				p_iss[i]->CycleCnt=cycle;
+				p_iss[i]->CyclePassed=0;
+				p_iss[i]->bStepCycle=true;
+				p_iss[i]->StopReason=0;
+				p_iss[i]->bDSPRunning=true;
+				p_iss[i]->bRunFirstCycle=true;
+				p_iss[i]->bDSPEnable=true;
+			}
+		}
+	}
+
+	if(!bOneCoreFound)
+	{
+		respDataText.push_back(CORE_GROUP_NO_ONE_FOUND);
+	}
+	else
+	{
+		respDataText.push_back(JTAG_SUCCESS);
+	}
+}
+
+/******************************************************************************
+*函数名称:				AnswerMultJtagReset
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerMultJtagReset(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	respDataText.push_back(JTAG_SUCCESS);
+}
+
+/******************************************************************************
+*函数名称:				AnswerReadRegister
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerReadRegister(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	NetworkShort s;
+	s.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	s.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+
+	int n=s.st;
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			/*if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}*/
+
+			//读出寄存器
+			respDataText.push_back(JTAG_SUCCESS);
+			respDataText.push_back(s.Buf[0]);
+			respDataText.push_back(s.Buf[1]);
+			unsigned int re=0;
+			NetworkInt ni;
+			for(int j=0;j<n;j++)
+			{
+				ni.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*4];
+				ni.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*4+1];
+				ni.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*4+2];
+				ni.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*4+3];
+
+				unsigned int addr=ni.i;
+
+				if ((addr>=0x9010000)&&(addr<0xa400000))
+				{
+					if(!(psysreg->read_reg(addr,re)))
+					{
+						respDataText.clear();
+						respDataText.push_back(READ_REG_ERROR);
+						return;
+					}
+				}
+				else if((addr>=0xb000000)&&(addr<0xb200000))
+				{
+					if(!(pm->read_word(addr,re)))
+					{
+						respDataText.clear();
+						respDataText.push_back(READ_REG_ERROR);
+						return;
+					}
+				}
+				else if((addr>=0x0)&&(addr<0x18000))
+				{
+					if(!(pram->read_word(addr,re)))
+					{
+						respDataText.clear();
+						respDataText.push_back(READ_MEMORY_ERROR);
+						return;
+					}
+				}
+				else
+				{
+					if((addr>=0x1000000)&&(addr<0x3000000))
+					{
+						if(id==0)
+						{
+							if((addr>=0x1000000)&&(addr<0x2000000))
+							{
+								addr=addr-0x1000000;
+							}
+							else
+							{
+								respDataText.clear();
+								respDataText.push_back(READ_REG_ERROR);
+								return;
+							}
+						}
+						else
+						{
+							if((addr>=0x2000000)&&(addr<0x3000000))
+							{
+								addr=addr-0x2000000;
+							}
+							else
+							{
+								respDataText.clear();
+								respDataText.push_back(READ_REG_ERROR);
+								return;
+							}
+						}
+					}
+
+					if(!(p_iss[i]->ReadMem(addr,&re)))
+					{
+						respDataText.clear();
+						respDataText.push_back(READ_REG_ERROR);
+						return;
+					}
+				}
+				JTAGLog(0,"read reg adr: 0x%x, value: 0x%x\n",ni.i,re);
+				ni.i=re;
+
+				respDataText.push_back(ni.Buf[0]);
+				respDataText.push_back(ni.Buf[1]);
+				respDataText.push_back(ni.Buf[2]);
+				respDataText.push_back(ni.Buf[3]);
+			}
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+/******************************************************************************
+*函数名称:				AnswerWriteRegister
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerWriteRegister(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	NetworkShort s;
+	s.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	s.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+
+	int n=s.st;
+
+	vector<unsigned int> value;
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			/*if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}*/
+			//读寄存器地址与值
+			for(int j=0;j<n;j++)
+			{
+				NetworkInt adr;
+				adr.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8];
+				adr.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+1];
+				adr.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+2];
+				adr.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+3];
+
+				NetworkInt v;
+				v.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+4];
+				v.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+5];
+				v.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+6];
+				v.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+7];
+
+				JTAGLog(0,"write reg address: 0x%x, value 0x%x\n",adr.i,v.i);
+
+				unsigned int addr=adr.i;
+
+				if(addr==VIRTUAL_ABI_CHECK_REG_MAIN_ADDR)
+				{
+					abi_check_main_addr=v.i;
+					continue;
+				}
+				if(addr==VIRTUAL_ABI_CHECK_REG_EXIT_ADDR)
+				{
+					abi_check_exit_addr=v.i;
+					p_iss[i]->NotifyABIInfoFromECS(ABICheckDir.c_str(),abi_check_exit_addr);
+					JTAGLog(0,"abi check path %s, main addr 0x%x, exit addr 0x%x\n",ABICheckDir.c_str(),abi_check_main_addr,abi_check_exit_addr);
+					continue;
+				}
+				if((addr>=0x9010000)&&(addr<0xa400000))
+				{
+					if(!(psysreg->write_reg(addr,v.i)))
+					{
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				else if((addr>=0)&&(addr<0x18000))
+				{
+					if(!(pram->write_word(addr,v.i)))
+					{
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				else if((addr>=0xb000000)&&(addr<0xb200000))
+				{
+					if(!pm->write_word(addr,v.i))
+					{
+						respDataText.push_back(WRITE_REG_ERROR);
+						return;
+					}
+				}
+				else
+				{
+					if((addr>=0x1000000)&&(addr<0x3000000))
+					{
+						if(id==0)
+						{
+							if((addr>=0x1000000)&&(addr<0x2000000))
+							{
+								addr=addr-0x1000000;
+							}
+							else
+							{
+								respDataText.clear();
+								respDataText.push_back(WRITE_REG_ERROR);
+								return;
+							}
+						}
+						else
+						{
+							if((addr>=0x2000000)&&(addr<0x3000000))
+							{
+								addr=addr-0x2000000;
+							}
+							else
+							{
+								respDataText.clear();
+								respDataText.push_back(WRITE_REG_ERROR);
+								return;
+							}
+						}
+					}
+
+					if(!p_iss[i]->WriteMem(addr,v.i))
+					{
+						respDataText.push_back(WRITE_REG_ERROR);
+						return;
+					}
+				}
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerReadMem
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerReadMem(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	NetworkInt adr;
+	adr.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	adr.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+	adr.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3];
+	adr.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[4];
+
+	NetworkInt step;
+	step.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[5];
+	step.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[6];
+	step.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[7];
+	step.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[8];
+
+	NetworkShort s;
+	
+	s.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[9];
+	s.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[10];
+	int n=s.st;
+	//读存储器长度
+
+	unsigned int addr=adr.i;
+	unsigned int steplen=step.i;
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+#ifdef ECS_RES_STAT
+			DSPU32 uStatPipe[4];
+			//在此添加统计分析的代码.
+			if(addr==0x68000000)
+			{
+				DSPU32 uRet[NUM_OF_UNITS * ALU_NUM_OF_UNIT + 1+NUM_OF_UNITS * MUL_NUM_OF_UNIT + 1+NUM_OF_UNITS * SHF_NUM_OF_UNIT + 1+NUM_OF_UNITS * SPU_NUM_OF_UNIT + 1+13+17+17];
+				s.st=sizeof(uRet)/sizeof(DSPU32);
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				//累加统计分析信息
+				
+				if(p_iss[i]->GetResInfo(uRet))
+				{
+					for (int k=0;k<sizeof(uRet)/sizeof(DSPU32);k++)
+					{
+						NetworkInt itBytes;
+						itBytes.i=uRet[k];
+						respDataText.push_back(itBytes.Buf[0]);
+						respDataText.push_back(itBytes.Buf[1]);
+						respDataText.push_back(itBytes.Buf[2]);
+						respDataText.push_back(itBytes.Buf[3]);
+					}
+				}
+				else
+				{
+					respDataText.clear();
+					respDataText.push_back(STATISTICS_MODE_OFF);
+				}
+				return;
+			}
+			else if(addr==0x68000001)
+			{
+				s.st=4;
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				p_iss[i]->GetResInfo_Phase(STAT_PHASE_DC3,uStatPipe);
+				for (int k=0;k<4;k++)
+				{
+					NetworkInt itBytes;
+					itBytes.i=uStatPipe[k];
+					respDataText.push_back(itBytes.Buf[0]);
+					respDataText.push_back(itBytes.Buf[1]);
+					respDataText.push_back(itBytes.Buf[2]);
+					respDataText.push_back(itBytes.Buf[3]);
+				}
+				return;
+				//流水线统计分析信息
+			}
+			else if(addr==0x68000002)
+			{
+				s.st=4;
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				p_iss[i]->GetResInfo_Phase(STAT_PHASE_DC4,uStatPipe);
+				for (int k=0;k<4;k++)
+				{
+					NetworkInt itBytes;
+					itBytes.i=uStatPipe[k];
+					respDataText.push_back(itBytes.Buf[0]);
+					respDataText.push_back(itBytes.Buf[1]);
+					respDataText.push_back(itBytes.Buf[2]);
+					respDataText.push_back(itBytes.Buf[3]);
+				}
+				return;
+				//流水线统计分析信息
+			}
+			else if(addr==0x68000003)
+			{
+				s.st=4;
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				p_iss[i]->GetResInfo_Phase(STAT_PHASE_AC,uStatPipe);
+				for (int k=0;k<4;k++)
+				{
+					NetworkInt itBytes;
+					itBytes.i=uStatPipe[k];
+					respDataText.push_back(itBytes.Buf[0]);
+					respDataText.push_back(itBytes.Buf[1]);
+					respDataText.push_back(itBytes.Buf[2]);
+					respDataText.push_back(itBytes.Buf[3]);
+				}
+				return;
+				//流水线统计分析信息
+			}
+			else if(addr==0x68000004)
+			{
+				s.st=4;
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				p_iss[i]->GetResInfo_Phase(STAT_PHASE_EX,uStatPipe);
+				for (int k=0;k<4;k++)
+				{
+					NetworkInt itBytes;
+					itBytes.i=uStatPipe[k];
+					respDataText.push_back(itBytes.Buf[0]);
+					respDataText.push_back(itBytes.Buf[1]);
+					respDataText.push_back(itBytes.Buf[2]);
+					respDataText.push_back(itBytes.Buf[3]);
+				}
+				return;
+				//流水线统计分析信息
+			}
+			else if(addr==0x68000005)
+			{
+				s.st=4;
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				p_iss[i]->GetResInfo_Phase(STAT_PHASE_WB,uStatPipe);
+				for (int k=0;k<4;k++)
+				{
+					NetworkInt itBytes;
+					itBytes.i=uStatPipe[k];
+					respDataText.push_back(itBytes.Buf[0]);
+					respDataText.push_back(itBytes.Buf[1]);
+					respDataText.push_back(itBytes.Buf[2]);
+					respDataText.push_back(itBytes.Buf[3]);
+				}
+				return;
+				//流水线统计分析信息
+			}
+			else
+#endif
+			{
+				respDataText.push_back(JTAG_SUCCESS);
+				respDataText.push_back(s.Buf[0]);
+				respDataText.push_back(s.Buf[1]);
+				for(int j=0;j<n;j++)
+				{
+					unsigned int re=0;
+
+					unsigned int dest=addr+steplen*j;
+
+					if((dest>=0xb000000)&&(dest<0xb200000))
+					{
+						if(!(pm->read_word(dest,re)))
+						{
+							respDataText.clear();
+							respDataText.push_back(READ_MEMORY_ERROR);
+							return;
+						}
+					}
+					else if((dest>=0x0)&&(dest<0x18000))
+					{
+						if(!(pram->read_word(dest,re)))
+						{
+							respDataText.clear();
+							respDataText.push_back(READ_MEMORY_ERROR);
+							return;
+						}
+					}
+					else if((dest>=0x80000000)&&(dest<0xc0000000))
+					{
+						if(!(ddr0->read_word(dest,re)))
+						{
+							respDataText.clear();
+							respDataText.push_back(READ_MEMORY_ERROR);
+							return;
+						}
+					}
+					else if((dest>=0xc1000000)&&(dest<=0xc13fffff))
+					{
+						if(!(ddrmodule->read_word(dest,re)))
+						{
+							respDataText.clear();
+							respDataText.push_back(READ_MEMORY_ERROR);
+							return;
+						}
+					}
+					else if((dest>=0xc0000000)&&(dest<=0xffffffff))
+					{
+						if(!(ddr1->read_word(dest,re)))
+						{
+							respDataText.clear();
+							respDataText.push_back(READ_MEMORY_ERROR);
+							return;
+						}
+					}
+					
+					else
+					{
+						if((dest>=0x1000000)&&(dest<0x3000000))
+						{
+							if(id==0)
+							{
+								if((dest>=0x1000000)&&(dest<0x2000000))
+								{
+									dest=dest-0x1000000;
+								}
+								else
+								{
+									respDataText.clear();
+									respDataText.push_back(READ_MEMORY_ERROR);
+									return;
+								}
+							}
+							else
+							{
+								if((dest>=0x2000000)&&(dest<0x3000000))
+								{
+									dest=dest-0x2000000;
+								}
+								else
+								{
+									respDataText.clear();
+									respDataText.push_back(READ_MEMORY_ERROR);
+									return;
+								}
+							}
+						}
+
+						if(!(p_iss[i]->ReadMem(dest,&re)))
+						{
+							respDataText.clear();
+							respDataText.push_back(READ_MEMORY_ERROR);
+							return;
+						}
+					}
+
+					{
+						JTAGLog(0,"read mem adr: 0x%x, value: 0x%x\n",addr+steplen*j,re);
+						NetworkInt itBytes;
+						itBytes.i=re;
+						respDataText.push_back(itBytes.Buf[0]);
+						respDataText.push_back(itBytes.Buf[1]);
+						respDataText.push_back(itBytes.Buf[2]);
+						respDataText.push_back(itBytes.Buf[3]);
+					}
+				}
+				return;
+			}
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerWriteMem
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerWriteMem(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	static unsigned int start_pc=0,end_pc=0x200000;
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	NetworkInt adr;
+	adr.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	adr.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+	adr.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3];
+	adr.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[4];
+
+	NetworkInt step;
+	step.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[5];
+	step.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[6];
+	step.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[7];
+	step.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[8];
+
+	NetworkShort s;
+	s.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[9];
+	s.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[10];
+
+	int n=s.st;
+	//读存储器值
+
+	unsigned int addr=adr.i;
+	unsigned int steplen=step.i;
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			/*if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}*/
+			for(int j=0;j<n;j++)
+			{
+				NetworkInt v;
+				v.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[11+j*4];
+				v.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[11+j*4+1];
+				v.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[11+j*4+2];
+				v.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[11+j*4+3];
+
+				unsigned int dest=addr+steplen*j;
+
+				//if(dest==0x68000006)
+				//{
+				//	start_pc=v.i;
+				//	p_iss[i]->SetStartPC(start_pc);
+				//	//end_pc=start_pc+0x200000;
+				//	respDataText.push_back(JTAG_SUCCESS);
+				//	return;
+				//}
+				//else 
+				if((dest>=0xb000000)&&(dest<0xb200000))
+				{
+					if(!(pm->write_word(dest,v.i)))
+					{
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				else if((dest>=0x0)&&(dest<0x18000))
+				{
+					if(!(pram->write_word(dest,v.i)))
+					{
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				else if((dest>=0x80000000)&&(dest<0xc0000000))
+				{
+					if(!(ddr0->write_word(dest,v.i)))
+					{
+						respDataText.clear();
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				else if((dest>=0xc1000000)&&(dest<=0xc13fffff))
+				{
+					if(!(ddrmodule->write_word(dest,v.i)))
+					{
+						respDataText.clear();
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				else if((dest>=0xc0000000)&&(dest<=0xffffffff))
+				{
+					if(!(ddr1->write_word(dest,v.i)))
+					{
+						respDataText.clear();
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				
+				else
+				{
+					if((dest>=0x1000000)&&(dest<0x3000000))
+					{
+						if(id==0)
+						{
+							if((dest>=0x1000000)&&(dest<0x2000000))
+							{
+								dest=dest-0x1000000;
+							}
+							else
+							{
+								respDataText.clear();
+								respDataText.push_back(WRITE_MEMORY_ERROR);
+								return;
+							}
+						}
+						else
+						{
+							if((dest>=0x2000000)&&(dest<0x3000000))
+							{
+								dest=dest-0x2000000;
+							}
+							else
+							{
+								respDataText.clear();
+								respDataText.push_back(WRITE_MEMORY_ERROR);
+								return;
+							}
+						}
+					}
+
+					if(!(p_iss[i]->WriteMem(dest,v.i)))
+					{
+						respDataText.push_back(WRITE_MEMORY_ERROR);
+						return;
+					}
+				}
+				JTAGLog(0,"write mem adr: 0x%x, value: 0x%x\n",addr+steplen*j,v.i);
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+void AnswerReadJtagRegister(DataPack rqtDataPack, vector<char> &respDataText)
+{
+}
+
+void AnswerWriteJtagRegister(DataPack rqtDataPack, vector<char> &respDataText)
+{
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerInsertBreakpoint
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerInsertBreakpoint(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	NetworkShort s;
+	s.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	s.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+
+	int n=s.st;
+
+	vector<unsigned int> value;
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+			p_iss[i]->ClearBreakpoint();
+			//读断点地址与忽略次数
+			for(int j=0;j<n;j++)
+			{
+				NetworkInt adr;
+				adr.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8];
+				adr.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+1];
+				adr.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+2];
+				adr.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+3];
+
+				NetworkInt Neg;
+				Neg.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+4];
+				Neg.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+5];
+				Neg.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+6];
+				Neg.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*8+7];
+
+
+				JTAGLog(0,"Insert breakpoint at core: %d, address: 0x%x\n",(int)id,adr.i);
+				if(!(p_iss[i]->InsertBreakpoint(adr.i,Neg.i)))
+				{
+					respDataText.push_back(BREAKPOINT_INSERT_ERROR);
+					return;
+				}
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerClearBreakpoint
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerClearBreakpoint(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			JTAGLog(0,"clear core: %d breakpoint message.\n",p_iss[i]->GetID());
+
+			p_iss[i]->ClearBreakpoint();
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerInsertWatchpoint
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerInsertWatchpoint(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	NetworkShort s;
+	s.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[1];
+	s.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[2];
+
+	int n=s.st;
+
+	vector<unsigned int> value;
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			if(p_iss[i]->bDSPRunning)
+			{
+				respDataText.push_back(CORE_IS_RUNNING);
+				return;
+			}
+			p_iss[i]->ClearWatchpoint();
+			//读观察点起始地址、结束地址、忽略记数与属性
+			for(int j=0;j<n;j++)
+			{
+				NetworkInt startadr;
+				startadr.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13];
+				startadr.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+1];
+				startadr.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+2];
+				startadr.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+3];
+
+				NetworkInt endadr;
+				endadr.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+4];
+				endadr.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+5];
+				endadr.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+6];
+				endadr.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+7];
+
+				NetworkInt neg;
+				neg.Buf[0]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+8];
+				neg.Buf[1]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+9];
+				neg.Buf[2]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+10];
+				neg.Buf[3]=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+11];
+
+				unsigned char acc=rqtDataPack.textPart->reqsPack.reqsPara[3+j*13+12];
+
+
+				JTAGLog(0,"Insert watchpoint at core: %d, startaddress: 0x%x, endaddress: 0x%x, neg %d, acc %d\n",(int)id,startadr.i,endadr.i,neg.i,acc);
+				if(!(p_iss[i]->InsertWatchpoint(startadr.i,endadr.i,neg.i,acc)))
+				{
+					JTAGLog(0,"error happened when inserting watchpoint at core: %d, startaddress: 0x%x, endaddress: 0x%x, neg %d, acc %d\n",(int)id,startadr.i,endadr.i,neg.i,acc);
+					respDataText.push_back(WATCHPOINT_INSERT_ERROR);
+					return;
+				}
+			}
+
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+
+/******************************************************************************
+*函数名称:				AnswerClearWatchpoint
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerClearWatchpoint(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char id=rqtDataPack.textPart->reqsPack.reqsPara[0];
+
+	for(int i=0;i<ISS_NUM_DEF;i++)
+	{
+		if(p_iss[i]->GetID()==id)
+		{
+			p_iss[i]->ClearWatchpoint();
+			respDataText.push_back(JTAG_SUCCESS);
+			return;
+		}
+	}
+
+	respDataText.push_back(CORE_ID_NOT_FOUND);
+}
+
+/******************************************************************************
+*函数名称:				AnswerSetJtagFreq
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void AnswerSetJtagFreq(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char freq=rqtDataPack.textPart->reqsPack.reqsPara[0];
+	respDataText.push_back(JTAG_SUCCESS);
+}
+
+#ifdef ECS_RES_STAT
+/******************************************************************************
+*函数名称:				AnswerSimSpecCmd
+*修改者                修改时间                		说明
+*林广栋                2015年6月19日         	修改确认
+******************************************************************************/
+void AnswerSimSpecCmd(DataPack rqtDataPack, vector<char> &respDataText)
+{
+	unsigned char bStatCmd=rqtDataPack.textPart->reqsPack.reqsPara[0];
+	unsigned char coreIdx=rqtDataPack.textPart->reqsPack.reqsPara[1];
+
+	if(coreIdx>=ISS_NUM_DEF)
+	{
+		respDataText.push_back(CORE_ID_NOT_FOUND);
+		return;
+	}
+	if(bStatCmd)
+	{
+		p_iss[coreIdx]->ISSEnStat(false);
+	}
+	else
+	{
+		p_iss[coreIdx]->ISSEnStat(true);
+	}
+	respDataText.push_back(JTAG_SUCCESS);
+}
+#endif
+/******************************************************************************
+*函数名称:				CheckSumTestFail
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void CheckSumTestFail(unsigned short commandID, unsigned short packSN)
+{
+	vector<char> respDataText;
+	DataPack respDataPack;
+
+	respDataText.push_back(CONNECT_CHECK_ERROR);
+	jtagComm.createRespPack(respDataPack,commandID,packSN,&respDataText);
+	jtagComm.sendDataPack(&respDataPack);
+}
+
+/******************************************************************************
+*函数名称:				jtag_accept_thread
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         		修改确认
+******************************************************************************/
+void gateway_accept_thread()
+{
+	char hostname[256]={0};
+	gethostname(hostname,256);
+	struct hostent * lpHostEnt = gethostbyname(hostname);
+	sockaddr_in ia;
+	if (lpHostEnt!=NULL)
+	{
+		unsigned int *lpAddr=(unsigned int *)lpHostEnt->h_addr_list[0];
+		ia.sin_addr.s_addr=*lpAddr;
+	}
+	sockaddr_in recvAddr,from;
+	recvAddr.sin_family=AF_INET;
+	recvAddr.sin_addr.s_addr=INADDR_ANY;
+	recvAddr.sin_port=htons(5687);
+	unsigned char recvbuf[256];
+
+	int fromlen=sizeof(sockaddr_in);
+	int recvSock=socket(AF_INET,SOCK_DGRAM,0);
+	char optval[256];
+	optval[0]=1;
+	setsockopt(recvSock,SOL_SOCKET,SO_BROADCAST,optval,1);
+	int sock_opt=1;
+	if(::setsockopt(recvSock,SOL_SOCKET,SO_REUSEADDR,(const char *)&sock_opt,sizeof(sock_opt))==-1)
+	{
+		JTAGLog(0,"set socket opt SO_REUSEADDR error, error code 0x%x\n",WSAGetLastError());
+	}
+	::bind(recvSock,(sockaddr *)&recvAddr,sizeof(sockaddr_in));
+
+	while (1)
+	{
+		if (bCommSetup)
+		{
+			boost::this_thread::sleep(boost::posix_time::millisec(200));
+			continue;
+		}
+
+		//from记录的是接收到的消息包的发送者的IP和端口号，因此，无须事前设置
+		//而a记录的是本套接字绑定到本机的哪个端口上，监听本机哪个端口的
+		//消息包，因此，必须事先设置。
+#ifdef DSP_WIN32
+		typedef int socklen_t;
+#endif
+		int len=recvfrom(recvSock,(char *)recvbuf,256,0,(sockaddr *)&from,(socklen_t *)&fromlen);
+		if (len==10)
+		{
+			if (bCommSetup)
+			{
+				continue;
+			}
+			if (!((recvbuf[0]==0x79)&&(recvbuf[1]==0xfd)&&(recvbuf[2]==0x3e)&&(recvbuf[3]==0x6a)))
+			{
+				continue;
+			}
+			printf("recv gateway search pack from %s, len %d\n",inet_ntoa(from.sin_addr),len);
+			sockaddr_in sendto;
+			unsigned int sendtoPort;
+			sendtoPort=(((unsigned int)recvbuf[8])<<8)|recvbuf[9];
+
+			sendto.sin_family=AF_INET;
+			sendto.sin_addr.s_addr=from.sin_addr.s_addr;
+			sendto.sin_port=htons(sendtoPort);
+
+			int socklen=sizeof(sockaddr_in);
+			int sendSock=socket(AF_INET,SOCK_DGRAM,0);
+			char sendbuf[256];
+			sendbuf[0]=0x79;
+			sendbuf[1]=0xfd;
+			sendbuf[2]=0x3e;
+			sendbuf[3]=0x6a;
+			memcpy(sendbuf+4,&(ia.sin_addr.s_addr),4);
+			sendbuf[8]=jtagPort>>8;
+			sendbuf[9]=jtagPort&0xff;
+			sendbuf[10]=BWDSP1041;
+			sendbuf[11]=1;
+			sendbuf[12]=1;
+			::sendto(sendSock,sendbuf,13,0,(sockaddr *)&sendto,socklen);
+		}
+	}
+}
+
+/******************************************************************************
+*函数名称:				jtag_accept_thread
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         		修改确认
+******************************************************************************/
+void jtag_accept_thread( void *pTop)
+{
+	pJtagTop=(dsp_top *)pTop;
+
+	dsp_top *pdt=(dsp_top *)pTop;
+	for(int itp=0;itp<ISS_NUM_DEF;itp++)
+	{
+		p_iss[itp]=pdt->GetCoreHandle(itp);
+	}
+	pm=pdt->GetPMemHandle();
+	pram=pdt->GetShareSRAMHandle();
+	psysreg=pdt->GetSysCfgRegHandle();
+	ddr0=pdt->GetDDR0Handle();
+	ddr1=pdt->GetDDR1Handle();
+	ddrmodule=pdt->GetDDRHandle();
+	while(1)
+	{
+		jtagComm.stopThread();
+		jtagComm.closeComm();
+
+		boost::this_thread::sleep(boost::posix_time::millisec(200));
+
+		IRemoteComm *irc=jtagComm.getRemoteComm();
+		if(irc)
+		{
+			irc->setCommPort(jtagPort);
+			irc->setCommAddress(jtagIPAdr);
+		}
+		else
+		{
+            printf("fail to get remotecomm\n");
+			return;
+		}
+
+		//{
+		//	boost::mutex::scoped_lock lk(jtagComm.stopThreadMutex);
+		//	jtagComm.stopThreadFlag=false;
+		//}
+
+		int ret;
+
+		if((ret = jtagComm.openComm()))
+		{
+			printf("open comm failed, port : %d, ret %d\n",jtagPort,ret);
+			return;
+		}
+
+		//printf("open comm succeed, port : %d\n",port);
+
+		//释放给主动上报线程的信号，表示链接已经建立。
+
+		jtagComm.startupThread();
+		bCommSetup=true;
+		vector<char> respDataText;
+		DataPack rqtDataPack;
+		DataPack respDataPack;
+
+		while(bCommSetup)
+		{
+			jtagComm.waitReqtPack(rqtDataPack);
+			if (!bCommSetup)
+			{
+				break;
+			}
+
+			//首先检查CheckSum是否有误，若有误，直接返回错误信息，不再进行其余的处理。
+			if(!(jtagComm.testCheckSum(rqtDataPack)))
+			{
+				CheckSumTestFail(rqtDataPack.textPart->reqsPack.commandID,rqtDataPack.headPart->header.packSN);
+				continue;
+			}
+
+			bool bFoundCommand=true;
+			respDataText.clear();
+			switch(rqtDataPack.textPart->reqsPack.commandID)
+			{
+			case CONNECT_REQUEST_PACK:
+				AnswerConnectRequest(rqtDataPack,respDataText);
+				break;
+			case DISCONNECT_REQUEST_PACK:
+				AnswerDisconnect(rqtDataPack,respDataText);
+				break;
+			case LINKTEST_REQUEST_PACK:
+				AnswerLinkTest(rqtDataPack,respDataText);
+				break;
+			case TARGET_CHECK_REQUEST_PACK:
+				AnswerTargetCheck(rqtDataPack,respDataText);
+				break;
+			case TARGET_SELECT_REQUEST_PACK:
+				AnswerTargetSelect(rqtDataPack,respDataText);
+				break;
+			case SINGLE_CORE_STEP_CYCLE:
+				AnswerStepCycle(rqtDataPack,respDataText);
+				break;
+			case SINGLE_CORE_STEP_INST:
+				AnswerStepInst(rqtDataPack,respDataText);
+				break;
+			case SINGLE_CORE_RUN:
+				AnswerRun(rqtDataPack,respDataText);
+				break;
+			case SINGLE_CORE_PAUSE:
+				AnswerPause(rqtDataPack,respDataText);
+				break;
+			case SINGLE_CORE_RESET:
+				AnswerReset(rqtDataPack,respDataText);
+				break;
+			case SINGLE_JTAG_RESET:
+				AnswerJtagReset(rqtDataPack,respDataText);
+				break;
+			case MULTI_CORE_RUN:
+				AnswerMultRun(rqtDataPack,respDataText);
+				break;
+			case MULTI_CORE_PAUSE:
+				AnswerMultPause(rqtDataPack,respDataText);
+				break;
+			case MULTI_CORE_RESET:
+				AnswerMultReset(rqtDataPack,respDataText);
+				break;
+			case MULTI_CORE_STEP_CYCLE:
+				AnswerMultStepCycle(rqtDataPack,respDataText);
+				break;
+			case MULTI_CORE_JTAG_RESET:
+				AnswerMultJtagReset(rqtDataPack,respDataText);
+				break;
+			case READ_REGISTER:
+			case READ_MEMORY_DISCRETE:
+				AnswerReadRegister(rqtDataPack,respDataText);
+				break;
+			case WRITE_REGISTER:
+			case WRITE_MEMORY_DISCRETE:
+				AnswerWriteRegister(rqtDataPack,respDataText);
+				break;
+			case READ_MEMORY:
+				AnswerReadMem(rqtDataPack,respDataText);
+				break;
+			case WRITE_MEMORY:
+				AnswerWriteMem(rqtDataPack,respDataText);
+				break;
+			case READ_JTAG_REGISTER:
+				AnswerReadJtagRegister(rqtDataPack,respDataText);
+				break;
+			case WRITE_JTAG_REGISTER:
+				AnswerWriteJtagRegister(rqtDataPack,respDataText);
+				break;
+			case BREAKPOINT_INSERT:
+				AnswerInsertBreakpoint(rqtDataPack,respDataText);
+				break;
+			case CLEAR_BREAKPOINT:
+				AnswerClearBreakpoint(rqtDataPack,respDataText);
+				break;
+			case WATCHPOINT_INSERT:
+				AnswerInsertWatchpoint(rqtDataPack,respDataText);
+				break;
+			case CLEAR_WATCHPOINT:
+				AnswerClearWatchpoint(rqtDataPack,respDataText);
+				break;
+			case SET_JTAG_FREQUENCY:
+				AnswerSetJtagFreq(rqtDataPack,respDataText);
+				break;
+#ifdef ECS_RES_STAT
+			case SIMULATOR_SPEC_COMMAND:
+				AnswerSimSpecCmd(rqtDataPack,respDataText);
+				break;
+#endif
+			default:
+				bFoundCommand=false;
+			}
+
+			//若没有找到对应的命令，不返回信息。
+			if(bFoundCommand)
+			{
+				jtagComm.createRespPack(respDataPack,rqtDataPack.textPart->reqsPack.commandID,rqtDataPack.headPart->header.packSN,&respDataText);
+				jtagComm.sendDataPack(&respDataPack);
+			}
+		}
+	}
+}
+
+
+/******************************************************************************
+*函数名称:				jtag_notify_thread
+*修改者                修改时间                		说明
+*林广栋                2013年3月30日         	修改确认
+******************************************************************************/
+void jtag_notify_thread()
+{
+	//等待数据链接建立
+	while(1)
+	{
+		//数据链接建立之前，主动上报线程始终等待数据链接建立。
+		boost::this_thread::sleep(posix_time::millisec(JTAG_CHECK_INTERVAL));
+
+		if(!bCommSetup)
+		{
+			continue;
+		}
+
+		DataPack ntfyDataPack;
+		vector<char> ntfyDataText;
+		{
+			boost::mutex::scoped_lock lk(ntfyMutex);
+			while(ntfyMsgQ.size())
+			{
+				ntfyMsgQ.pop();
+			}
+		}
+
+		//一旦数据链接断开，主动上报线程也自动终止。
+		while(bCommSetup)
+		{
+			while(1)
+			{
+				ntfyMsg r;
+
+				{
+					boost::mutex::scoped_lock lk(ntfyMutex);
+					if(ntfyMsgQ.empty())
+					{
+						break;
+					}
+					r=ntfyMsgQ.front();
+					ntfyMsgQ.pop();
+				}
+
+				ntfyDataText.clear();
+				ntfyDataText.push_back(1);//核数量
+				ntfyDataText.push_back(r.coreIdx);//全局核号
+				ntfyDataText.push_back(0);//核状态
+
+				//核停止原因
+				NetworkInt intReason;
+				intReason.i=r.stopRsn;
+				ntfyDataText.push_back(intReason.Buf[0]);
+				ntfyDataText.push_back(intReason.Buf[1]);
+				ntfyDataText.push_back(intReason.Buf[2]);
+				ntfyDataText.push_back(intReason.Buf[3]);
+
+				//核当前PC
+				NetworkInt intPC;
+				intPC.i=r.pc;
+				ntfyDataText.push_back(intPC.Buf[0]);
+				ntfyDataText.push_back(intPC.Buf[1]);
+				ntfyDataText.push_back(intPC.Buf[2]);
+				ntfyDataText.push_back(intPC.Buf[3]);
+
+				//核观察点信息
+				NetworkInt intWP;
+				intWP.i=r.wp;
+				ntfyDataText.push_back(intWP.Buf[0]);
+				ntfyDataText.push_back(intWP.Buf[1]);
+				ntfyDataText.push_back(intWP.Buf[2]);
+				ntfyDataText.push_back(intWP.Buf[3]);
+
+				jtagComm.createNtfyPack(ntfyDataPack,STOP_EVENT_NOTIFY_PACK,&ntfyDataText);
+				jtagComm.sendDataPack(&ntfyDataPack);
+			}
+
+			//为减轻CPU负担，主动上报线程每50毫秒才去检查一次是否需要上报消息
+			boost::this_thread::sleep(posix_time::millisec(JTAG_CHECK_INTERVAL));
+		}
+	}
+}

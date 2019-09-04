@@ -1,0 +1,50 @@
+#IC=-I/home/share/systemc-2.2.0/include -I/home/share/TLM-2009-07-15/include/tlm
+
+
+SRC_DIR=/home/liugu/workspace/icache_sim_20140121/icache_sim/src/
+
+CC=g++
+CCFLAG=${IC} -g -c 
+AR=ar
+ARFLAG=-rv
+#obj_files=main.o
+lib_files=icache_sim.a
+lib_obj_files=icache_module_new.o\
+		icache_ram_new.o\
+		L2_mmc_new.o\
+		register32.o
+
+.PHONY:	all clean update
+
+all:	ranlib_icache_sim	
+	#icache_sim.a
+
+#test_icache: $(obj_files) $(lib_obj_files)
+#	$(CC) $^ -o $@
+
+ranlib_icache_sim: icache_sim.a 
+	ranlib $^
+
+icache_sim.a: $(lib_obj_files)
+	$(AR) $(ARFLAG) $@ $^
+
+%.o: %.cpp
+	$(CC) $(CCFLAG) $^ -o $@
+
+update:
+	cp ${SRC_DIR}cfg.h .
+	cp ${SRC_DIR}global.h .
+	cp ${SRC_DIR}icache_memory.h .
+	cp ${SRC_DIR}icache_module_new.h .
+	cp ${SRC_DIR}icache_module_new.cpp .
+	cp ${SRC_DIR}icache_ram_new.h .
+	cp ${SRC_DIR}icache_ram_new.cpp .
+	cp ${SRC_DIR}icache_type.h .
+	cp ${SRC_DIR}L2_mmc_new.h .
+	cp ${SRC_DIR}L2_mmc_new.cpp .
+	cp ${SRC_DIR}register32.h .
+	cp ${SRC_DIR}register32.cpp .
+	cp ${SRC_DIR}user_type.h .
+
+clean:
+	rm -rf icache_sim.a *.o

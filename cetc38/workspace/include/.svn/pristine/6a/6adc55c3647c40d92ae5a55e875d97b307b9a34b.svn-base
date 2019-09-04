@@ -1,0 +1,231 @@
+#ifndef DMAC_H_
+#define DMAC_H_
+
+#include "./src/defines.h"
+#include "dmac_global.h"
+//#include "../iss_dmac_comm.h"
+#include "reg_file.h"
+
+class DMAC: public sc_module
+	,public tlm::tlm_fw_transport_if<mydma_protocol_types>
+	,public tlm::tlm_bw_transport_if<mydma_protocol_types>{
+public:	
+	sc_in_clk clk;
+
+	SC_HAS_PROCESS(DMAC);
+
+	DMAC(sc_module_name mn, unsigned int CORE_ID);
+	~DMAC(){
+
+	}
+
+
+	virtual tlm::tlm_sync_enum nb_transport_bw(
+		tlm::tlm_generic_payload &trans,
+		tlm::tlm_phase &phase,
+		sc_core::sc_time &t);
+
+	virtual void invalidate_direct_mem_ptr(
+		sc_dt::uint64 start_range,
+		sc_dt::uint64 end_range){}
+
+	virtual tlm::tlm_sync_enum nb_transport_fw(
+		tlm::tlm_generic_payload &trans,
+		tlm::tlm_phase &phase,
+		sc_core::sc_time &t);
+
+	virtual void b_transport(
+		tlm::tlm_generic_payload &trans,
+		sc_core::sc_time &t){}
+
+	virtual bool get_direct_mem_ptr(
+		tlm::tlm_generic_payload &trans,
+		tlm::tlm_dmi &dmi_data){return false;}
+
+	virtual unsigned int transport_dbg(
+		tlm::tlm_generic_payload &trans){return 0;}
+
+
+
+
+	void  TRANS2CORE(tlm::tlm_phase PHASE = tlm::BEGIN_REQ , DMAC_CMD CMD = DMAC_CMD_MAX,unsigned int CH_ID = 0x0,  unsigned char* DATA_PTR = NULL, sc_time DELAY = SC_ZERO_TIME); 
+	bool  TRANS2OTHER(tlm::tlm_phase PHASE = tlm::BEGIN_REQ , DMAC_CMD CMD = DMAC_CMD_MAX,unsigned int CH_ID = 0x0,  unsigned char* DATA_PTR = NULL, sc_time DELAY = SC_ZERO_TIME); 
+	void  TRANSFromCore(tlm::tlm_generic_payload& trans);
+
+//zqw+ SRIO相关传输函数定义
+	void  SRIOTRANS2CORE(tlm::tlm_phase PHASE = tlm::BEGIN_REQ , DMAC_CMD CMD = DMAC_CMD_MAX,unsigned int CH_ID = 0x0,  unsigned char* DATA_PTR = NULL, sc_time DELAY = SC_ZERO_TIME); 
+	bool  SRIOTRANS2OTHER(tlm::tlm_phase PHASE = tlm::BEGIN_REQ , DMAC_CMD CMD = DMAC_CMD_MAX,unsigned int CH_ID = 0x0,  unsigned char* DATA_PTR = NULL, sc_time DELAY = SC_ZERO_TIME); 
+	void  SRIOTRANSFromCore(tlm::tlm_generic_payload& trans);
+
+
+	tlm::tlm_initiator_socket	<CH_WIDTH_256,mydma_protocol_types> init_socket2core; //256 init for own core
+	tlm::tlm_target_socket		<CH_WIDTH_256,mydma_protocol_types> targ_socket2core; //256 targ for own core
+
+
+	tlm::tlm_initiator_socket	<CH_WIDTH_256,mydma_protocol_types> init_socket2other; //256 init for the other dmac
+	tlm::tlm_target_socket		<CH_WIDTH_256,mydma_protocol_types> targ_socket2other; //256 targ for the other dmac
+
+
+
+	tlm::tlm_initiator_socket	<CH_WIDTH_256,mydma_protocol_types> init_socket2SyscfgReg; //256 init for the SyscfgReg
+	tlm::tlm_target_socket		<CH_WIDTH_256,mydma_protocol_types> targ_socket2SyscfgReg; //256 targ for the SyscfgReg
+
+
+	tlm::tlm_initiator_socket	<CH_WIDTH_256,mydma_protocol_types> init_socket2ddr; //256 init for ddr Channel 2
+	tlm::tlm_target_socket		<CH_WIDTH_256,mydma_protocol_types> targ_socket2ddr; //256 targ for ddr Channel 2
+
+
+
+	unsigned int core_id;
+
+
+	reg_file REGS;
+
+
+
+	void clock_tick();
+	void TransPayload2core(bool IsWrOrNot,bool TransNewOrnot,unsigned int ch_id,DMAC_CMD CMD);
+	void mission_over_reset(mission_type Mtype,unsigned int ch_id);
+	bool JudgeAddr(unsigned int addr);
+
+//zqw+ SRIO相关传输函数定义
+	void SRIOTransPayload2core(bool IsWrOrNot,bool TransNewOrnot,unsigned int ch_id,DMAC_CMD CMD);
+	void SRIOmission_over_reset(mission_type Mtype,unsigned int ch_id);
+
+
+	//for delay interrupt
+	void Trans_interrupt();
+	unsigned int WR_DEAD_LINE[CHANNEL_NUM];
+	prim_register	wr_interrupt[CHANNEL_NUM];
+	unsigned int RD_DEAD_LINE[CHANNEL_NUM];
+	prim_register	rd_interrupt[CHANNEL_NUM];
+
+	//for write rem regs
+	void WriteRemRegs(unsigned int ch_id, RegsType reg, unsigned int val=0);
+
+	void WriteLog(string str);
+
+
+
+	void ShiftRegs();
+	//========================LOG
+#ifdef DMAC_LOG
+	fstream DmacLog;
+	fstream RegFileLog;
+	void WriteLogFile();
+#endif
+
+
+
+
+
+
+
+	prim_register	 c2d_xmchI_waccept[CHANNEL_NUM];
+	prim_register	 c2d_xschI_waccept[CHANNEL_NUM];
+	prim_register	 c2d_xmchI_raccept[CHANNEL_NUM];
+	prim_register	 c2d_xschI_raccept[CHANNEL_NUM];
+
+	prim_register	 dma_wr_mission_on[CHANNEL_NUM];
+	prim_register	 dma_rd_mission_on[CHANNEL_NUM];
+	prim_register	 dma_rdack_mission_on[CHANNEL_NUM];
+
+//zqw+ 2019.9.17 SRIO传输相关变量
+	prim_register	 srio_c2d_xmchI_waccept[CHANNEL_NUM];
+	prim_register	 srio_c2d_xschI_waccept[CHANNEL_NUM];
+	prim_register	 srio_c2d_xmchI_raccept[CHANNEL_NUM];
+	prim_register	 srio_c2d_xschI_raccept[CHANNEL_NUM];
+
+	prim_register	 srio_wr_mission_on[SRIO_NUM];
+	prim_register	 srio_rd_mission_on[SRIO_NUM];
+	prim_register	 srio_rdack_mission_on[SRIO_NUM];
+//zqw+ 2019.9.17 SRIO地址、传输长度
+	int srio_dst_id_wr[SRIO_NUM]; 
+	int srio_src_curr_addr_wr[SRIO_NUM];
+	//int srio_src_rem_x_len_wr[SRIO_NUM];	
+	int srio_dst_curr_addr_wr[SRIO_NUM];
+	int srio_src_rem_x_len_wr[SRIO_NUM];	
+	int srio_dst_rem_x_len_wr[SRIO_NUM];	
+
+
+	int srio_dst_id_rd[SRIO_NUM];
+	int srio_src_curr_addr_rd[SRIO_NUM];
+	//int srio_src_rem_x_len_rd[SRIO_NUM];	
+	int srio_dst_curr_addr_rd[SRIO_NUM];
+	int srio_src_rem_x_len_rd[SRIO_NUM];
+	int srio_dst_rem_x_len_rd[SRIO_NUM];	
+
+
+	//DMA WR SRC val	
+	bool src_D_sel_wr[CHANNEL_NUM];//0-1d,1-2d 
+	int src_curr_addr_wr[CHANNEL_NUM];
+	int src_rem_x_len_wr[CHANNEL_NUM];	
+	int src_rem_y_len_wr[CHANNEL_NUM];	
+	int src_addr_x_step_wr[CHANNEL_NUM];
+	int src_addr_y_step_wr[CHANNEL_NUM];
+	//DMA RD SRC val
+	bool src_D_sel_rd[CHANNEL_NUM];//0-1d,1-2d
+	int src_curr_addr_rd[CHANNEL_NUM];
+	int src_rem_x_len_rd[CHANNEL_NUM];	
+	int src_rem_y_len_rd[CHANNEL_NUM];	
+	int src_addr_x_step_rd[CHANNEL_NUM];
+	int src_addr_y_step_rd[CHANNEL_NUM];
+	//DMA WR DST val
+	bool dst_D_sel_wr[CHANNEL_NUM];;//0-1d,1-2d
+	DSPU64 dst_curr_addr_wr[CHANNEL_NUM];
+	int dst_rem_x_len_wr[CHANNEL_NUM];	
+	int dst_rem_y_len_wr[CHANNEL_NUM];	
+	int dst_addr_x_step_wr[CHANNEL_NUM];
+	int dst_addr_y_step_wr[CHANNEL_NUM];
+	//DMA RD DST val
+	bool dst_D_sel_rd[CHANNEL_NUM];//0-1d,1-2d
+	DSPU64 dst_curr_addr_rd[CHANNEL_NUM];
+	int dst_rem_x_len_rd[CHANNEL_NUM];	
+	int dst_rem_y_len_rd[CHANNEL_NUM];	
+	int dst_addr_x_step_rd[CHANNEL_NUM];
+	int dst_addr_y_step_rd[CHANNEL_NUM];
+
+	//be Slave record DMA rd addr vals
+
+	unsigned int Sdst_x_len_record[CHANNEL_NUM];
+	unsigned int Sdst_y_len_record[CHANNEL_NUM];
+	bool Sdst_D_sel_rd[CHANNEL_NUM];//0-1d,1-2d
+	DSPU64 Sdst_curr_addr_rd[CHANNEL_NUM];
+	int Sdst_rem_x_len_rd[CHANNEL_NUM];	
+	int Sdst_rem_y_len_rd[CHANNEL_NUM];	
+	int Sdst_addr_x_step_rd[CHANNEL_NUM];
+	int Sdst_addr_y_step_rd[CHANNEL_NUM];
+
+	//zqw+ 2019.1.21  be Slave record DMA rd addr vals
+	unsigned int Ssrio_dst_x_len_record[SRIO_NUM];
+	DSPU64 Ssrio_dst_curr_addr_rd[SRIO_NUM];
+	int Ssrio_dst_rem_x_len_rd[SRIO_NUM];	
+
+
+
+	//Vec
+	vector<DMAC_MEM>  DMARDBuff[CHANNEL_NUM];
+	vector<DMAC_MEM>  DMAWRBuff[CHANNEL_NUM];
+
+	//zqw+ 2019.3.4  Vec
+	vector<DMAC_MEM>  SRIORDBuff[SRIO_NUM];
+	vector<DMAC_MEM>  SRIOWRBuff[SRIO_NUM];
+
+	//recent record
+	DMAC_MEM		  recent_rdCoreForDMAWR[CHANNEL_NUM];//DMAC0 write DMAC1 so read Core0
+	DMAC_MEM		  recent_rdCoreForDMARD[CHANNEL_NUM];//DMAC1 read  DMAC0 so read Core0
+	DMAC_MEM		  recent_wrCoreForDMAWR[CHANNEL_NUM];//DMAC1 write DMAC0 so write Core0
+	DMAC_MEM		  recent_wrCoreForDMARD[CHANNEL_NUM];//DMAC0 read  DMAC1 so write Core0
+
+	//--------------------------------------------------------------for SystemCfgReg rd/wr
+	bool  SystemCfgRegWr(unsigned int addr,	unsigned int val);
+	bool  SystemCfgRegRd(unsigned int addr, unsigned int & result);
+
+	//----------------------------------------------------------------Out Mem Req entry
+	bool  OutMemRW(DMAC_MEM* dmac_mem_ptr);
+
+};
+
+
+#endif
+

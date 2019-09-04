@@ -1,0 +1,30 @@
+
+#include "dsp_top.h"
+
+//--------------------------------------------------
+sc_iss* dsp_top::GetCoreHandle(unsigned int p_u32CoreID)
+{
+	if (p_u32CoreID >= ISS_NUM_DEF)
+	{
+		printf("GetCoreHandle: Invalid parameter\n");
+		return NULL;
+	}
+
+	return m_pISS[p_u32CoreID];
+}
+
+DSPU32 dsp_top::ReadXR8ofCore(unsigned int p_u32CoreID)
+{
+	DSPU32 u32Value;
+
+	if (p_u32CoreID >= ISS_NUM_DEF)
+	{
+		printf("ReadXR8ofCore: Invalid parameter\n");
+		return 0xFFFFFFFF;
+	}
+
+	m_pISS[p_u32CoreID]->ReadMem(0x00E00808, &u32Value);
+
+	return u32Value;
+}
+

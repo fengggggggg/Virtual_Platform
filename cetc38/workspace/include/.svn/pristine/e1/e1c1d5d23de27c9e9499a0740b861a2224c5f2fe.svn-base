@@ -1,0 +1,170 @@
+/******************************************************************************
+*Copyright (C), CETE38
+*文件名  :    JTAGLog.cpp
+*作者    :    林广栋 ，黄光红
+*版本    :    v0.0.1
+*完成日期:    2012-12-29
+*描述    :    实现日志接口
+*其它    :
+*历史记录:
+*1.
+*修改日期:
+*作者    :林广栋
+*修改内容:创建
+******************************************************************************/
+
+#include "JTAGLog.h"
+
+#if defined(LOG_CMD) || defined(LOG_FILE)
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/thread.hpp>//using boost::mutex
+#define MAX_LEVEL 10
+boost::mutex jtagLogMutex;
+#endif
+
+#ifdef LOG_FILE
+FILE *jtagLogFile = NULL;
+#endif
+
+#ifdef LOG_CMD
+    /******************************************************************************
+    *函数名称:    logPrintf
+    *描述    :    向控制台打印日志
+    *输入参数:    level：层次
+			 format及以后的参数：按printf方式，打印日志。
+    *输出参数:	 无
+    *返回值  :    无
+    *其它    :    
+    ******************************************************************************/
+void logPrintf(int level, char * format, ...)
+{
+	{
+		boost::mutex::scoped_lock lk(jtagLogMutex);
+		va_list arg_ptr;
+		va_start(arg_ptr, format);
+		if((level>=0) && (level <= MAX_LEVEL))
+		{
+			for(int i=0; i<level; i++)
+			{
+				printf("    ");
+			}
+			vprintf(format, arg_ptr);
+			//printf("\n");
+			fflush(stdout);
+		}
+		va_end(arg_ptr);
+	}
+}
+#endif
+
+#ifdef LOG_FILE
+string logFileDirectory = "";
+void setLogFileDir(const char * directory)
+{
+    logFileDirectory = directory;
+}
+
+string MyInt2Str(int data)
+{
+    stringstream strmTemp("");
+    strmTemp.str("");
+    strmTemp<<data;
+    string strResult = strmTemp.str();
+    return strResult;
+}
+
+string getLogFileName()
+{
+    time_t t = time(NULL);
+    struct tm *loctime = localtime(&t);
+    int year = loctime->tm_year;
+    int mon = loctime->tm_mon;
+    int mday = loctime->tm_mday;
+    int hour = loctime->tm_hour;
+    int min = loctime->tm_min;
+    int sec = loctime->tm_sec;
+    if(logFileDirectory == "")
+    {
+        logFileDirectory = ".";
+    }
+
+	//SYSTEMTIME smt;
+	//GetLocalTime(&smt);
+	boost::posix_time::ptime now=boost::posix_time::microsec_clock::local_time();
+
+    return logFileDirectory + "/Jtag_"+MyInt2Str(year+1900)+"_"+MyInt2Str(mon+1)+"_"+MyInt2Str(mday)
+        +"_"+MyInt2Str(hour)+"_"+MyInt2Str(min)+"_"+MyInt2Str(sec)+"_"+MyInt2Str((now.time_of_day().total_milliseconds())%1000)+".Jtaglog";
+}
+
+    /******************************************************************************
+    *函数名称:    logFilePrintf
+    *描述    :    向文件打印日志
+    *输入参数:    level：层次
+			 format及以后的参数：按printf方式，打印日志。
+    *输出参数:	 无
+    *返回值  :    无
+    *其它    :    
+    ******************************************************************************/
+void logFilePrintf(int level, char *format, ...)
+{
+    {
+	boost::mutex::scoped_lock lk(jtagLogMutex);
+	if(jtagLogFile)
+	{
+		va_list arg_ptr;
+		va_start(arg_ptr, format);
+		if((level>=0)&&(level<=MAX_LEVEL))
+		{
+			for(int i=0;i<level;i++)
+			{
+				fprintf(jtagLogFile, "    ");
+			}
+			vfprintf(jtagLogFile, format, arg_ptr);
+			//fprintf(jtagLogFile, "\n");
+			fflush(jtagLogFile);
+		}
+		va_end(arg_ptr);
+	}
+    }
+}
+
+
+    /******************************************************************************
+    *函数名称:    openLogFile
+    *描述    :    设置并打开日志文件
+    *输入参数:    无
+    *输出参数:	 无
+    *返回值  :    无
+    *其它    :    
+    ******************************************************************************/
+void openLogFile()
+{
+	if((jtagLogFile = fopen(getLogFileName().c_str(), "w")) == NULL)
+	{
+	    //cout<<"open log file "<<getLogFileName()<<"error."<<endl;
+	}
+}
+
+
+    /******************************************************************************
+    *函数名称:    closeLogFile
+    *描述    :    关闭文件
+    *输入参数:    无
+    *输出参数:	 无
+    *返回值  :    无
+    *其它    :    
+    ******************************************************************************/
+void closeLogFile()
+{
+    if(jtagLogFile!=NULL)
+	{
+		fclose(jtagLogFile);
+		jtagLogFile=NULL;
+	}
+}
+
+#endif
+

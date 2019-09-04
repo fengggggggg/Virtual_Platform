@@ -1,0 +1,154 @@
+/*
+ *ddr.cpp
+ *
+ *Created on: Jun 5, 2014
+ *Author:	liugu
+*/
+#include "ddr.h"
+#include "icache_memory.h"
+
+ddr::ddr(unsigned int id, sc_module_name module_name)
+	:DDR_id(id),
+	name(module_name),
+	m_peq(this, &ddr::peq_cb_send_RESP),
+	ddr_low_address( (id == 0) ? DDR_DEFAULT_LOW_ADDRESS0 : DDR_DEFAULT_LOW_ADDRESS1),
+	ddr_size(DDR_DEFAULT_SIZE)
+{
+	/*Variable initializing*/
+	/*Sockets binding*/
+	target_socket_from_mmac.bind(*this);
+
+	/*Clock tick function initializing*/
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+
+	/*Allocate space for memory*/
+	try{
+		memory = new unsigned int[ddr_size];
+	}catch(std::bad_alloc err){
+		DEBUG_out<< "ERROR "<<err.what()<<": Bad alloction for DDR buffer" << endl;
+	}
+}
+
+ddr::~ddr()
+{
+	//Free memory space
+	delete memory;
+}
+
+void ddr::reset()
+{
+	memset(memory,0x0,ddr_size*sizeof(unsigned int));
+}
+
+/*receive payloads from mmac*/
+tlm_sync_enum ddr::nb_transport_fw(
+	tlm_generic_payload &trans,
+	tlm_phase &phase,
+	sc_time &t){
+	/*TODO:TBD*/
+
+	if(phase == BEGIN_REQ_CACHE_LINE){
+		//Modify phase to END_REQ_CACHE_LINE
+		phase = END_REQ_CACHE_LINE;
+	
+		//Setting delay time for response and insert to peq
+		sc_time delay_time(30,SC_NS);			//Log: 2015-4-21 lantency=pmem
+		m_peq.notify(trans,phase,delay_time+t);
+
+		return TLM_UPDATED;	
+	}
+	return TLM_ACCEPTED;
+}
+
+/*Clock main function*/
+void ddr::clock_tick(){
+	//cout<<"["<<sc_time_stamp()<<"]"<<"DDR "<<name<<": clock_tick"<<endl;
+	/*TODO:TBD*/
+	return;
+}
+
+/*PEQ Call back function for sending BEGIN_RESP_CACHE_LINE*/
+void ddr::peq_cb_send_RESP(tlm::tlm_generic_payload &trans,const tlm::tlm_phase &phase)
+{
+	tlm_sync_enum status = TLM_COMPLETED;
+
+	if(phase == END_REQ_CACHE_LINE){
+		tlm_command command = trans.get_command();
+		if(command == TLM_READ_COMMAND){
+			//A read command
+			//Process address first
+			unsigned int addr = (unsigned int)trans.get_address();
+			if((addr < ddr_low_address) || (addr > (ddr_low_address + ddr_size))){
+				//DEBUG_out<<"ERROR: access ddr address 0x"<<addr<<" out of range"<<endl;
+				//return;
+			}
+			if(addr % 0x10 !=0){
+				//Align address to 16
+				//DEBUG_out<<"Warning: cache line addr 0x"<<addr<<" is auto aligned to 16: 0x"<<(addr - (addr%16))<<endl;
+				addr = addr - (addr % 0x10);
+			}
+			
+			BWDSP104X::insnLine512 *data = (BWDSP104X::insnLine512 *)trans.get_data_ptr();
+			for(int i=0;i<16;i++){
+				//Read cache line from memory
+				data->insnSlot[i] = memory[addr+i-ddr_low_address];//0;
+			}
+			trans.set_response_status(TLM_OK_RESPONSE);
+
+			tlm_phase phase_new = BEGIN_RESP_CACHE_LINE;
+			sc_time delay = SC_ZERO_TIME;
+
+			status = target_socket_from_mmac->nb_transport_bw(trans,phase_new,delay);
+
+			//DEBUG_out<<"Send a RESPONSE for addr = 0x"<<hex<<trans.get_address()<<endl;
+			
+			switch(status){
+				case TLM_COMPLETED:
+					{
+						return;
+						break;
+					}
+				case TLM_ACCEPTED:
+				case TLM_UPDATED:
+				default:
+					{
+						break;
+					}
+			}
+			
+		}else{
+			DEBUG_out<<"Transaction command "<<command<<" ignored"<<endl;
+			return;
+		}
+	}
+	
+	return;
+}
+
+/*JTAG Interface*/
+bool ddr::read_word(unsigned int addr,unsigned int &value)
+{
+	bool ret = false;
+	//Check for address
+	if((addr < ddr_low_address)||(addr>(ddr_low_address + ddr_size))){
+		DEBUG_out<<"ERROR: access ddr address 0x"<<addr<<" out of range"<<endl;
+		return false;
+	}
+	value = memory[addr-ddr_low_address];
+	return true;
+}
+
+bool ddr::write_word(unsigned int addr,const unsigned int value)
+{
+	bool ret = false;
+	//Check for address
+	if((addr < ddr_low_address)||(addr>(ddr_low_address + ddr_size))){
+		DEBUG_out<<"ERROR: access ddr address 0x"<<addr<<" out of range"<<endl;
+		return false;
+	}
+	memory[addr-ddr_low_address] = value;
+	return true;
+}
+

@@ -1,0 +1,394 @@
+/*
+ * icache_ram_new.cpp
+ *
+ *  Created on: Dec 25, 2013
+ *      Author: liugu
+ */
+
+#include "icache_ram_new.h"
+
+using namespace BWDSP104X;
+
+icache_ram_new::icache_ram_new()
+{
+	//reset();
+	return;
+}
+
+void icache_ram_new::reset()
+{
+	lowAddr = 0;
+	//printf("lowAddr is set to 0x%x in icache_ram_new::reset()\n",lowAddr);
+	highAddr = lowAddr + (0x8000 -1);	//32K word
+
+	readPC = 0;
+	readEn = false;
+	writePC = 0;
+	writeEn = false;
+	writeLine.reset();
+	for(int i=0;i<4;i++){
+		readLine[i].reset();
+	}
+	icWbDelay_2nd_w = false;
+	for(int i=0;i<4;i++){
+		for(int j=0;j<128;j++){
+			cacheMem[i][j].reset();
+		}
+		readOutBuffer[i].reset();
+	}
+	wb_PC_reg.reset();
+	wb_En_reg.reset();
+	wb_Line_reg.reset();
+	for(int i=0;i<4;i++){
+		readOrWrite[i]=false;
+		PCAddress[i]=0;
+		writeInput[i].reset();
+	}
+	//write trace file
+#ifdef LOG_OUTPUT
+	FILE *fp = NULL;
+//	if ((fp = fopen("trace_write.dat", "w")) == NULL)
+//	{
+//		DEBUG_INFO_STREAM("Error:failed to open trace_write.dat\n");
+//		return;
+//	}
+	fp = fopen("trace_write.dat", "w");
+	fclose(fp);
+#endif
+	return;
+}
+
+
+void icache_ram_new::evaluate()
+{
+
+	if(!in_flush_proc){
+
+	//1. Generate output signals
+	for(int i=0;i<4;i++){
+		readLine[i] = readOutBuffer[i].read();
+	}
+	icWbDelay_2nd_w = false;
+	//2. Generate r/w and PCAddress for each bank
+	//2.0 Initialize rwEn in 4 banks with false;
+	for(int i=0;i<4;i++){
+		rwEn[i]=false;
+	}
+	//2.1 Rewrite first
+	if(wb_En_reg.read().val){
+		DEBUG_INFO_STREAM("Event: PC ="<<wb_PC_reg.read()<<" rewrite success in bank"
+				<<parseBankIdx(wb_PC_reg.read())<<std::endl);
+		rwEn[parseBankIdx(wb_PC_reg.read())] = true;			//enable
+		readOrWrite[parseBankIdx(wb_PC_reg.read())] = true;		//write
+		PCAddress[parseBankIdx(wb_PC_reg.read())] =  wb_PC_reg.read();
+		writeInput[parseBankIdx(wb_PC_reg.read())] = wb_Line_reg.read();
+
+		//rewrite only once?
+		wb_En_reg.write(false);
+
+		//trace file
+#ifdef LOG_OUTPUT
+		FILE *fp = NULL;
+//		if ((fp = fopen("trace_write.dat", "a+")) == NULL)
+//		{
+//			DEBUG_INFO_STREAM("Error:failed to open trace_write.dat\n");
+//			return;
+//		}
+		fp = fopen("trace_write.dat", "a+");
+		fprintf(fp, "[%8x]\t[%8x]\t",CC,wb_PC_reg.read());
+		int enable_way[4] = { 0,0,0,0 };
+		enable_way[victim_old] = 1;
+		fprintf(fp, "way:%d\t",victim_old);
+		fprintf(fp, "enable:1%d%d%d%d\t",enable_way[0],enable_way[1],enable_way[2],enable_way[3]);
+		fprintf(fp, "valid:%d%d%d%d\t",wb_Line_reg.read().tagLine.valid[0],
+				wb_Line_reg.read().tagLine.valid[1],wb_Line_reg.read().tagLine.valid[2],wb_Line_reg.read().tagLine.valid[3]);
+		fprintf(fp, "lru:%2x\t",wb_Line_reg.read().tagLine.lru);
+		fprintf(fp, "tag:%8x %8x %8x %8x", wb_Line_reg.read().tagLine.tag[0],wb_Line_reg.read().tagLine.tag[1],
+				wb_Line_reg.read().tagLine.tag[2],wb_Line_reg.read().tagLine.tag[3]);
+		fprintf(fp, "data:");
+		for(int i=0;i<16;i++){
+			fprintf(fp, "%8x ", wb_Line_reg.read().dataLine[victim_old].insnSlot[i]);
+		}
+		fprintf(fp,"\n");
+		fclose(fp);
+#endif
+
+	}
+	//2.2 Read second
+	//If read address is in the same bank of rewrite, read suspended
+	if(readEn){
+		if((wb_En_reg.read().val)&&(parseBankIdx(readPC)==parseBankIdx(wb_PC_reg.read()))){
+			DEBUG_INFO_STREAM("Event: PC = "<<readPC<<" read suspended in bank "
+					<<parseBankIdx(readPC)<<std::endl);
+			icWbDelay_2nd_w = true;
+		}else{
+			//Read success
+			DEBUG_INFO_STREAM("Event: PC = "<<readPC<<" read success in bank "
+					<<parseBankIdx(readPC)<<std::endl);
+			DEBUG_INFO_STREAM("read content = ");
+			for(int j=0;j<4;j++){
+						for(int i=0;i<16;i++){
+							DEBUG_INFO_STREAM("0x"<<cacheMem[parseBankIdx(readPC)][parseEntryIdx(readPC)].read().dataLine[j].insnSlot[i]<<" ");
+
+						}
+							DEBUG_INFO_STREAM("\n");
+						}
+			rwEn[parseBankIdx(readPC)] = true;				//enable
+			readOrWrite[parseBankIdx(readPC)] = false;		//read
+			PCAddress[parseBankIdx(readPC)] = readPC;
+		}
+	}
+
+	//2.3 write last
+	if(writeEn){
+		//If write and read in the same bank, write suspended
+		if((readEn) && (parseBankIdx(readPC)==parseBankIdx(writePC))){
+			DEBUG_INFO_STREAM("Event: PC = "<<writePC<<" write suspended in bank "
+					<<parseBankIdx(writePC)<<std::endl);
+			//write into the suspended write registers
+			wb_PC_reg.write(writePC);
+			wb_En_reg.write(true);
+			wb_Line_reg.write(writeLine);
+		}else{
+			//Write success, and it can't be conflicted with the rewrite operation
+			assert(!((wb_En_reg.read().val)&&(parseBankIdx(writePC) == parseBankIdx(wb_PC_reg.read()))));
+			DEBUG_INFO_STREAM("Event: PC = "<<writePC<<" write success in bank "
+					<<parseBankIdx(writePC)<<std::endl);
+			DEBUG_INFO_STREAM("Write content= ");
+			for(int j=0;j<4;j++){
+			for(int i=0;i<16;i++){
+				DEBUG_INFO_STREAM("0x"<<writeLine.dataLine[j].insnSlot[i]<<" ");
+			}
+				DEBUG_INFO_STREAM("\n");
+			}
+			rwEn[parseBankIdx(writePC)] = true;
+			readOrWrite[parseBankIdx(writePC)] = true;
+			PCAddress[parseBankIdx(writePC)] = writePC;
+			writeInput[parseBankIdx(writePC)] = writeLine;
+
+			//trace file
+#ifdef LOG_OUTPUT
+			FILE *fp = NULL;
+//			if ((fp = fopen("trace_write.dat", "a+")) == NULL)
+//			{
+//				DEBUG_INFO_STREAM("Error:failed to open trace_write.dat\n");
+//				return;
+//			}
+			fp = fopen("trace_write.dat","a+");
+			fprintf(fp, "[%8x]\t[%8x]\t",CC,writePC);
+			int enable_way[4] = { 0,0,0,0 };
+			enable_way[victim] = 1;
+			fprintf(fp, "way:%d\t",victim);
+			fprintf(fp, "enable:1%d%d%d%d\t",enable_way[0],enable_way[1],enable_way[2],enable_way[3]);
+			fprintf(fp, "valid:%d%d%d%d\t",writeLine.tagLine.valid[0],
+					writeLine.tagLine.valid[1],writeLine.tagLine.valid[2],writeLine.tagLine.valid[3]);
+			fprintf(fp, "lru:%2x\t",writeLine.tagLine.lru);
+			fprintf(fp, "tag:%8x %8x %8x %8x", writeLine.tagLine.tag[0],writeLine.tagLine.tag[1],
+					writeLine.tagLine.tag[2],writeLine.tagLine.tag[3]);
+			fprintf(fp, "data:");
+			for(int i=0;i<16;i++){
+				fprintf(fp, "%8x ", writeLine.dataLine[victim].insnSlot[i]);
+			}
+			fprintf(fp,"\n");
+			fclose(fp);
+#endif
+		}
+	}
+
+	//3. read and write operations in 4 banks
+	write_vector.clear();
+	assert(write_vector.empty());
+	for(int i=0; i<4; i++){
+		if(rwEn[i]){						//enabled r/w
+			if(readOrWrite[i] == false){	//read
+				readOutBuffer[i].write(cacheMem[i][parseEntryIdx(PCAddress[i])].read());
+			}else{	//write
+				cacheMem[i][parseEntryIdx(PCAddress[i])].write(writeInput[i]);
+				write_elem * ptr_wr = new write_elem();
+				ptr_wr->bank_idx = i;
+				ptr_wr->entry_idx = parseEntryIdx(PCAddress[i]);
+				ptr_wr->write_content = writeInput[i];
+				write_vector.push_back(*ptr_wr);
+				delete ptr_wr;
+			}
+		}
+	}
+
+	}//if(!in_flush_rpoc)
+	else{		//flush processing
+		for(int i=0;i<4;i++){
+			cacheMem[i][parseEntryIdx(readPC)].reset();
+			DEBUG_INFO_STREAM("EVENT: flush pc= 0x"<<std::hex<<readPC<<std::endl);
+		}
+		//clear rewrite_en register
+		wb_En_reg.reset();
+		icWbDelay_2nd_w = false;
+
+	}
+
+	//SynRam_s(clk,ce_n,wr_en, addr, wrData,rdData)
+
+	return;
+}
+
+void icache_ram_new::update()
+{
+
+	//TODO: This loop consumed too match time, get rid of it
+//	for(int i=0;i<4;i++){
+//		for(int j=0;j<128;j++){
+//			cacheMem[i][j].update();
+//		}
+//		readOutBuffer[i].update();
+//	}
+	std::vector<write_elem>::iterator it;
+	for(it= write_vector.begin();it != write_vector.end(); it++){
+		cacheMem[(*it).bank_idx][(*it).entry_idx].update();
+	}
+	for(int i=0;i<4;i++){
+		readOutBuffer[i].update();
+	}
+	wb_En_reg.update();
+	wb_PC_reg.update();
+	wb_Line_reg.update();
+}
+
+//void icache_ram_new::parsePC()
+//{
+//	//parse readPC and writePC, set internal signals
+//	readPC_bank_sel = readPC >> 4 & 0x3;
+//	readPC_entry_sel = readPC >>6 & 0x7f;
+//	readPC_tag = readPC >> 13 & 0x7ffff;
+//	readPC_offset = readPC & 0xf;
+//	writePC_bank_sel = writePC >> 4 & 0x3;
+//	writePC_entry_sel = writePC >> 6 & 0x7f;
+//	writePC_tag = writePC >> 13 & 0x7ffff;
+//	writePC_offset = writePC & 0xf;
+//	return;
+//}
+
+void icache_ram_new::gatherInputSignals(bool p_flush,unsigned int p_readPC, bool p_readEn,
+		unsigned int p_writePC, bool p_writeEn, cacheLine2136 p_writeLine)
+{
+	in_flush_proc = p_flush;
+	readPC = p_readPC;
+	readEn = p_readEn;
+	writePC = p_writePC;
+	writeEn = p_writeEn;
+	writeLine = p_writeLine;
+	return;
+}
+
+void icache_ram_new::emitOutputSignals(cacheLine2136 p_readLine[4])
+{
+	for(int i=0;i<4;i++){
+		//p_readLine[i] = readLine[i];
+		p_readLine[i] = readOutBuffer[i].read();
+	}
+	return;
+}
+
+bool icache_ram_new::getWb2nd()
+{
+	return icWbDelay_2nd_w;
+}
+unsigned int icache_ram_new::parseBankIdx(unsigned int PC)
+{
+	return PC >> 4 & 0x3;		//PC[4..5], 0~3
+}
+
+unsigned int icache_ram_new::parseEntryIdx(unsigned int PC)
+{
+	return PC >> 6 & 0x7f;		//PC[6..12], 0~127
+}
+
+unsigned int icache_ram_new::parseOffsetIdx(unsigned int PC)
+{
+	return  PC & 0xf;
+}
+
+unsigned int icache_ram_new::parseTagIdx(unsigned int PC)
+{
+	return PC >>13 & 0x7ffff;
+}
+bool icache_ram_new::set(unsigned int addr,unsigned int value)
+{
+	//Can only be used in SRAM mode, tag will be modified too.
+
+	if(addr<lowAddr || addr>highAddr){
+		return false;
+	}
+	unsigned int idx = addr;
+	unsigned int bank_idx = parseBankIdx(idx);
+	unsigned int entry_idx = parseEntryIdx(idx);
+	unsigned int offset_idx = parseOffsetIdx(idx);
+	unsigned int way_idx = parseTagIdx(idx) & 0x3;	//lower 2 bits of Tag indicate witch way
+
+	cacheLine2136 tmp = cacheMem[bank_idx][entry_idx].read();
+	tmp.dataLine[way_idx].insnSlot[offset_idx] = value;
+	tmp.tagLine.valid[way_idx] = 1;
+	tmp.tagLine.tag[way_idx] = parseTagIdx(addr);
+	cacheMem[bank_idx][entry_idx].set(tmp);
+	return true;
+}
+
+bool icache_ram_new::get(unsigned int addr,unsigned int *value)
+{
+	if(addr<lowAddr || addr>highAddr){
+		return false;
+	}
+	unsigned int idx = addr;
+	unsigned int bank_idx = parseBankIdx(idx);
+	unsigned int entry_idx = parseEntryIdx(idx);
+	unsigned int offset_idx = parseOffsetIdx(idx);
+	unsigned int way_idx = parseTagIdx(idx) & 0x3;	//lower 2 bits of Tag indicate witch way
+
+	//Not the original way_idx,but the information in tag ram.
+	unsigned int way_idx_in_tag = way_idx;
+	unsigned int tag = parseTagIdx(idx);
+	for(int i=0;i<4;i++){
+		if (tag == cacheMem[bank_idx][entry_idx].read().tagLine.tag[i]){
+			if(cacheMem[bank_idx][entry_idx].read().tagLine.valid[i] != 0 ){
+				way_idx_in_tag = i;
+				break;
+			}
+		}
+	}
+	/*if(way_idx_in_tag==4){
+		printf("tag not found\n");
+		exit(1);
+	}*/
+
+	*value = cacheMem[bank_idx][entry_idx].read().dataLine[way_idx_in_tag].insnSlot[offset_idx];
+	return true;
+}
+
+void icache_ram_new::setSpaceAddr(unsigned int low)
+{
+	lowAddr = low;
+	//printf("lowAddr is set to 0x%x in icache_ram_new::setSpaceAddr\n",lowAddr);
+	highAddr = low + 0x7fff;
+	//TODO: reset tag and valid with space
+	return;
+}
+
+void icache_ram_new::getUtilization(double *p_util)
+{
+	//return the rate of valid data in cache
+	unsigned int validSum = 0;
+	unsigned int totalLineNum = 4*4*128;	//2048 line
+	for(int bank_idx=0;bank_idx<4;bank_idx++){
+		for(int entry_idx=0;entry_idx<128;entry_idx++){
+			for(int way_idx=0;way_idx<4;way_idx++){
+				validSum += (cacheMem[bank_idx][entry_idx].read().tagLine.valid[way_idx] == 1)?1:0;
+			}
+		}
+	}
+	*p_util = (double)validSum / totalLineNum;
+	return;
+}
+
+//void icache_ram_new::getMissRate(double *p_missRate)
+//{
+//	return;
+//}

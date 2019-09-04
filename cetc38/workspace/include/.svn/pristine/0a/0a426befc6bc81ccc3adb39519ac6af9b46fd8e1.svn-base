@@ -1,0 +1,1965 @@
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <vector>
+#include <time.h>
+#include "IOServer.hpp"
+#include "hxproto.h"
+#include "../sc_iss.h"
+//#define BOOST_THREAD_USE_LIB
+//#include <boost/thread.hpp>
+#include "JTAGLog.h"
+#include <string>
+
+using namespace std;
+
+#ifdef WIN32 
+
+#pragma warning (disable: 4996)
+#pragma warning (disable: 4311)
+#pragma warning (disable: 4312)
+#pragma warning (disable: 4267)
+#pragma warning (disable: 4018)
+#pragma warning (disable: 4244)
+
+#endif
+
+extern void PrintUserMsg(string sOutput);
+
+char IOBuf[MAXPACKSZ*WORDSZ];
+char printToFileIOBuf[MAXPACKSZ*WORDSZ];
+char filenamebuf[MAXFILENAMESIZE];
+char filenamebuf2[MAXFILENAMESIZE];
+char cmdbuf[MAXCMDSIZE];
+char keybuf[MAXKEYSIZE];
+
+IOHostServer::IOHostServer():_global_pserver_addr(0),_sbuffer_addr(0),_owner(NULL),_arr_len(0),_stdbuf_flag(0){
+	__init_opmodlist();
+	//if(TEMP_STDIN_FILE[0] == '\0'){
+	//	strcpy(TEMP_STDIN_FILE, "stdintemp.log");
+	//}
+	//if(TEMP_STDOUT_FILE[0] == '\0'){
+	//	strcpy(TEMP_STDIN_FILE, "stdouttemp.log");
+	//}
+}
+
+
+IOHostServer::IOHostServer(sc_iss *piss, unsigned int flag_addr, unsigned int sbuff_addr){
+	_owner=piss;
+	_global_pserver_addr = flag_addr;
+	_sbuffer_addr = sbuff_addr;
+	_arr_len = 0;
+	_stdbuf_flag = 0;
+	__init_opmodlist();
+#ifdef MULTI_CORE_PRINT_TO_FILE
+	char buf[32]={};
+	sprintf(buf,"app_output_%d.txt",piss->GetID());
+	fstdout=fopen(buf,"w+");
+	/*
+	sprintf(buf,"app_input_%d.txt",piss->GetID());
+		fstdin=fopen(buf,"r");*/
+	fstdin=NULL;
+#endif
+}
+IOHostServer::~IOHostServer(){
+
+	map<int, OpenMode>::iterator iter = _opmod_list.begin();
+	while(iter != _opmod_list.end()){
+		int fd = iter->first;
+		if(fd >4){
+			fclose((FILE*)fd);
+		}
+		iter++;
+	}
+	_global_pserver_addr = 0;
+    _sbuffer_addr = 0;
+    _debug_data_addr = 0;
+#ifdef MULTI_CORE_PRINT_TO_FILE
+	if(fstdout)
+		fclose(fstdout);
+	if(fstdin)
+		fclose(fstdin);
+#endif
+}
+
+bool IOHostServer::_writeMemory(unsigned int start, unsigned int len, vector<unsigned int> *pvData)
+{
+	if((start>=0x1000000)&&(start<0x2000000))
+	{
+		start=start-0x1000000;
+	}
+	else if((start>=0x2000000)&&(start<0x3000000))
+	{
+		start=start-0x2000000;
+	}
+	unsigned int paddr=start;
+	for (int i=0;i<len;i++)
+	{
+		unsigned int tempvalue=pvData->at(i);
+		if(!_owner->WriteMem(paddr,tempvalue))
+		{
+			return false;
+		}
+		paddr++;
+	}
+	return true;
+}
+
+bool IOHostServer::_readMemory(unsigned int start, unsigned int len, vector<unsigned int > *pvData)
+{
+	if((start>=0x1000000)&&(start<0x2000000))
+	{
+		start=start-0x1000000;
+	}
+	else if((start>=0x2000000)&&(start<0x3000000))
+	{
+		start=start-0x2000000;
+	}
+
+	unsigned int paddr=start;
+	pvData->clear();
+	for (int i=0;i<len;i++)
+	{
+		unsigned int tempvalue;
+		if(!_owner->ReadMem(paddr,&tempvalue))
+		{
+			return false;
+		}
+		pvData->push_back(tempvalue);
+		paddr++;
+	}
+	return true;
+}
+
+bool IOHostServer::preread(){
+
+	return _readMemory(_global_pserver_addr,IOBUFFER_SIZE,&_iobuffer);
+}
+//void IOHostServer::set_path(char* prj_dir, char* temp_stdin_file, char* temp_stdout_file){
+//	strcpy(PRJ_DIR, prj_dir);
+//	strcpy(TEMP_STDIN_FILE, temp_stdin_file);
+//	strcpy(TEMP_STDOUT_FILE, temp_stdout_file);
+//}
+char* IOHostServer::prj_dir(){
+	return PRJ_DIR;
+}
+//char* IOHostServer::temp_stdin_file(){
+//	return TEMP_STDIN_FILE;
+//}
+//char* IOHostServer::temp_stdout_file(){
+//	return TEMP_STDOUT_FILE;
+//}
+void IOHostServer::setdebugger(sc_iss *piss){
+	_owner=piss;
+}
+
+//void HostServer::selectmodel(int model_num){
+//	_model_num = model_num;
+//}
+/* Set buffer address */
+void IOHostServer::setbufaddr(unsigned int addr){
+	_sbuffer_addr = addr;
+}
+/* Get buffer address */
+unsigned int IOHostServer::getbufaddr(){
+	return _sbuffer_addr;
+}
+void IOHostServer::setdebugdataaddr(unsigned int addr){
+	_debug_data_addr = addr;
+}
+/* Set flag address  */
+void IOHostServer::setflagaddr(unsigned int addr){
+	_global_pserver_addr = addr;
+}
+ /* Get flag address  */
+ unsigned int IOHostServer::getflagaddr(){
+ 	return _global_pserver_addr;
+}
+
+int IOHostServer::getstdoutflag(){
+	unsigned int ret;
+	//__readdata(_global_pserver_addr, &ret);
+	ret = _iobuffer.at(0);
+	ret &= 0x00000004;
+	return ret?1:0;
+}
+int IOHostServer::getstdinflag(){
+	unsigned int ret;
+	//__readdata(_global_pserver_addr, &ret);
+	ret = _iobuffer.at(0);
+	ret &= 0x00000002;
+	return ret?1:0;
+}
+
+int IOHostServer::getstdbufflag(){
+	return _stdbuf_flag;
+}
+unsigned int* IOHostServer::getplotparams(){
+	return _plot_params;
+}
+vector<unsigned int>* IOHostServer::getstdbuf(){
+	return &_stdbuf;
+}
+void IOHostServer::clrstdoutflag(){
+	unsigned int ret;
+	//__readdata(_global_pserver_addr, &ret);
+	ret = _iobuffer.at(0);
+	ret &= 0xFFFFFFFB;
+	//__writedata(_global_pserver_addr, ret);
+	_iobuffer.at(0) = ret;
+	__mv_cursor(0);
+	//FILE* fp = fopen(TEMP_STDOUT_FILE, "w");
+	//fclose(fp);
+	
+}
+void IOHostServer::clrstdinflag(){
+	unsigned int ret;
+	//__readdata(_global_pserver_addr, &ret);
+	ret = _iobuffer.at(0);
+	ret &= 0xFFFFFFFD;
+	//__writedata(_global_pserver_addr, ret);	
+	_iobuffer.at(0) = ret;
+	__mv_cursor(0);
+}
+void IOHostServer::clrstdbuf(){
+	_stdbuf_flag = 0;
+	_arr_len = 0;
+	_stdbuf.clear();
+}
+/*initialize _opmod_list, add stdin, stdout and stderr to the list*/
+void IOHostServer::__init_opmodlist(){
+	__addmod(0,"stdin",ASC);
+	__addmod(1,"stdout",ASC);  
+	__addmod(2,"stderr",ASC);
+	//__addmod(4,"stdbuf",BIN);
+}
+	
+/* Add file-open-mode to _opmod_list */
+void IOHostServer::__addmod(int fd, const char *filename, OPMODE mode){
+	OpenMode fi;
+	fi.fd = fd;
+	strcpy(fi.filename, filename);
+	fi.mode = mode;
+	_opmod_list.insert(pair< int, OpenMode >(fd, fi));
+}
+
+/* Get file-open-mode of a file, ASC or BIN. If not find the file, return -1 */
+int IOHostServer::__getmod(int fd){
+	map<int, OpenMode>::iterator iter;
+	iter = _opmod_list.find(fd);
+	if (iter != _opmod_list.end()) {
+		return (int)((iter->second).mode);
+	} else {
+		return -1;
+	}
+}
+/* Get file name*/
+void IOHostServer::__getfilename(int fd, char *filename){
+	map<int, OpenMode>::iterator iter;
+	iter = _opmod_list.find(fd);
+	if (iter != _opmod_list.end()) {
+		 strcpy(filename, (iter->second).filename);
+	}else{
+		strcpy(filename,"");
+	}
+}
+/*Show all file-open modes*/
+void IOHostServer::__showallmods(){
+	map<int, OpenMode>::iterator iter;
+	iter = _opmod_list.begin();
+	printf("%s   %s\n", "file pointer", "open mode");
+	while(iter != _opmod_list.end()) {
+		if((iter->second).mode == ASC)
+			printf("%d   %s\n", iter->first, "ASC");
+		if((iter->second).mode == BIN)
+			printf("%d   %s\n", iter->first, "BIN");
+		iter++;
+	}
+}
+
+/* Delete file-open-mode from _opmod_list. Return 1:success, 0:not find the file */
+int IOHostServer::__delmod(int fd){
+	map<int, OpenMode>::iterator iter;
+	iter = _opmod_list.find(fd);
+	if (iter != _opmod_list.end()) {
+		_opmod_list.erase(iter);
+		return 1;
+	} else {
+		return 0;
+	}
+}
+
+/* Get flag value.
+ * That flag is equal to 0 means there is no new command in the shared buffer.
+ * That flag is equal to 1 means there is a new command in the shared buffer, hostserver can do it .
+ */
+int IOHostServer::__getflag(){
+	unsigned int ret;
+	//__readdata(_global_pserver_addr, &ret);
+	ret = _iobuffer.at(0);
+	ret &= 0x00000001;
+	return ret;
+}
+/* Set flag value */
+void IOHostServer::__setflag(int flag){
+	unsigned int ret;
+	//__readdata(_global_pserver_addr, &ret);
+    ret = _iobuffer.at(0);
+	if(flag == 1){
+		ret |= 0x00000001;
+	}
+	if(flag == 0){
+		ret &= 0xFFFFFFFE;
+	}
+	//__writedata(_global_pserver_addr, flag);
+	_iobuffer.at(0) = ret;
+	__mv_cursor(0);
+}
+/* Pick  operation code up from shared memory */
+int IOHostServer::__op_code(){
+	unsigned int ret;
+	//__readdata(_sbuffer_addr, &ret);
+	ret = _iobuffer.at(1);
+	return ret;
+}
+/* Pick string length up from shared memory */
+int IOHostServer::__len(){
+	unsigned int ret;
+	//__readdata(_sbuffer_addr+1, &ret);
+	ret = _iobuffer.at(2);
+	return ret;
+}
+/* Get the value at offset place  */
+int IOHostServer::__val(unsigned int offset){
+	unsigned int ret;
+	if(offset>3){
+		__readdata(_sbuffer_addr+offset, &ret);
+	}else{
+		ret = _iobuffer.at(1 + offset);
+	}
+	return ret;
+}
+/* Set the value at offset place */
+void IOHostServer::__setval(unsigned int val, unsigned int offset){
+	if(offset>2){
+		__writedata(_sbuffer_addr+offset, val);
+	}else{
+		_iobuffer.at(1 + offset) = val;
+	    __mv_cursor(1 + offset);
+	}
+}
+/*
+ *Set result of a file operation, SUCCESS or ERROR, offset in shared memory is 0 .
+ */
+void IOHostServer::__setresult(unsigned int ret){
+	//__writedata(_sbuffer_addr, ret);
+	_iobuffer.at(1) = ret;
+	__mv_cursor(1);
+}
+/*
+*Set string length, offset in shared memory is 1.
+*/
+void IOHostServer::__setlen(unsigned int len){
+	//__writedata(_sbuffer_addr+1, len);
+	_iobuffer.at(2) = len;
+	__mv_cursor(2);
+}
+/* Allocate buffer space 
+ * pbuf will pointer to new buffer address, len is buffer size, return new buffer address
+ */
+char* IOHostServer::__allocbuf(char **pbuf, unsigned int len){
+	if(*pbuf != NULL || len<=0)
+		return NULL;
+	else{
+		(*pbuf) = (char*)malloc(len*sizeof(char));//allocate memory space
+		return *pbuf;
+	}
+}
+/* Release buffer space */
+void IOHostServer::__freebuf(char *buf){
+	free(buf);
+}
+bool IOHostServer::_writeback(){
+	if(_cursor>0){
+		vector<unsigned int> _output;
+		int i;
+		for(i=0;i<_cursor;i++){
+			_output.push_back(_iobuffer.at(i));
+		}
+
+		return _writeMemory(_global_pserver_addr,_output.size(),&_output);
+	}
+	return true;
+}
+void IOHostServer::__mv_cursor(int new_place){
+	if(_cursor<(new_place+1)){
+	   _cursor = new_place+1;
+	}
+}
+bool IOHostServer::__readdata(unsigned int startaddr, unsigned int* data){
+	//_data_buf.clear();
+	bool ret = _readMemory(startaddr,1,&_data_buf);
+	*data = _data_buf.at(0);
+	return ret;
+}
+bool IOHostServer::__writedata(unsigned int startaddr, unsigned int data){
+	_data_buf.clear();
+	_data_buf.push_back(data);
+	return _writeMemory(startaddr,_data_buf.size(),&_data_buf);
+}
+/*
+ *Load a string in shared memory into a temporay buffer
+ *offset : the offset of string in shared memory
+ *tmp_buf: temporary buffer address
+ *len: string length
+ *mode: file open mode  ASC(ASCII) or BIN(Binary)
+ *Return the length(unit:byte) of the string in the temporary buffer, Error if return 0.
+ */
+int IOHostServer::__readbuf(unsigned int offset, char *tmp_buf, int len, OPMODE mode){
+	if(( tmp_buf ==NULL || offset<0) || len <=0){// error parameters
+		return 0;
+	}else{
+		unsigned int i,j,end;
+		unsigned int start = _sbuffer_addr + offset;
+		_data_buf.clear();
+		if(len == 1){
+			_data_buf.push_back(_iobuffer.at(1 + offset));
+		}else{
+			_readMemory(start,len,&_data_buf);
+		}
+		if(mode == ASC){//Open mode is ASCII
+		
+			//(*tmp_buf) = (char*)malloc(len*sizeof(char));//allocate memory space
+			//compress and replicate string in shared memory,  1word(4bytes)-->1byte
+
+			for(i=0;i<len;i++){
+				//_pModel->ReadMem(start+i, &c);
+				*(tmp_buf+i) = (char)(_data_buf.at(i));
+			}
+			return len;
+		}
+		if(mode == BIN){//Open mode is Binary
+			//(*tmp_buf) = (char*)malloc(4*len*sizeof(char));//allocate memory space
+			//replicate string in shared memory without compressing. 1word --> 4bytes
+			end = WORDSZ*len;
+			for(i=0,j=0;i<end;i+=WORDSZ,j++){
+				//_pModel->ReadMem(start+j, &c);
+				*((unsigned int*)(tmp_buf+i)) = (unsigned int)(_data_buf.at(j));
+			}
+			return WORDSZ*len;
+		}
+	}
+	return 0;
+}
+/*
+ *Fill things in the  temporay buffer into the shared memory starting at offset
+ *offset : the offset of string in shared memory
+ *tmp_buf: temporary buffer address
+ *len: string length
+ *mode: file open mode  ASC(ASCII) or BIN(Binary)
+ *Return the length(unit:word) of the string  in the shared memory, Error if return 0.
+ */
+int IOHostServer::__filbuf(unsigned int offset, char *tmp_buf, int len, OPMODE mode){
+	if(( tmp_buf ==NULL || offset<0) || len <=0){// error parameters
+		return 0;
+	}else{
+		unsigned int i,j;
+		unsigned int start = _sbuffer_addr + offset;
+		_data_buf.clear();
+		if(mode == ASC){//Open mode is ASCII
+			//extend and replicate string to shared memory,  1byte-->1word(4bytes)
+			for(i=0;i<len;i++){
+				_data_buf.push_back((unsigned int)tmp_buf[i]);
+				//_pModel->WriteMem(start+i, c);				
+			}
+			if(len == 1){//offset = 2;
+				_iobuffer.at(1 + offset) = _data_buf.at(0);
+				__mv_cursor(1 + offset);
+			}else{
+				_writeMemory(start,_data_buf.size(),&_data_buf);
+			}
+			return len;
+		}
+		if(mode == BIN){//Open mode is Binary
+			//replicate string to shared memory without extending,  4bytes-->1word 
+			for(i=0,j=0;i<len;i+=WORDSZ,j++){
+				_data_buf.push_back(*((unsigned int*)(tmp_buf+i)));
+				//_pModel->WriteMem(start+j, c);
+			}
+			if(len == 4){//offset = 2, 4bytes
+				_iobuffer.at(1 + offset) = _data_buf.at(0);
+				__mv_cursor(1 + offset);
+			}else{
+				_writeMemory(start,_data_buf.size(),&_data_buf);
+			}
+			return len/WORDSZ;
+		}
+	}
+	return 0;
+}
+
+void showhex(char *arr, int len){
+	int i;
+	for(i=0;i<len;i++){
+		unsigned char c;
+		c = (unsigned char)arr[i];
+		printf("%2d ", c);
+	}
+	printf("\n");
+}
+ 
+
+/* Execute a command stored in the buffer */
+int IOHostServer::exec(){
+	/*Read 4 words in advance*/
+	//_preread();
+    _cursor = 0;
+	if(__getflag() == 1 && getbufaddr() != 0){
+		/*Request code, refering to the protocol in hxproto.h*/
+		int req_code = (int)(unsigned char)(__op_code());
+		int lock = 1;
+		switch(req_code){
+			case SP_OPEN2 :
+				{
+					/*file name length*/
+					int len = __len();
+					/*file name*/
+					//char *fn = NULL;
+					/*open flag*/
+					int spoflag;
+					/*Get file name*/
+					//if(__allocbuf(&fn,len+1)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					__readbuf(VCODESZ+VLENSZ, filenamebuf, len, ASC);
+					*(filenamebuf+len) = '\0';
+					/*Get open flag*/
+					spoflag = INT32(__val(VCODESZ+VLENSZ+len));
+					_open(filenamebuf, spoflag);
+					//__freebuf(fn);
+					lock = 0;
+					break;
+				}
+			case SP_CLOSE :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					/*Close file*/
+					_close(fd);
+					lock = 0;
+					break;
+				}
+			case SP_PUTBLOCK :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					/*Get number of objects for writing to a file*/
+					int count = __val(2);
+					/*Allocate a temporary buffer to load string in the shared buffer*/
+					//char *buf = NULL;
+					//if(__allocbuf(&buf,MAXPACKSZ*WORDSZ)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					int mod = __getmod(fd);
+					if(mod == -1)
+						return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					/* Load string in the shared buffer */
+					JTAGLog(0,"IOServer write block fd %d, count %d, mod %d\n",fd,count,mod);
+					count = __readbuf(3, IOBuf, count, (OPMODE)mod);
+					/* Write the string into the file */
+					_write(fd, IOBuf, count);
+					/* Release buffer space */
+					/*__freebuf(buf);
+					buf = NULL;*/
+					lock = 0;
+					break;
+				}
+			case SP_GETBLOCK :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					/*Get number of objects for reading from a file*/
+					int count = __val(2);
+					/*Starting address of buffer*/
+					/*Allocate a temporary buffer to load string in the shared buffer*/
+					//char *buf = NULL;
+					//if(__allocbuf(&buf,MAXPACKSZ*WORDSZ)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					int mod = __getmod(fd);
+					if(mod == -1)
+						return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					if(mod == BIN)
+						count *= WORDSZ;
+					/* Load a string which size is [count] into buffer from the file */
+					_read(fd, IOBuf, count);
+					/* Write the string from temporary buffer to shared buffer */
+					__filbuf(2, IOBuf, count+1, (OPMODE)mod);
+					/* Release buffer space */
+					/*__freebuf(buf);
+					buf = NULL;*/
+					lock = 0;
+					break;
+				}
+			case SP_EOF :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					_eof(fd);
+					lock = 0;
+					break;
+				}
+			case SP_FERROR :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					_ferror(fd);
+					lock = 0;
+					break;
+				}
+			case SP_EXIT :
+				{
+					int status = __val(1);
+					_exit(status);
+                    lock = 0;
+					break;
+				}
+			case SP_TIMES :
+				{
+					int elapsedtime = __val(1);
+    			    int usertime = __val(5);
+    			    int systime = __val(9);
+    			    //_msgpool.put_msg("ElapsedTime:%d,UserTime:%d,SysTime:%d\n", elapsedtime, usertime, systime);
+				    __setresult((unsigned int)SP_SUCCESS);
+				    lock = 0;
+                    break;
+				}
+			case SP_RENAME :
+				{
+					int olen, nlen;
+					/*char* ofn = NULL;
+					char* nfn = NULL;*/
+					/*Get file name length*/
+					olen = __val(1);
+					nlen = __val(1+olen+1);
+					/*Get file name*/
+					//if(__allocbuf(&ofn,olen+1)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					__readbuf(VCODESZ+VLENSZ, filenamebuf, olen, ASC);
+					*(filenamebuf+olen) = '\0';
+					//if(__allocbuf(&nfn,nlen+1)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					__readbuf(VCODESZ+VLENSZ+olen+VLENSZ, filenamebuf2, nlen, ASC);
+					*(filenamebuf2+nlen) = '\0';
+					/*Rename file*/
+					_rename(filenamebuf, filenamebuf2);
+					/*__freebuf(ofn);
+					__freebuf(nfn);*/
+					lock = 0;
+					break;
+				}
+			case SP_REMOVE :
+				{
+					/*Get file name length*/
+					int len = __len();
+					/*file name*/
+					//char *fn = NULL;
+					/*Get file name*/
+					//if(__allocbuf(&fn,len+1)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					__readbuf(VCODESZ+VLENSZ, filenamebuf, len, ASC);
+					*(filenamebuf+len) = '\0';
+					/*Remove file*/
+					_remove(filenamebuf);
+					//__freebuf(fn);
+					lock = 0;
+					break;
+				}
+			case SP_TELL :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					_tell(fd, (OPMODE)(__getmod(fd)));
+					lock = 0;
+					break;
+				}
+			case SP_SEEK :
+				{
+					/*Get file pointer*/
+					int fd = __val(1);
+					long offset = __val(2);
+					int origin = __val(3);
+					origin = (origin == SP_SEEK_SET ? SEEK_SET :
+					origin == SP_SEEK_CUR ? SEEK_CUR :
+						 SEEK_END);
+					_lseek(fd, offset, origin, (OPMODE)(__getmod(fd)));
+					lock = 0;
+					break;
+				}
+			case SP_GETENV :
+				{
+					/*key length*/
+					int len = __len();
+					/*key*/
+					//char *key = NULL;
+					/*value returned by getenv()*/
+					char getenvbuf[1024];
+					//if(__allocbuf(&key,len+1)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					__readbuf(VCODESZ+VLENSZ, keybuf, len, ASC);
+					*(keybuf+len) = '\0';
+					/*Get maximal length of value returned by _getenv()*/
+					size_t max_len =  (MAXPACKSZ-2)<sizeof(getenvbuf)? (MAXPACKSZ-2) : sizeof(getenvbuf);
+					_getenv(keybuf, getenvbuf, max_len);
+
+					/*copy value to shared buffer*/
+					__filbuf(2, getenvbuf, max_len, ASC);
+					//__freebuf(key);
+					lock = 0;
+					break;
+				}
+			case SP_SYSTEM :
+				{
+					/*command string length*/
+					int len = __len();
+					/*Get command string*/
+					//char *cmd = NULL;
+					//if(__allocbuf(&cmd,len+1)==NULL)
+					//	return EXIT_FAILURE;//exit(EXIT_FAILURE);
+					__readbuf(VCODESZ+VLENSZ, cmdbuf, len, ASC);
+					*(cmdbuf+len) = '\0';
+
+					_system(cmdbuf);
+
+					//__freebuf(cmd);
+					lock = 0;
+					break;
+				}
+			case SP_TIME :
+				{
+					time_t local;
+					time_t UTC;
+
+					_time(&local, &UTC);
+
+					lock = 0;
+					break;
+				}
+#ifdef DSP_WIN32
+			case SP_SOCKET_CREATE:
+				{
+					unsigned int domain=__val(1);
+					unsigned int type=__val(2);
+					unsigned int protocol=__val(3);
+					unsigned int sock=_socket_create(domain, type,protocol);
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(sock,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_CONNECT:
+				{
+					int ret = _socket_connect();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_SEND:
+				{
+					int len=_socket_send();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(len,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_RECV:
+				{
+					int len=_socket_recv();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(len,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_CLOSE:
+				{
+					int ret=_socket_close();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_SHUTDOWN:
+				{
+					int ret=_socket_shutdown();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_BIND:
+				{
+					int ret=_socket_bind();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_LISTEN:
+				{
+					int ret=_socket_listen();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_ACCEPT:
+				{
+					int ret=_socket_accept();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(0,1);
+					__setval(ret,2);
+					lock=0;
+					break;
+				}
+
+			case SP_SOCKET_SETSOCKOPT:
+				{
+					int ret=_socket_setopt();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_SENDTO:
+				{
+					int ret=_socket_sendto();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_RECVFROM:
+				{
+					int ret=_socket_recvfrom();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+			case SP_SOCKET_GETLASTERROR:
+				{
+					int ret=_socket_getlasterror();
+					__setresult((unsigned int)SP_SUCCESS);
+					__setval(ret,1);
+					lock=0;
+					break;
+				}
+#endif
+			default :
+			  {
+				//_msgpool.put_msg("ERROR! request code:%d\n",req_code);
+				__setresult((unsigned int)SP_ERROR);
+				lock = 0;
+			  }
+		}
+
+		if(!lock){
+			__setflag(0);
+		}
+		_writeback();
+		//unsigned int val;
+		//__readdata(_sbuffer_addr, &val);
+		//_msgpool.show_allmsg();
+		//_msgpool.clear();
+		return 1;
+	}else{
+		return 0;
+	}
+}
+
+/*Is absolute path?
+ *Return 
+ * 0: relative path
+ * 1: absolute path
+ */
+int is_abs_path(const char* path){
+	int i = 0;
+	while(path[i]==' ' || path[i]=='\t'){
+		i++;
+	}
+	if(path[i]=='\0'){//empty path
+		return 0;
+	}
+	if(path[i]=='.'){//".\..." or "./..."
+		return 0;//relative path
+	}
+	if(path[i] == '\\' || path[i] == '/'){// "/..." or "\..."
+		return 1;//absolute path
+	}
+	while(path[i]!='\\' && path[i]!='/' && path[i]!='\0'){
+		if(path[i] == ':'){//disk symbol "D:\..." or "ftp:\\..."
+			return 1;//absolute path
+		}
+		i++;
+	}
+	return 0; //relative path
+}
+
+/*file open mode:
+*		"r" Open a text file for reading 
+*		"w" Create a text file for writing 
+*		"a" Append to a text file 
+*		"rb" Open a binary file for reading 
+*		"wb" Create a binary file for writing 
+*		"ab" Append to a binary file 
+*		"r+" Open a text file for read/write 
+*		"w+" Create a text file for read/write 
+*		"a+" Open a text file for read/write 
+*		"rb+" Open a binary file for read/write 
+*		"wb+" Create a binary file for read/write 
+*		"ab+" Open a binary file for read/write 
+*/
+/**
+* Return file pointer address if OK, -1 if not.
+*/
+int IOHostServer::_open(const char *filename, int spoflag, ...){
+
+	/*file handle*/
+	FILE *fp = NULL;
+	/*file open mode*/
+	char mode[8];
+	/*Get file open mode*/
+	mode[0] = '\0';
+	int i=0;
+	OPMODE mod = ASC;
+	if (spoflag & SP_O_RDONLY) {//"r"
+		mode[0] = 'r';
+		i++;
+	}else if (spoflag & SP_O_TRUNC){//"w"
+  	mode[0] = 'w';
+		i++;
+	}else if (spoflag & SP_O_APPEND){//"a"
+		mode[0] = 'a';
+		i++;
+	}
+	if (spoflag & SP_O_BINARY){//"b"
+		mode[i] = 'b';
+		mod = BIN;
+		i++;
+	}
+	if (spoflag & SP_O_RDWR){//"+"
+		mode[i] = '+';
+		i++;
+	}
+	mode[i] = '\0';
+#ifdef AT_WINDOWS
+	if(!is_abs_path(filename)){//file name is a relative path
+		char abs_file_path[1024]={0};
+		sprintf(abs_file_path, "%s\\%s", PRJ_DIR, filename);//compose absolute path
+		/*Open file*/
+		fp = fopen(abs_file_path,mode);
+	}else{//file name is an absolute path
+		/*Open file*/
+		fp = fopen(filename,mode);
+	}
+#else
+	/*Open file*/
+	fp = fopen(filename,mode);
+#endif
+	if(fp != NULL){
+		/* Add mode to _opmod_list*/
+		if(mod == ASC)
+			__addmod((int &)fp, filename, ASC);
+		if(mod == BIN)
+		__addmod((int &)fp, filename, BIN);
+		__setresult((unsigned int )SP_SUCCESS);
+		__setval((unsigned int &)fp,1);
+		//_msgpool.put_msg("successful to open file:%s,mode:%s, fd:%d\n",filename,mode,(int &)fp);
+	}else{
+		__setresult((unsigned int)SP_ERROR);
+		__setval((unsigned int)NULL,1);
+		//_msgpool.put_msg("failed to open file:%s,mode:%s\n",filename,mode);
+		return -1;
+	}
+
+	return (int &)fp;
+}
+
+
+/*
+ *
+ *  Close file descriptor fd on host.  Return 0 if OK, -1 if not.
+ *
+ */
+int IOHostServer::_close(int fd){
+	FILE *fp = (FILE *)fd;
+    if(((fd==0 || fd==1)|| fd==2)||fd==4){//can't close stdin(0),stdout(1),stderr(2)
+  	   __setresult((unsigned int)SP_SUCCESS);
+    }else{
+		if(!fclose(fp)){
+			__delmod(fd);
+			//_msgpool.put_msg("successful to close file, fd:%d\n",fd);
+  		__setresult((unsigned int)SP_SUCCESS);
+		}else{
+	 		__setval((unsigned int)-1,1);
+			return -1;
+		}
+    }
+	return 0;
+}
+
+
+/*
+ *
+ *      int _read (int fd, void *buf, size_t nbytes)
+ *
+ *  Read specified number of bytes from specified file descriptor into
+ *  buffer, and return the number of bytes read, or -1 in case of an
+ *  error.  This function tries very hard to work around iserver problems,
+ *  and also support pserver extensions to provide good error checking and
+ *  reporting.  If the requested number of bytes is larger than a single
+ *  server reply packet can hold, multiple requests are issued.
+ *
+ */
+
+int IOHostServer::_read (int fd, void *buf, size_t nbytes){
+	FILE *fp = NULL;
+	FILE *stdin_bk = NULL;
+	size_t count = 0;
+	//char filename[200];
+
+	#ifdef REDIRECT_STDIN
+		if(fd == 0){
+			fp = fopen(TEMP_STDIN_FILE, READ_MODE_STR);//redirect stdin to a tempory file
+		}else{
+			fp = (FILE *)fd;
+		}
+		//__showallmods();
+		//reading ...
+		count = fread(buf, 1, nbytes, fp);
+
+		if(fd == 0){
+			fclose(fp);
+		}//$if(fd == 0)
+	#endif
+	#ifndef REDIRECT_STDIN
+	if(fd == 0){
+			////fp = stdin;
+			//MCCDMI *pMI=(MCCDMI *)(_debugger->getMCCDMI());
+			//while(!(pMI->SetAppInput()))
+			//{
+			//	boost::this_thread::sleep(boost::posix_time::millisec(50));
+			//}
+			//boost::this_thread::sleep(boost::posix_time::millisec(200));
+			//string s;
+			//while(1)
+			//{
+			//	if(pMI->GetAppInput(s))
+			//	{
+			//		break;
+			//	}
+			//	boost::this_thread::sleep(boost::posix_time::millisec(50));
+			//}
+
+			//s=s.substr(0,nbytes);
+			//count=s.length();
+			//strcpy((char *)buf,s.c_str());
+
+		fp=stdin;
+		memset(buf,0,MAXPACKSZ*WORDSZ);
+		scanf("%s",buf);
+		count=strlen((char *)buf);
+		*((char *)buf+count)='\n';
+		count++;
+
+		
+		}else{
+			fp = (FILE *)fd;
+			count = fread(buf, 1, nbytes, fp);
+		}
+		
+	#endif
+	//__getfilename(fd, filename);
+	if(count > 0){
+		//_msgpool.put_msg("read %d bytes from file '%s'\n",count, filename);
+	  	__setresult((unsigned int)SP_SUCCESS);
+		int mod = __getmod(fd);
+		if( mod == ASC)
+			__setlen(count);
+		if( mod == BIN){
+			if((count%WORDSZ) != 0){//if count is not times of word size, it needs to make value up to word size with 0.
+				size_t i;
+				size_t makeup_size = WORDSZ - count%WORDSZ;
+				for(i=1;i<=makeup_size;i++){
+					*((char*)buf+count+i-1) = 0;
+				}
+				count += makeup_size;
+			}
+			__setlen(count/WORDSZ);
+		}
+	}else{
+		if(fd == 0){//stdin
+			//_msgpool.put_msg("read %d bytes from file '%s'\n",count, filename);
+			__setresult((unsigned int)SP_SUCCESS);
+    		int mod = __getmod(fd);
+		    __setlen(count);
+		}else{
+			if(feof(fp)){//end of file, count==0
+		        //_msgpool.put_msg("read %d bytes from file '%s'\n",count, filename);
+		        __setresult((unsigned int)SP_SUCCESS);
+	    	    int mod = __getmod(fd);
+	            __setlen(count);
+	
+			}else{//error
+				__setresult((unsigned int)SP_ERROR);
+				//_msgpool.put_msg("failed to read file '%s'\n", filename);
+				return -1;
+			}
+	  }
+	}
+	return count;
+}
+void ouput_vec(vector<unsigned int> &vec, unsigned int* params){
+	//int num = 0;
+	//int line_num = 0;
+	////cout<<"params: "<<params[0]<<" "<<params[1]<<" "<<params[2]<<" "<<params[3]<<" "<<params[4]<<" "<<endl;
+	//vector<unsigned int>::iterator iter = vec.begin();
+	//while(iter != vec.end()){
+	//	unsigned int data = *iter;
+	//	num++;
+	//	if(params[1] == 1)
+	//		//cout<<*(int*)(&data)<<" ";
+	//	if(params[1] == 2)
+	//		cout<<data<<" ";
+	//	if(params[1] == 3)
+	//		cout<<*(float*)(&data)<<" ";
+	//	iter++;
+	//	if(num%50 == 0){
+	//		line_num++;
+	//		cout<<endl;
+	//	}
+	//}
+	//cout<<endl;
+	//if(num%50 != 0){
+	//	line_num++;
+	//}
+	//cout<<"line count:"<<line_num<<"  largest data count of every line:50"<<endl;
+}
+/*
+ *
+ *      int _write (int fd, const void *buf, size_t nbytes)
+ *
+ *  Write specified number of bytes to specified file descriptor from
+ *  buffer, and return the number of bytes written, or -1 in case of an
+ *  error.  If the requested number of bytes is larger than a single
+ *  server request packet can hold, multiple requests are issued.
+ *
+ */
+int IOHostServer::_write (int fd, const void *buf, size_t nbytes){
+	size_t count = 0;
+	//if(fd == 4){//figure operation added at 2011-4-14
+	//	int len = nbytes/4;
+	//	int i = 0;
+	//	if(_stdbuf.size() == 0){
+	//		//first bag that starting with the array length(stored in buf[0]) and data type(stored in buf[0])
+	//		_arr_len = *(int*)buf;
+	//		_plot_params[0] = _arr_len;//length
+	//		_plot_params[1] = *((int*)buf + 1);//data type
+	//		_plot_params[2] = *((int*)buf + 2);//step
+	//		_plot_params[3] = *((int*)buf + 3);//2D/3D
+	//		_plot_params[4] = *((int*)buf + 4);//distance
+	//		i = 5;
+	//	}
+	//	for(;i<len;i++){
+	//		_stdbuf.push_back(*((unsigned int*)buf + i));
+	//	}
+	//	if(_stdbuf.size() == _arr_len){//_stdbuf has received enough data, figure these data
+	//		//ouput_vec(_stdbuf, _plot_params);
+	//		_stdbuf_flag = 1;
+	//		//clrstdbuf(); //_stdbuf will be cleared after the vector has been ploted.(by Yu feng lin)
+	//	}
+	//	count = nbytes;
+	//	if(count > 0){
+	//		//_msgpool.put_msg("write %d bytes to file '%s'\n",count, filename);
+	//		__setresult((unsigned int)SP_SUCCESS);
+	//		int mod = __getmod(fd);
+
+	//		if( mod == ASC)
+	//			__setlen(count);
+	//		if( mod == BIN)
+	//			__setlen(count/WORDSZ);
+
+	//	}else{
+	//		__setresult((unsigned int)SP_ERROR);
+	//		//_msgpool.put_msg("failed to write file '%s'\n", filename);
+	//		return -1;
+	//	}
+	//	return count;
+	//}
+	FILE *fp = NULL;
+	FILE *stdout_bk = NULL;
+	FILE *stderr_bk = NULL;
+	//char filename[200];
+	if(fd == 1){
+		#ifdef REDIRECT_STDOUT
+		  #ifdef AT_WINDOWS
+		    //fp = freopen(TEMP_STDOUT_FILE, WRITE_MODE_STR, stdout);//redirect stdout to a tempory file
+			fp = fopen(TEMP_STDOUT_FILE, WRITE_MODE_STR);//redirect stdout to a tempory file
+		  #else
+		    stdout_bk = stdout; //store stdout
+		    fp = fopen(TEMP_STDOUT_FILE, WRITE_MODE_STR);//redirect stdout to a tempory file
+		    stdout = fp;
+		  #endif
+		#else
+			
+			//fp = fopen(TEMP_STDOUT_FILE, WRITE_MODE_STR);//redirect stdout to a tempory file
+			//count=fwrite(buf,1,nbytes,fp);
+			//fclose(fp);
+
+			////在此添加把打印加入到MI接口中的代码，通过调用MI接口的一个函数来实现
+			//string s((char *)buf);
+			//s=s.substr(0,nbytes);
+			//PrintUserMsg(s);
+#ifdef MULTI_CORE_PRINT_TO_FILE
+		if (fstdout)
+		{
+			fp=fstdout;
+		}
+		else
+		{
+			fp=stdout;
+		}
+		
+		//printf("core %d, fp: 0x%x\n",_owner->GetID(),fp);
+#else
+		fp=stdout;
+#endif
+			
+		#endif
+	}else if(fd == 2){
+		#ifdef REDIRECT_STDERR
+		  #ifdef AT_WINDOWS
+		    fp = freopen(TEMP_STDOUT_FILE, WRITE_MODE_STR, stderr);//redirect stderr to a tempory file
+		  #else
+		    stderr_bk = stderr; //store stderr
+		    fp = fopen(TEMP_STDOUT_FILE, WRITE_MODE_STR);//redirect stderr to a tempory file
+		    stderr = fp;
+		  #endif
+		#else
+			fp = stderr;
+		#endif
+	}else{
+		fp = (FILE *)fd;
+
+	}
+	/*
+	count = fwrite(buf, 1, nbytes, fp);
+		cout<<nbytes<<" "<<_owner->GetID()<<endl;
+		const char *pbuf=(const char *)buf;
+		unsigned int a='\n',b=pbuf[nbytes-2];
+		cout<<a<<"                  "<<b<<endl;*/
+#ifdef MULTI_CORE_PRINT_TO_FILE
+	memcpy(printToFileIOBuf,buf,nbytes);
+	printToFileIOBuf[nbytes]='\0';
+	fprintf(fp,"%s\n",printToFileIOBuf);
+	count=nbytes;
+	fflush(fp);
+#else
+	count = fwrite(buf, 1, nbytes, fp);
+#endif
+
+	#ifdef REDIRECT_STDOUT
+		if(fd == 1){
+	    fclose(fp);
+	    #ifdef AT_WINDOWS
+	      //fp = freopen("CON", "w", stdout);
+	    #else
+	      stdout = stdout_bk; //restore stdout
+	    #endif
+	  }
+	#endif
+	#ifdef REDIRECT_STDERR
+	  if(fd == 2){
+		  fclose(fp);
+	    #ifdef AT_WINDOWS
+	      //fp = freopen("CON", "w", stderr);//restore stderr
+	    #else
+	      stderr = stderr_bk; //restore stderr
+	    #endif
+		}
+	#endif
+
+	//__getfilename(fd, filename);
+	if(count > 0){
+		//_msgpool.put_msg("write %d bytes to file '%s'\n",count, filename);
+		__setresult((unsigned int)SP_SUCCESS);
+		int mod = __getmod(fd);
+
+		if( mod == ASC)
+			__setlen(count);
+		if( mod == BIN)
+			__setlen(count/WORDSZ);
+
+	}else{
+		__setresult((unsigned int)SP_ERROR);
+		//_msgpool.put_msg("failed to write file '%s'\n", filename);
+		return -1;
+	}
+	return count;
+}
+
+/*
+ *
+ *      int _ferror (int fd)
+ *
+ *  Ask host for errno pertaining to fildes fd (i.e. fails if not ferror(fd)).
+ *  Sets errno, possibly converted from host values to target values, and
+ *  returns 0 if errno retrieved and -1 if not.
+ *
+ *  Pserver extension:  if fildes is -1, pserver always returns errno,
+ *      regardless of whether ferror(fd) is set.
+ *
+ *  Caller must take care of calling PSERVER and VSERVER, since the request
+ *  for errno must immediately follow the failed service request.  Also,
+ *  the caller should make sure not to call _ferror() if compiled for the
+ *  reduced library.
+ *
+ *  XXX - should improve on errno translation (use SP_ERRNO_* defs?)
+ *
+ */
+
+int IOHostServer::_ferror (int fd){
+ 	/*If fd is -1, it is failed to open the file. So fd is meaningless at this moment.*/
+	if(fd == -1)
+		return -1;
+	FILE *fp = (FILE *)fd;
+	int err_no = ferror(fp);
+	__setresult((unsigned int)SP_SUCCESS);
+	__setval((unsigned int)err_no, 1);
+	//_msgpool.put_msg("fd:%d  errno:%d\n", fd, err_no);
+	return err_no;
+}
+
+/*
+ *
+ *      int _eof (int fd)
+ *
+ *  Ask host whether fildes is at end of file (if target fildes is host
+ *  stream - see _read() and _write()).  Return nonzero if EOF, zero if not.
+ *
+ *  Caller must take care of calling PSERVER and VSERVER, since the check
+ *  for EOF must immediately follow the failed service request.  Also,
+ *  the caller should make sure not to call _feof() if compiled for the
+ *  reduced library.
+ *
+ */
+
+int IOHostServer::_eof (int fd){
+	FILE *fp = (FILE *)fd;
+	if(feof(fp)){
+		//_msgpool.put_msg("fd:%d, EOF\n",fd);
+  	__setresult((unsigned int)SP_SUCCESS);
+  	return 1;
+	}else{
+	 	__setresult((unsigned int)SP_ERROR);
+		return 0;
+	}
+}
+
+/*
+ *
+ *      void _exit (int status)
+ *
+ *  Terminate host server with specified exit status.  The target
+ *  thread is NOT stopped.
+ *
+ */
+
+void  IOHostServer::_exit (int status)
+{
+		//Don't call exit() to stop simulator
+    //exit(status);
+    //_msgpool.put_msg("EXIT %d\n",status);
+    __setresult((unsigned int)SP_SUCCESS);
+}
+
+/*
+ *
+ *      int _remove (const char *filename)
+ *
+ *  Remove the named file.  If open, behavior depends on the host.
+ *  Returns 0 if the operation succeeds, or -1 if it fails.
+ *
+ */
+
+int IOHostServer::_remove (const char *filename)
+{
+    int ret = remove(filename);
+    if(ret == 0){
+      __setresult((unsigned int)SP_SUCCESS);
+    }else{
+      __setresult((unsigned int)SP_ERROR);
+    }
+    return ret;
+}
+
+/*
+ *
+ *      int _rename (const char *old, const char *new)
+ *
+ *  Get host to rename file.  If a file with the new name exists, it is
+ *  first removed (unless no file with the new name exists).  Returns 0
+ *  if OK, -1 if not.
+ *
+ */
+int IOHostServer::_rename(const char* oldfname, const char* newfname){
+    int ret = rename(oldfname, newfname);
+    if(ret == 0){
+      __setresult((unsigned int)SP_SUCCESS);
+    }else{
+      __setresult((unsigned int)SP_ERROR);
+    }
+    return ret;
+}
+
+/*
+ *
+ *      long _lseek (int fd, long offset, int origin, int mod)
+ *
+ *  Tell host to seek to specified position in file.  Return 0 if OK, -1
+ *  if not.
+ *
+ */
+
+long IOHostServer::_lseek (int fd, long offset, int origin, OPMODE mod)
+{
+    FILE *fp = (FILE *)fd;
+    int ret;
+    if(mod == ASC){
+    	ret = fseek(fp, offset, origin);
+    }
+    if(mod == BIN){
+    	ret = fseek(fp, offset*4, origin);
+    }
+    if(ret == 0){
+      __setresult((unsigned int)SP_SUCCESS);
+    }else{
+      __setresult((unsigned int)SP_ERROR);
+    }
+    return ret;
+}
+
+/*
+ *
+ *      long _tell (int fd, int mod)
+ *
+ *  Ask host for current position in specified file.
+ *
+ */
+
+long IOHostServer::_tell (int fd, OPMODE mod)
+{
+    FILE *fp = (FILE *)fd;
+    long pos = (unsigned int)ftell(fp);
+    __setresult((unsigned int)SP_SUCCESS);
+    
+    if(mod == ASC){
+    	__setval(pos, 1);
+    }
+    if(mod == BIN){
+    	__setval(pos/4, 1);
+    }
+    /*printf("%s, pos = %d\n", (mod==ASC)?"ASC":"BIN", pos);*/
+    return pos;
+}
+
+/*
+ *
+ *      char *_getenv (const char *name, char *value, size_t len)
+ *
+ *  Ask host/OS for value of named environment variable.  If found,
+ *  the value is written in the specified buffer value (max len bytes)
+ *  and the buffer pointer is returned.  Otherwise, NULL is returned.
+ *
+ */
+
+char* IOHostServer::_getenv (const char *name, char *value, size_t len)
+{
+    char* _value = getenv(name);
+    if(_value == NULL){
+       value[0] = '\0';
+       __setresult((unsigned int)SP_ERROR);
+       return NULL;
+    }else{
+       size_t _len = strlen(_value);
+       if (len > _len+1)
+          len = _len+1;
+       memcpy (value, _value, len-1);
+       value[len-1] = '\0';
+       __setresult((unsigned int)SP_SUCCESS);
+       __setval(len-1, 1);
+       return value;
+    }
+}
+
+/*
+ *
+ *      int _system (const char *string);
+ *
+ *  Pass string to host to be executed as command.  Returns result of
+ *  system() call on host.  If string is empty, host returns indication
+ *  of whether a system() call is possible.
+ *
+ */
+
+int IOHostServer::_system (const char *string)
+{
+    int ret;
+	JTAGLog(0,"system cmd: %s\n",string);
+    ret = system(string);
+    /*Host has no responsibility of checking if implemention is successful or not, which be left to target program*/
+    __setresult((unsigned int)SP_SUCCESS);
+    __setval(ret, 1);
+    return ret;
+}
+
+/*
+ *
+ *      int _time (time_t *local, time_t *UTC)
+ *
+ *  Ask the host/OS for the local+UTC times.  If successful, stores local
+ *  and UTC times and returns nonzero.  If UTC is not available, it gets
+ *  the value 0.  If not successful, no local and UTC times are stored and
+ *  zero is returned.
+ *
+ */
+int IOHostServer::_time (time_t *local, time_t *UTC)
+{
+    time_t local_tm;
+    if(time(&local_tm) == -1){
+	    __setresult((unsigned int)SP_ERROR);
+	    return 0;
+    }else{
+      *UTC = 0;//UTC(Universal time coordinated)
+      *local = local_tm;
+      __setresult((unsigned int)SP_SUCCESS);
+      __setval(*local, 1);
+      __setval(*UTC, 2);
+      return local_tm;
+    }
+}
+
+#ifdef DSP_WIN32
+int IOHostServer::_socket_create (unsigned int domain,unsigned int type, unsigned int protocol)
+{
+	JTAGLog(0,"create socket with parameter 0x%x, 0x%x, 0x%x\n",domain,type,protocol);
+
+	int sock=socket(domain,type,protocol);
+	//__setval(sock, 0);
+	JTAGLog(0,"create socket 0x%x\n",sock);
+
+	if (sock!=INVALID_SOCKET )
+	{
+		unsigned long ul=1;
+
+		int ret = ::ioctlsocket(sock,FIONBIO,&ul);
+		if(ret == SOCKET_ERROR)
+		{
+			sock_last_error=::WSAGetLastError();
+			JTAGLog(0,"ioctlsocket error in socket function, error code 0x%x\n",sock_last_error);
+			return -1;
+		}
+		else
+		{
+			sock_last_error=0;
+			JTAGLog(0,"ioctlsocket in socket function successfully!\n");
+		}
+	}
+
+	return sock;
+}
+
+int IOHostServer::_socket_connect()
+{
+
+	int fd=__val(1);
+	unsigned int sock_buf[128]={};
+	unsigned int count = __readbuf(2, (char *)sock_buf, 15, BIN);
+	SOCKADDR addrSrv;
+	//addrSrv.sin_addr.S_un.S_addr=((sock_buf[4]&0xff)<<24)|((sock_buf[5]&0xff)<<16)|((sock_buf[6]&0xff)<<8)|(sock_buf[7]&0xff);
+	addrSrv.sa_family=sock_buf[0];
+	//addrSrv.sin_port=((sock_buf[2]&0xff)<<8)|(sock_buf[3]&0xff);
+	for (int i=0;i<14;i++)
+	{
+		addrSrv.sa_data[i]=(sock_buf[i+1])&0xff;
+	}
+
+	int ret =connect(fd,(SOCKADDR*)&addrSrv,sizeof(SOCKADDR));
+	JTAGLog(0,"connect result 0x%x\n",ret);
+	if (ret==SOCKET_ERROR)
+	{
+		sock_last_error=WSAGetLastError();
+		JTAGLog(0,"error code : 0x%x\n",sock_last_error);
+		if (sock_last_error==10035)
+			//WSAEWOULDBLOCK
+		{
+			fd_set fs;
+			TIMEVAL tv;
+			tv.tv_sec=30;
+			tv.tv_usec=0;
+			fs.fd_count=1;
+			fs.fd_array[0]=fd;
+			int sel_ret=select(0,NULL,&fs,NULL,&tv);
+			if (sel_ret>0)
+			{
+				JTAGLog(0,"connect successfully, select result %d!\n",sel_ret);
+				sock_last_error=0;
+				return 0;
+			}
+			else
+			{
+				JTAGLog(0,"connect timeout, failed, select result %d\n",sel_ret);
+				return SOCKET_ERROR;
+			}
+		}
+	}
+	else
+	{
+		sock_last_error=0;
+	}
+	return ret;
+}
+
+int IOHostServer::_socket_send()
+{
+	unsigned int send_buf[MAXSENDPACKSIZE]={};
+	unsigned int sock=__val(1);
+	unsigned int flag=__val(2);
+	unsigned int len=__val(3);
+	//JTAGLog(0,"in socket send: len %d, 0x%X, 0x%x, 0x%x, 0x%x\n",len,_iobuffer[5],_iobuffer[6],_iobuffer[7],_iobuffer[8]);
+	__readbuf(4, (char *)send_buf, len, BIN);
+	len = len*WORDSZ;
+	unsigned int count=::send(sock,(char *)send_buf,len,flag);
+
+	if (count==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"send error,  error code 0x%x, sock 0x%x, len 0x%x, flag 0x%x\n",sock_last_error,sock,len,flag);
+		return SOCKET_ERROR;
+	}
+	else
+	{
+		sock_last_error=0;
+	}
+
+	count=count/WORDSZ;
+	//网络发送和接收,返回给应用程序的长度单位都是以字为单位的,而windows平台下的
+	//套接字接口是以字节为单位的,所以要经过转化,发送(或接收)前进行一次转变,
+	//发送(或接收)后进行一次转换.
+	return count;
+}
+
+int IOHostServer::_socket_recv()
+{
+	unsigned int recv_buf[MAXSENDPACKSIZE]={};
+	unsigned int sock=__val(1);
+	unsigned int flag=__val(2);
+	unsigned int len=__val(3);
+	len=len*WORDSZ;
+	unsigned int count=::recv(sock,(char *)recv_buf,len,flag);
+	//__setval(count,1);
+	if(count==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"recv error, error code 0x%x\n",sock_last_error);
+		return SOCKET_ERROR;
+	}
+	else
+	{
+		sock_last_error=0;
+	}
+	__filbuf(2,(char *)recv_buf,count,BIN);
+	//网络发送和接收,返回给应用程序的长度单位都是以字为单位的,而windows平台下的
+	//套接字接口是以字节为单位的,所以要经过转化,发送(或接收)前进行一次转变,
+	//发送(或接收)后进行一次转换.
+	if((count%WORDSZ)==0)
+	{
+		count=count/WORDSZ;
+	}
+	else
+	{
+		count=count/WORDSZ;
+		count++;
+	}
+	return count;
+}
+
+int IOHostServer::_socket_close()
+{
+	unsigned int sock=__val(1);
+	JTAGLog(0,"in socket close, sock: 0x%x.\n",sock);
+	unsigned int ret=::closesocket(sock);
+	JTAGLog(0,"in socket close, result: %d.\n",ret);
+	if (ret == SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"socket close error, sock 0x%x, error code 0x%x\n",sock,sock_last_error);
+	}
+	else
+	{
+		sock_last_error=0;
+	}
+	return ret;
+}
+
+int IOHostServer::_socket_shutdown()
+{
+	unsigned int sock=__val(1);
+	unsigned int how=__val(2);
+	unsigned int ret=::shutdown(sock,how);
+	if (ret==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"shutdown failed, error code 0x%x\n",sock_last_error);
+	}
+	else
+	{
+		sock_last_error=0;
+	}
+	return ret;
+}
+
+int IOHostServer::_socket_bind()
+{
+	unsigned int sock=__val(1);
+	unsigned int sock_buf[128]={};
+	unsigned int count = __readbuf(2, (char *)sock_buf, 15, BIN);
+	SOCKADDR addrSrv;
+	//addrSrv.sin_addr.S_un.S_addr=((sock_buf[4]&0xff)<<24)|((sock_buf[5]&0xff)<<16)|((sock_buf[6]&0xff)<<8)|(sock_buf[7]&0xff);
+	addrSrv.sa_family=sock_buf[0];
+	//addrSrv.sin_port=((sock_buf[2]&0xff)<<8)|(sock_buf[3]&0xff);
+	JTAGLog(0,"socket bind with parameter: 0x%x, sa_family: 0x%x, sa_data: ",sock,addrSrv.sa_family);
+	for (int i=0;i<14;i++)
+	{
+		addrSrv.sa_data[i]=(sock_buf[i+1])&0xff;
+		JTAGLog(0,"0x%x ",addrSrv.sa_data[i]);
+	}
+	JTAGLogStr(0,"\n\n");
+	int sock_opt=1;
+	if(::setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,(const char *)&sock_opt,sizeof(sock_opt))==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"set socket opt SO_REUSEADDR failed, error code 0x%x\n",sock_last_error);
+		return SOCKET_ERROR;
+	}
+	unsigned int ret=::bind(sock,&addrSrv,sizeof(addrSrv));
+	if(ret==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"bind error, sock 0x%x,  error code 0x%x\n",sock,sock_last_error);
+	}
+	else
+	{
+		sock_last_error=0;
+		JTAGLog(0,"bind sucessfully.\n");
+	}
+	return ret;
+}
+
+int IOHostServer::_socket_listen()
+{
+	unsigned int sock=__val(1);
+	unsigned int n=__val(2);
+	unsigned int ret=::listen(sock,n);
+	if(ret==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"listen error, error code 0x%x\n",sock_last_error);
+	}
+	else
+	{
+		sock_last_error=0;
+		JTAGLog(0,"listen successfully!\n");
+	}
+	return ret;
+}
+
+
+int IOHostServer::_socket_setopt()
+{
+	unsigned int sock=__val(1);
+	unsigned int level=__val(2);
+	unsigned int optname=__val(3);
+	unsigned int optlen=__val(4);
+	char optval[256];
+	for (unsigned int i=0;i<optlen;i++)
+	{
+		optval[i]=__val(i+5);
+	}
+	JTAGLog(0,"set sock opt with parameter: 0x%x, 0x%x, 0x%x, opt len 0x%x, opt: ",sock,level,optname,optlen);
+	for (unsigned int i=0;i<optlen;i++)
+	{
+		JTAGLog(0,"0x%x ",(unsigned int)(optval[i]));
+	}
+	JTAGLogStr(0,"\n\n");
+
+	int ret=::setsockopt(sock,level,optname,optval,optlen);
+	if(ret==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"set sockopt error,  error code 0x%x\n",sock_last_error);
+	}
+	else
+	{
+		sock_last_error=0;
+		JTAGLog(0,"set sockopt successfully!\n");
+	}
+	return ret;
+}
+
+
+int IOHostServer::_socket_getlasterror()
+{
+	JTAGLog(0,"get last error 0x%x\n",sock_last_error);
+	return sock_last_error;
+}
+
+
+int IOHostServer::_socket_accept()
+{
+	unsigned int sock=__val(1);
+	SOCKADDR sa;
+	int len=sizeof(sa);
+	unsigned int tcpSockAccept=::accept(sock,&sa,&len);
+	if(tcpSockAccept!=INVALID_SOCKET)
+	{
+		unsigned long ul=1;
+
+		JTAGLog(0,"accept successfully!\n");
+		int ret = ::ioctlsocket(tcpSockAccept,FIONBIO,&ul);
+		if(ret == SOCKET_ERROR)
+		{
+			sock_last_error=::WSAGetLastError();
+			JTAGLog(0,"ioctlsocket error,  error code 0x%x\n",sock_last_error);
+			return SOCKET_ERROR;
+		}
+		else
+		{
+			sock_last_error=0;
+			JTAGLog(0,"ioctlsocket successfully!\n");
+		}
+		__setval(len, 2);
+		__setval(sa.sa_family,3);
+		char *psa=(char *)(sa.sa_data);
+		len-=2;
+		for (int i=0;i<len;i++)
+		{
+			__setval(*psa,4+i);
+			psa++;
+		}
+	}
+	else
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"accept error,  error code 0x%x\n",sock_last_error);
+	}
+	return tcpSockAccept;
+}
+
+
+int IOHostServer::_socket_sendto()
+{
+	int sock=__val(1);
+	int flags=__val(2);
+	int dest_addr_len=__val(3);
+	sockaddr dest_addr;
+	dest_addr.sa_family=__val(4);
+	__readbuf(5,dest_addr.sa_data,14,ASC);
+	int len=__val(19);
+	char buf[4096];
+	__readbuf(20,buf,len,BIN);
+	len*=WORDSZ;
+	JTAGLog(0,"dest sock addr :\n",0);
+	for (int i=0;i<14;i++)
+	{
+		JTAGLog(0,"0x%x ",dest_addr.sa_data[i]);
+	}
+	JTAGLog(0,"\n");
+
+	JTAGLog(0,"send data : \n");
+	for (int i=0;i<len/WORDSZ;i++)
+	{
+		JTAGLog(0,"0x%x ",*(((int *)buf)+i));
+	}
+	JTAGLog(0,"\n");
+	int ret=::sendto(sock,buf,len,flags,(const sockaddr*)&dest_addr,sizeof(dest_addr));
+	if (ret == SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"send error, error code 0x%x\n",sock_last_error);
+	}
+	else
+	{
+		sock_last_error=0;
+	}
+
+	JTAGLog(0,"udp sendto result 0x%x\n",ret);
+	return ret;
+}
+
+
+int IOHostServer::_socket_recvfrom()
+{
+	int sock=__val(1);
+	int len=__val(2);
+	int flags=__val(3);
+	int fromlen[1];
+	unsigned int sock_buf[128]={};
+	JTAGLog(0,"recvfrom with parameter 0x%x, 0x%x, 0x%x\n",sock,len,flags);
+
+	__readbuf(2, (char *)sock_buf, 15, BIN);
+	SOCKADDR addrSrv;
+	//addrSrv.sin_addr.S_un.S_addr=((sock_buf[4]&0xff)<<24)|((sock_buf[5]&0xff)<<16)|((sock_buf[6]&0xff)<<8)|(sock_buf[7]&0xff);
+	addrSrv.sa_family=sock_buf[0];
+	//addrSrv.sin_port=((sock_buf[2]&0xff)<<8)|(sock_buf[3]&0xff);
+	for (int i=0;i<14;i++)
+	{
+		addrSrv.sa_data[i]=(sock_buf[i+1])&0xff;
+	}
+
+	char recv_buf[4096];
+	len*=WORDSZ;
+	fromlen[0]=16;
+	int count=::recvfrom(sock,recv_buf,len,flags,(SOCKADDR *)&addrSrv,fromlen);
+	JTAGLog(0,"udp recvfrom result 0x%x\n",count);
+	JTAGLog(0,"recvfrom : %s\n",recv_buf);
+	if (count==SOCKET_ERROR)
+	{
+		sock_last_error=::WSAGetLastError();
+		JTAGLog(0,"error code 0x%x\n",sock_last_error);
+		return SOCKET_ERROR;
+	}
+	else
+	{
+		sock_last_error=0;
+		if((count%WORDSZ)==0)
+		{
+			count=count/WORDSZ;
+		}
+		else
+		{
+			count=count/WORDSZ;
+			count++;
+		}
+		__filbuf(2,(char *)recv_buf,count*WORDSZ,BIN);
+		JTAGLog(0,"count 0x%x\n",count);
+		__setval(15,2+count);
+		JTAGLog(0,"set from len at addr 0x%x, value 0x%x\n",_sbuffer_addr+2+count,fromlen[0]/4);
+		__setval(addrSrv.sa_family,3+count);
+		__filbuf(4+count,addrSrv.sa_data,14,ASC);
+	}
+
+
+
+	return count;
+}
+#endif

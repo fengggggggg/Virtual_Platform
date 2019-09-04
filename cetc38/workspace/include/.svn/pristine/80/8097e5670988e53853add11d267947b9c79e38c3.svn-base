@@ -1,0 +1,641 @@
+#include "dsptypes.h"
+#include "GlobleDef.h"
+#include "IMA.h"
+
+/******************************************************************
+	函数名：		Sigma32
+
+	对应指令形式:  	xRs=sigma{x,y,z,t}Rm(U)
+					xRs=sigma{x,y,z,t}Rm
+
+	描述:		宏间数据相加。将{x,y,z,t}Rm中的32位定点有符号数分别相加后送到x宏的Rs寄存器上。  
+					详见指令集20130702版。    
+
+	参数:		xRm -- 来自x宏的32位定点数，对应指令中的xRm。
+					yRm -- 来自y宏的32位定点数，对应指令中的yRm。
+					zRm -- 来自z宏的32位定点数，对应指令中的zRm。
+					tRm -- 来自t宏的32位定点数，对应指令中的tRm。
+					p_pStatReg -- 指向标志寄存器IMAFR输出缓存的指针，所指内存区域初始为0。
+					p_IMACR -- 宏外加法器控制寄存器。用IMACR寄存器的第0位来表示有/无符号数。
+										 第0位为1表示Rm为有符号数。
+										 第0位为0表示Rm为无符号数。
+
+	返回值：		返回计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-10-8		林广栋			1。新建函数
+*******************************************************************/
+
+DSPU32 Sigma32(DSPU32 xRm, DSPU32 yRm, DSPU32 zRm, DSPU32 tRm, DSPU32 *p_pStatReg, DSPU32 p_IMACR)
+{
+	bool bSign=TestBit(p_IMACR,0);
+	bool bSatu=TestBit(p_IMACR,1);
+
+	DSPU64 iMask=0xffffffff80000000ull;
+	DSPU64 uMask=0xffffffff00000000ull;
+
+	DSPU32 ret32=0;
+	if(bSign)
+	{
+		DSPI64 x64=((DSPI32 &)xRm);
+		DSPI64 y64=((DSPI32 &)yRm);
+		DSPI64 z64=((DSPI32 &)zRm);
+		DSPI64 t64=((DSPI32 &)tRm);
+
+		DSPI64 iRes64;
+		iRes64=x64+y64+z64+t64;
+
+		ret32=iRes64;
+		if(((iRes64&iMask)!=0)&&((iRes64&iMask)!=iMask))
+		{
+			SetFlag(*p_pStatReg, 0); 
+			SetFlag(*p_pStatReg, 6);
+			SetFlag(*p_pStatReg,14);
+			SetFlag(*p_pStatReg, 8); 
+			if(bSatu)
+			{
+				if(iRes64<0)
+				{
+					ret32=0x80000000;
+				}
+				else
+				{
+					ret32=0x7fffffff;
+				}
+			}
+		}
+	}
+	else
+	{
+		DSPU64 uX64=xRm;
+		DSPU64 uY64=yRm;
+		DSPU64 uZ64=zRm;
+		DSPU64 uT64=tRm;
+
+		DSPU64 uRes=uX64+uY64+uZ64+uT64;
+
+		ret32=uRes;
+		if(uRes&uMask)
+		{
+			SetFlag(*p_pStatReg, 0); 
+			SetFlag(*p_pStatReg, 6);
+			SetFlag(*p_pStatReg,14);
+			SetFlag(*p_pStatReg, 8); 
+			if(bSatu)
+			{
+				ret32=0xffffffff;
+			}
+		}
+	}
+
+	return ret32;
+}
+
+
+/******************************************************************
+	函数名：		SigmaD16
+
+	对应指令形式:  	xHRs=sigma{x,y,z,t}HRm(U)
+					xHRs=sigma{x,y,z,t}HRm
+
+	描述:		宏间数据相加。将{x,y,z,t}Rm中的双16位定点有符号数分别相加后送到x宏的Rs寄存器上。  
+					详见指令集20130702版。    
+
+	参数:		xRm -- 来自x宏的32位数，对应指令中的xRm。
+					yRm -- 来自y宏的32位数，对应指令中的yRm。
+					zRm -- 来自z宏的32位数，对应指令中的zRm。
+					tRm -- 来自t宏的32位数，对应指令中的tRm。
+					p_pStatReg -- 指向标志寄存器IMAFR输出缓存的指针，所指内存区域初始为0。
+					p_IMACR -- 宏外加法器控制寄存器。用IMACR寄存器的第0位来表示有/无符号数。
+										 第0位为1表示Rm为有符号数。
+										 第0位为0表示Rm为无符号数。
+
+	返回值：		返回计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-10-8		林广栋			1。新建函数
+*******************************************************************/
+DSPU32 SigmaD16(DSPU32 xRm, DSPU32 yRm, DSPU32 zRm, DSPU32 tRm, DSPU32 *p_pStatReg, DSPU32 p_IMACR)
+{
+	DSPU32 uDest=0;
+
+	bool bSign=TestBit(p_IMACR,0);
+	bool bSatu=TestBit(p_IMACR,1);
+
+	DSPU32 iMask32=0xffff8000ull;
+	DSPU32 uMask32=0xffff0000ull;
+
+	DSPU16 uHigh16=0,uLow16=0;
+	if(bSign)
+	{
+		DSPI32 iX32,iY32,iZ32,iT32;
+		if(xRm&0x8000)
+		{
+			iX32=xRm|0xffff8000;
+		}
+		else
+		{
+			iX32=xRm&0xffff;
+		}
+
+		if(yRm&0x8000)
+		{
+			iY32=yRm|0xffff8000;
+		}
+		else
+		{
+			iY32=yRm&0xffff;
+		}
+
+		if(zRm&0x8000)
+		{
+			iZ32=zRm|0xffff8000;
+		}
+		else
+		{
+			iZ32=zRm&0xffff;
+		}
+
+		if(tRm&0x8000)
+		{
+			iT32=tRm|0xffff8000;
+		}
+		else
+		{
+			iT32=tRm&0xffff;
+		}
+
+		DSPI32 iRet32=iX32+iY32+iZ32+iT32;
+
+		uLow16=iRet32;
+		if(((iRet32&iMask32)!=0)&&((iRet32&iMask32)!=iMask32))
+		{
+			SetFlag(*p_pStatReg, 0); 
+			SetFlag(*p_pStatReg, 5);
+			SetFlag(*p_pStatReg,13);
+			SetFlag(*p_pStatReg, 8);
+
+			if(bSatu)
+			{
+				if(iRet32<0)
+				{
+					uLow16=0x8000;
+				}
+				else
+				{
+					uLow16=0x7fff;
+				}
+			}
+		}
+
+		xRm=xRm>>16;
+		yRm=yRm>>16;
+		zRm=zRm>>16;
+		tRm=tRm>>16;
+		if(xRm&0x8000)
+		{
+			iX32=xRm|0xffff8000;
+		}
+		else
+		{
+			iX32=xRm&0xffff;
+		}
+
+		if(yRm&0x8000)
+		{
+			iY32=yRm|0xffff8000;
+		}
+		else
+		{
+			iY32=yRm&0xffff;
+		}
+
+		if(zRm&0x8000)
+		{
+			iZ32=zRm|0xffff8000;
+		}
+		else
+		{
+			iZ32=zRm&0xffff;
+		}
+
+		if(tRm&0x8000)
+		{
+			iT32=tRm|0xffff8000;
+		}
+		else
+		{
+			iT32=tRm&0xffff;
+		}
+
+		iRet32=iX32+iY32+iZ32+iT32;
+
+		uHigh16=iRet32;
+		if(((iRet32&iMask32)!=0)&&((iRet32&iMask32)!=iMask32))
+		{
+			SetFlag(*p_pStatReg, 0); 
+			SetFlag(*p_pStatReg, 5);
+			SetFlag(*p_pStatReg,13);
+			SetFlag(*p_pStatReg, 8);
+
+			if(bSatu)
+			{
+				if(iRet32<0)
+				{
+					uHigh16=0x8000;
+				}
+				else
+				{
+					uHigh16=0x7fff;
+				}
+			}
+		}
+	}
+	else
+	{
+		DSPU32 uX32,uY32,uZ32,uT32;
+		uX32=xRm&0xffff;
+		uY32=yRm&0xffff;
+		uZ32=zRm&0xffff;
+		uT32=tRm&0xffff;
+
+		DSPU32 uRet32;
+		uRet32=uX32+uY32+uZ32+uT32;
+
+		uLow16=uRet32;
+
+		if(uRet32&uMask32)
+		{
+			SetFlag(*p_pStatReg, 0); 
+			SetFlag(*p_pStatReg, 5);
+			SetFlag(*p_pStatReg,13);
+			SetFlag(*p_pStatReg, 8);
+
+			if(bSatu)
+			{
+				uLow16=0xffff;
+			}
+		}
+
+		xRm=xRm>>16;
+		yRm=yRm>>16;
+		zRm=zRm>>16;
+		tRm=tRm>>16;
+
+		uX32=xRm&0xffff;
+		uY32=yRm&0xffff;
+		uZ32=zRm&0xffff;
+		uT32=tRm&0xffff;
+
+		uRet32=uX32+uY32+uZ32+uT32;
+
+		uHigh16=uRet32;
+
+		if(uRet32&uMask32)
+		{
+			SetFlag(*p_pStatReg, 0); 
+			SetFlag(*p_pStatReg, 5);
+			SetFlag(*p_pStatReg,13);
+			SetFlag(*p_pStatReg, 8);
+
+			if(bSatu)
+			{
+				uHigh16=0xffff;
+			}
+		}
+	}
+
+	uDest=uHigh16;
+	uDest=uDest<<16;
+	uDest=uDest|((DSPU32)uLow16);
+	return uDest;
+}
+
+
+/******************************************************************
+	函数名：		SigmaD32
+
+	对应指令形式:  	xRs+1:s=sigma{x,y,z,t}Rm+1:m(U)
+					xRs+1:s=sigma{x,y,z,t}Rm+1:m
+
+	描述:		宏间数据相加。将{x,y,z,t}Rm+1:m中的两个32位定点有符号数分别相加后送到x宏的Rs+1:s寄存器上。  
+					详见指令集20130702版。    
+
+	参数:		xSrc -- 来自x宏的2个32位数，对应指令中的xRm+1:m，其中xSrc的高32位放Rm+1，低32位放Rm。
+					ySrc -- 来自y宏的2个32位数，对应指令中的yRm+1:m，其中ySrc的高32位放Rm+1，低32位放Rm。
+					zSrc -- 来自z宏的2个32位数，对应指令中的zRm+1:m，其中zSrc的高32位放Rm+1，低32位放Rm。
+					tSrc -- 来自t宏的2个32位数，对应指令中的tRm+1:m，其中tSrc的高32位放Rm+1，低32位放Rm。
+					Res -- 计算结果，对应指令中的Rs+1:s，其中Res的高32位放Rs+1，低32位放Rs。
+					p_pStatReg -- 指向标志寄存器IMAFR输出缓存的指针，所指内存区域初始为0。
+					p_IMACR -- 宏外加法器控制寄存器。用IMACR寄存器的第0位来表示有/无符号数。
+										 第0位为1表示Rm为有符号数。
+										 第0位为0表示Rm为无符号数。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-10-8		林广栋			1。新建函数
+*******************************************************************/
+void SigmaD32(DSP_BIT64 xSrc, DSP_BIT64 ySrc, DSP_BIT64 zSrc, DSP_BIT64 tSrc, DSP_BIT64 &Res, DSPU32 *p_pStatReg, DSPU32 p_IMACR)
+{
+	DSPU32 uDestHigh=0,uDestLow=0;
+
+	uDestHigh=Sigma32(xSrc.u32High,ySrc.u32High,zSrc.u32High,tSrc.u32High,
+		p_pStatReg,p_IMACR);
+
+	uDestLow=Sigma32(xSrc.u32Low,ySrc.u32Low,zSrc.u32Low,tSrc.u32Low,
+		p_pStatReg,p_IMACR);
+
+	Res.u32High=uDestHigh;
+	Res.u32Low=uDestLow;
+}
+
+
+/******************************************************************
+	函数名：		SigmaQ16
+
+	对应指令形式:  	xHRs+1:s=sigma{x,y,z,t}HRm+1:m(U)
+					xHRs+1:s=sigma{x,y,z,t}HRm+1:m
+
+	描述:		宏间数据相加。将{x,y,z,t}Rm+1:m中的双16位定点有符号数分别相加后送到x宏的Rs+1:s寄存器上。
+					详见指令集20130702版。    
+
+	参数:		xSrc -- 来自x宏的2个32位数，对应指令中的xRm+1:m，其中xSrc的高32位放Rm+1，低32位放Rm。
+					ySrc -- 来自y宏的2个32位数，对应指令中的yRm+1:m，其中ySrc的高32位放Rm+1，低32位放Rm。
+					zSrc -- 来自z宏的2个32位数，对应指令中的zRm+1:m，其中zSrc的高32位放Rm+1，低32位放Rm。
+					tSrc -- 来自t宏的2个32位数，对应指令中的tRm+1:m，其中tSrc的高32位放Rm+1，低32位放Rm。
+					Res -- 计算结果，对应指令中的Rs+1:s，其中Res的高32位放Rs+1，低32位放Rs。
+					p_pStatReg -- 指向标志寄存器IMAFR输出缓存的指针，所指内存区域初始为0。
+					p_IMACR -- 宏外加法器控制寄存器。用IMACR寄存器的第0位来表示有/无符号数。
+										 第0位为1表示Rm为有符号数。
+										 第0位为0表示Rm为无符号数。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2013-10-8		林广栋			1。新建函数
+*******************************************************************/
+void SigmaQ16(DSP_BIT64 xSrc, DSP_BIT64 ySrc, DSP_BIT64 zSrc, DSP_BIT64 tSrc, DSP_BIT64 &Res, DSPU32 *p_pStatReg, DSPU32 p_IMACR)
+{
+	DSPU32 uDestHigh=0,uDestLow=0;
+
+	uDestHigh=SigmaD16(xSrc.u32High,ySrc.u32High,zSrc.u32High,tSrc.u32High,
+		p_pStatReg,p_IMACR);
+	uDestLow=SigmaD16(xSrc.u32Low,ySrc.u32Low,zSrc.u32Low,tSrc.u32Low,
+		p_pStatReg,p_IMACR);
+
+	Res.u32High=uDestHigh;
+	Res.u32Low=uDestLow;
+}
+
+
+/******************************************************************
+	函数名：		SigmaAddD16
+
+	对应指令形式:  	无
+
+	描述:		略
+
+	参数:		略
+
+	返回值：		返回计算结果。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2015-6-8		林广栋			1。新建函数
+*******************************************************************/
+DSPU32 SigmaAddD16(DSPU32 xRm, DSPU32 yRm, DSPU32 zRm, DSPU32 tRm, DSPU32 *p_pStatReg, DSPU32 p_IMACR, DSPU32 p_ADDCR)
+{
+	DSPU32 uDest=0;
+
+	bool bSatu=TestBit(p_IMACR,1);
+
+	DSPU32 iMask32=0xffff8000ull;
+
+	DSPU16 uHigh16=0,uLow16=0;
+
+	DSPI32 iX32,iY32,iZ32,iT32;
+	if(xRm&0x8000)
+	{
+		iX32=xRm|0xffff8000;
+	}
+	else
+	{
+		iX32=xRm&0xffff;
+	}
+
+	if(yRm&0x8000)
+	{
+		iY32=yRm|0xffff8000;
+	}
+	else
+	{
+		iY32=yRm&0xffff;
+	}
+
+	if(zRm&0x8000)
+	{
+		iZ32=zRm|0xffff8000;
+	}
+	else
+	{
+		iZ32=zRm&0xffff;
+	}
+
+	if(tRm&0x8000)
+	{
+		iT32=tRm|0xffff8000;
+	}
+	else
+	{
+		iT32=tRm&0xffff;
+	}
+
+	if(p_ADDCR&1)
+	{
+		iX32=-iX32;
+	}
+	if(p_ADDCR&2)
+	{
+		iY32=-iY32;
+	}
+	if(p_ADDCR&4)
+	{
+		iZ32=-iZ32;
+	}
+	if(p_ADDCR&8)
+	{
+		iT32=-iT32;
+	}
+	DSPI32 iRet32=iX32+iY32+iZ32+iT32;
+
+	uLow16=iRet32;
+	if(((iRet32&iMask32)!=0)&&((iRet32&iMask32)!=iMask32))
+	{
+		SetFlag(*p_pStatReg, 0); 
+		SetFlag(*p_pStatReg, 5);
+		SetFlag(*p_pStatReg,13);
+		SetFlag(*p_pStatReg, 8);
+
+		if(bSatu)
+		{
+			if(iRet32<0)
+			{
+				uLow16=0x8000;
+			}
+			else
+			{
+				uLow16=0x7fff;
+			}
+		}
+	}
+
+	xRm=xRm>>16;
+	yRm=yRm>>16;
+	zRm=zRm>>16;
+	tRm=tRm>>16;
+	if(xRm&0x8000)
+	{
+		iX32=xRm|0xffff8000;
+	}
+	else
+	{
+		iX32=xRm&0xffff;
+	}
+
+	if(yRm&0x8000)
+	{
+		iY32=yRm|0xffff8000;
+	}
+	else
+	{
+		iY32=yRm&0xffff;
+	}
+
+	if(zRm&0x8000)
+	{
+		iZ32=zRm|0xffff8000;
+	}
+	else
+	{
+		iZ32=zRm&0xffff;
+	}
+
+	if(tRm&0x8000)
+	{
+		iT32=tRm|0xffff8000;
+	}
+	else
+	{
+		iT32=tRm&0xffff;
+	}
+
+	if(p_ADDCR&1)
+	{
+		iX32=-iX32;
+	}
+	if(p_ADDCR&2)
+	{
+		iY32=-iY32;
+	}
+	if(p_ADDCR&4)
+	{
+		iZ32=-iZ32;
+	}
+	if(p_ADDCR&8)
+	{
+		iT32=-iT32;
+	}
+	iRet32=iX32+iY32+iZ32+iT32;
+
+	uHigh16=iRet32;
+	if(((iRet32&iMask32)!=0)&&((iRet32&iMask32)!=iMask32))
+	{
+		SetFlag(*p_pStatReg, 0); 
+		SetFlag(*p_pStatReg, 5);
+		SetFlag(*p_pStatReg,13);
+		SetFlag(*p_pStatReg, 8);
+
+		if(bSatu)
+		{
+			if(iRet32<0)
+			{
+				uHigh16=0x8000;
+			}
+			else
+			{
+				uHigh16=0x7fff;
+			}
+		}
+	}
+
+	uDest=uHigh16;
+	uDest=uDest<<16;
+	uDest=uDest|((DSPU32)uLow16);
+	return uDest;
+}
+
+
+
+/*found*****************************************************************
+	函数名：		SigmaAddQ16
+
+	对应指令形式:  	{x|y|z|t} HRs+1:s=sigma {x,y,z,t} HRm+1:m  ({+/-,+/-,+/-,+/-})
+									
+
+	描述:		将4个宏中的Rm+1:m中的高低4个16位数分别做有符号累加或累减，结果存入指定宏中的Rs+1:s的对应高低4个16位数中。   
+
+	参数:		xSrc -- 来自x宏的2个32位数，对应指令中的xRm+1:m，其中xSrc的高32位放Rm+1，低32位放Rm。
+					ySrc -- 来自y宏的2个32位数，对应指令中的yRm+1:m，其中ySrc的高32位放Rm+1，低32位放Rm。
+					zSrc -- 来自z宏的2个32位数，对应指令中的zRm+1:m，其中zSrc的高32位放Rm+1，低32位放Rm。
+					tSrc -- 来自t宏的2个32位数，对应指令中的tRm+1:m，其中tSrc的高32位放Rm+1，低32位放Rm。
+					Res -- 计算结果，对应指令中的Rs+1:s，其中Res的高32位放Rs+1，低32位放Rs。
+					p_pStatReg -- 指向标志寄存器IMAFR输出缓存的指针，所指内存区域初始为0。
+					p_IMACR -- 宏外加法器控制寄存器。用IMACR寄存器的第0位来表示有/无符号数。
+										 第0位为1表示Rm为有符号数。
+										 第0位为0表示Rm为无符号数。
+				    p_ADDCR -- 控制每个宏的数据进行累加还是累减。取1为累减，指令形式上对应宏前为“-”号；取0为累加，指令形式上对应宏前为“+”号；
+					           有效位低4位，第[0]位控制x宏，第[1]位控制y宏，第[2]位控制z宏，第[3]位控制t宏。
+
+	返回值：		无。
+
+	注意事项:		根据计算结果设置相关标志位。
+
+	修改记录
+	--------------------------------------
+	日期			作者			修改处
+	2015-6-8		林广栋			新建
+	
+*******************************************************************/
+void SigmaAddQ16(DSP_BIT64 xSrc, DSP_BIT64 ySrc, DSP_BIT64 zSrc, DSP_BIT64 tSrc, DSP_BIT64 &Res, DSPU32 *p_pStatReg, DSPU32 p_IMACR, DSPU32 p_ADDCR)
+{
+	DSPU32 uDestHigh=0,uDestLow=0;
+
+	uDestHigh=SigmaAddD16(xSrc.u32High,ySrc.u32High,zSrc.u32High,tSrc.u32High,
+		p_pStatReg,p_IMACR,p_ADDCR);
+	uDestLow=SigmaAddD16(xSrc.u32Low,ySrc.u32Low,zSrc.u32Low,tSrc.u32Low,
+		p_pStatReg,p_IMACR,p_ADDCR);
+
+	Res.u32High=uDestHigh;
+	Res.u32Low=uDestLow;
+}

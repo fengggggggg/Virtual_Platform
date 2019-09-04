@@ -1,0 +1,108 @@
+
+#include "sc_iss.h"
+
+//-----------------------------------------------------------------------------------
+void sc_iss::ResetBPB()
+{
+	int i;
+
+	for (i = 0; i < 2048; i++)
+	{
+		u2ri_BPB[i] = 2;
+		u2ro_BPB[i] = 2;
+		//u2r_BPB[i].SetValue(2);
+	}
+}
+//-----------------------------------------------------------------------------------
+// p_u32PC: 分支指令的地址，必定4字对齐
+//
+void sc_iss::WriteBPB(DSPU32 p_u32PC, DSPU32 p_u32Value)
+{
+	DSPU32 u32BPBIdx;
+
+	//u32BPBIdx = p_u32PC & 0x1FF;
+	u32BPBIdx = (p_u32PC & 0x1FFC) >> 2;  // [bit12..bit2]共11位参与寻址2048个入口
+	
+	u2ri_BPB[u32BPBIdx] = p_u32Value;
+	m_bolUpdateBPB = true;
+	m_u32BPBIdx = u32BPBIdx;
+}
+//-----------------------------------------------------------------------------------
+DSPU32 sc_iss::CalcBPB(DSPU32 p_u32BPBValue, bool p_bolBraTaken)
+{
+	DSPU32 u32Temp = 0;
+
+	if (p_bolBraTaken)
+	{
+		switch (p_u32BPBValue)
+		{
+			case 0:
+				u32Temp = 1;
+				break;
+			case 1:
+				u32Temp = 3;
+				break;
+			case 2:
+				u32Temp = 3;
+				break;
+			case 3:
+				u32Temp = 3;
+				break;
+			default: 
+				PrintToCerr("CalcBPB: Invalid parameter\n");
+		}			
+	}
+	else
+	{
+		switch (p_u32BPBValue)
+		{
+			case 0:
+				u32Temp = 0;
+				break;
+			case 1:
+				u32Temp = 0;
+				break;
+			case 2:
+				u32Temp = 0;
+				break;
+			case 3:
+				u32Temp = 2;
+				break;
+			default: 
+				PrintToCerr("CalcBPB: Invalid parameter\n");
+		}
+	}
+
+	return u32Temp;
+}
+//-----------------------------------------------------------------------------------
+// p_u32PC: 分支指令的地址，必定4字对齐
+//
+DSPU32 sc_iss::ReadBPB(DSPU32 p_u32PC)
+{
+	DSPU32 u32BPBIdxRD = 0;
+	DSPU32 u32ValueRD = 0;
+
+	//u32BPBIdxRD = (p_u32PC & 0x1FF0) >> 4;
+	//u32BPBIdxRD = p_u32PC & 0x1FF;
+	u32BPBIdxRD = (p_u32PC & 0x1FFC) >> 2; // [bit12..bit2]共11位参与寻址2048个入口
+	
+	u32ValueRD = u2ro_BPB[u32BPBIdxRD];
+	//u32ValueRD = u2r_BPB[u32BPBIdxRD];
+
+	return u32ValueRD;
+}
+//-----------------------------------------------------------------------------------
+bool sc_iss::IsBTakenLast(DSPU32 p_u32BPBValue)  //(0, 2)
+{
+	bool bolBTake;
+	
+	bolBTake = ((p_u32BPBValue == 0) || (p_u32BPBValue == 1))? false:true;
+
+	return bolBTake;
+}
+//-----------------------------------------------------------------------------------
+
+
+
+

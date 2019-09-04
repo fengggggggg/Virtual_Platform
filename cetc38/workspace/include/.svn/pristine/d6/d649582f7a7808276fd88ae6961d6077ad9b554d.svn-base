@@ -1,0 +1,672 @@
+/******************************************************************************
+Copyright (C), CETE38
+文件名  :    CommProtocol.cpp
+作者    :    黄光红      
+版本    :    v0.0.1       
+完成日期:    2013-03-01
+描述    :    CommProtocol.cpp实现RecvDataPackThread类
+其它    :          
+历史记录:       
+1. 
+修改日期:
+作者    :
+修改内容:
+2. 
+...
+******************************************************************************/
+
+
+#include "CommProtocol.h"
+#include "TCPRemoteComm.h"
+#include "JtagError.h"
+#include "PackCommandID.h"
+#include "JTAGLog.h"
+#include "jtag.h"
+#include <iomanip>
+#include <vector>
+#include <sstream>
+using namespace std;
+
+     IRemoteComm *CommProtocol::getRemoteComm()
+     {
+         return remoteComm;
+     }
+
+	 void CommProtocol::initCommandInfo()
+	 {
+		 typedef pair<unsigned short, string> infoPair;
+
+		 commandInfo.insert(infoPair(CONNECT_REQUEST_PACK, "connect"));
+		 commandInfo.insert(infoPair(DISCONNECT_REQUEST_PACK, "disconnect"));
+		 commandInfo.insert(infoPair(LINKTEST_REQUEST_PACK, "link test"));
+		 commandInfo.insert(infoPair(TARGET_CHECK_REQUEST_PACK, "target check"));
+		 commandInfo.insert(infoPair(TARGET_SELECT_REQUEST_PACK, "target select"));
+		 commandInfo.insert(infoPair(SINGLE_CORE_STEP_CYCLE, "step cycle"));
+		 commandInfo.insert(infoPair(SINGLE_CORE_STEP_INST, "step instr"));
+		 commandInfo.insert(infoPair(SINGLE_CORE_RUN, "run"));
+		 commandInfo.insert(infoPair(SINGLE_CORE_PAUSE, "pause"));
+		 commandInfo.insert(infoPair(SINGLE_CORE_RESET, "reset"));
+		 commandInfo.insert(infoPair(SINGLE_JTAG_RESET, "jtag reset"));
+		 commandInfo.insert(infoPair(MULTI_CORE_RUN, "mult run"));
+		 commandInfo.insert(infoPair(MULTI_CORE_PAUSE, "mult pause"));
+		 commandInfo.insert(infoPair(MULTI_CORE_RESET, "mult reset"));
+		 commandInfo.insert(infoPair(MULTI_CORE_STEP_CYCLE,"mult stepcycle"));
+		 commandInfo.insert(infoPair(MULTI_CORE_JTAG_RESET, "jtag reset"));
+		 commandInfo.insert(infoPair(READ_REGISTER, "read register"));
+		 commandInfo.insert(infoPair(WRITE_REGISTER, "write register"));
+		 commandInfo.insert(infoPair(READ_MEMORY, "read memory"));
+		 commandInfo.insert(infoPair(WRITE_MEMORY, "write memory"));
+		 commandInfo.insert(infoPair(READ_MEMORY_DISCRETE, "read memory discrete"));
+		 commandInfo.insert(infoPair(WRITE_MEMORY_DISCRETE, "write memory discrete"));
+		 commandInfo.insert(infoPair(READ_JTAG_REGISTER, "read jtag"));
+		 commandInfo.insert(infoPair(WRITE_JTAG_REGISTER, "write jtag"));
+		 commandInfo.insert(infoPair(BREAKPOINT_INSERT, "set breakpoint"));
+		 commandInfo.insert(infoPair(CLEAR_BREAKPOINT, "clear breakpoint"));
+		 commandInfo.insert(infoPair(WATCHPOINT_INSERT, "set watchppoint"));
+		 commandInfo.insert(infoPair(CLEAR_WATCHPOINT, "clear watchpoint"));
+		 commandInfo.insert(infoPair(SET_JTAG_FREQUENCY, "set jtagclock"));
+		 commandInfo.insert(infoPair(STOP_EVENT_NOTIFY_PACK, "notify pack"));
+
+	 }
+
+
+    /******************************************************************************
+    函数名称:    CommProtocol
+    描述    :    构造函数
+    输入参数:    owner指定所属调试器
+    输出参数:    无
+    返回值  :    无
+    其它    :
+    ******************************************************************************/
+    void recvPackThreadFunction(CommProtocol *commProtocol)
+    {
+        if(commProtocol == NULL)
+        {
+            return;
+        }
+        //bool stopflag = false;
+        while(1)
+        {
+            //cout<<"    waiting for a pack..."<<endl;
+            if(commProtocol->recvDataPack() != JTAG_OK)
+            {
+                //cout<<"    commProtocol recvDataPack error."<<endl;
+                break;
+            }
+
+            //作为线程中断点
+            boost::this_thread::sleep(boost::posix_time::millisec(50));
+
+			//{
+			//	boost::mutex::scoped_lock lk(commProtocol->stopThreadMutex);
+   //         	stopflag = commProtocol->stopThreadFlag;
+			//}
+        }
+
+		//{
+		//	boost::mutex::scoped_lock lk(commProtocol->reqtPackListMutex);
+		//	commProtocol->reqtPackList.clear();
+		//}
+        //cout<<"    recvPackThreadFunction end."<<endl;
+    }
+
+
+ /******************************************************************************
+    函数名称:    CommProtocol
+    描述    :    构造函数
+    输入参数:    owner指定所属调试器
+    输出参数:    无
+    返回值  :    无
+    其它    :
+    ******************************************************************************/
+    CommProtocol::CommProtocol()
+    {
+			CommType=Ethernet_TCP; 
+			remoteComm=new TCPRemoteComm;
+			recvThread=NULL;
+			ntfyPackSN=0;
+			initCommandInfo();
+			//stopThreadFlag=false;
+        //cout<<"    CommProtocol construction success."<<endl;
+    }
+
+    /******************************************************************************
+    函数名称:    CommProtocol
+    描述    :    析构函数
+    输入参数:    无
+    输出参数:    无
+    返回值  :    无
+    其它    :
+    ******************************************************************************/
+    CommProtocol::~CommProtocol()
+    {
+		if(recvThread)
+		{
+			recvThread->interrupt();
+			recvThread->join();
+			delete recvThread;
+			recvThread = NULL;
+		}
+        if(remoteComm)
+        {
+            delete remoteComm;
+            remoteComm = NULL;
+        }
+        //cout<<"    CommProtocol destruction success."<<endl;
+    }
+
+    /******************************************************************************
+    函数名称:    openComm
+    描述    :    打开通信
+    输入参数:    无
+    输出参数:    无
+    返回值  :    空
+    其它    :
+    ******************************************************************************/
+    int CommProtocol::openComm()
+    {
+        int result = 0;
+        if((result=remoteComm->initComm()) != JTAG_OK)
+        {
+           return result;
+        }
+
+        //cout<<"    CommProtocol openComm communication connect success."<<endl;
+        return JTAG_OK;
+    }
+
+    /******************************************************************************
+    函数名称:    closeComm
+    描述    :    关闭通信
+    输入参数:    无
+    输出参数:    无
+    返回值  :    空
+    其它    :
+    ******************************************************************************/
+    void CommProtocol::closeComm()
+    {
+        remoteComm->closeConnect();
+        //cout<<"    CommProtocol closeComm success."<<endl;
+    }
+
+    /******************************************************************************
+            函数名称:    startupThread
+            描述    :    启动接收线程
+            输入参数:    无
+            输出参数:    无
+            返回值  :    空
+            其它    :
+    ******************************************************************************/
+     void CommProtocol::startupThread()
+     {
+         if(recvThread != NULL)
+         {
+             return;
+         }
+		 //{
+			// boost::mutex::scoped_lock lk(stopThreadMutex);
+			// stopThreadFlag=false;
+		 //}
+         recvThread = new boost::thread(boost::bind(&recvPackThreadFunction, this));
+         //cout<<"    CommProtocol startupThread success."<<endl;
+     }
+
+    /******************************************************************************
+         函数名称:    stopThread
+         描述    :    停止接收线程
+         输入参数:    无
+         输出参数:    无
+         返回值  :    空
+         其它    :
+     ******************************************************************************/
+     void CommProtocol::stopThread()
+     {
+		if(recvThread)
+		{
+			recvThread->interrupt();
+			recvThread->join();
+			delete recvThread;
+			recvThread=NULL;
+		}
+		{
+			boost::mutex::scoped_lock lk(reqtPackListMutex);
+			reqtPackList.clear();
+		}
+     }
+
+     /******************************************************************************
+     函数名称:    searchSyncHead
+     描述    :    搜素数据包同步字头。
+     输入参数:    无
+     输出参数:    无
+     返回值  :    成功返回0，失败返回错误码
+     其它    :
+     ******************************************************************************/
+     int CommProtocol::searchSyncHead()
+     {
+         //搜索同步字符，4字节
+         char oneByte = 0;
+         int i = 0;
+         while(i < 4)
+         {
+             if(remoteComm->receive(&oneByte, 1) != JTAG_OK)
+             {
+                 return SERVER_ETHERNET_RECV_ERROR;
+             }
+
+             if(oneByte == PACK_SYNC_HEAD[i])
+             {
+                 ++i;
+             }
+             else
+             {
+                 if(oneByte == PACK_SYNC_HEAD[0])
+                 {
+                     i = 1;
+                 }
+                 else
+                 {
+                     i = 0;
+                 }
+             }
+         }
+         return JTAG_OK;
+     }
+
+    /******************************************************************************
+    函数名称:    waitReqtPack
+    描述    :    等待应答包。等待直到reqtPackList中有应答包才返回。
+    输入参数:    无
+    输出参数:    若等到应答包，reqtPack返回应答包。
+    返回值  :    
+    其它    :
+    ******************************************************************************/
+    void CommProtocol::waitReqtPack(DataPack &reqtPack)
+    {
+        int timeslice = 50;//50　millisecond　毫秒
+        bool havePack = false;
+        while(bCommSetup)
+        {
+            
+			{
+				boost::mutex::scoped_lock lk(reqtPackListMutex);
+    			if(!reqtPackList.empty())
+    			{
+        			reqtPack = *(reqtPackList.begin());
+        			reqtPackList.erase(reqtPackList.begin());
+					havePack = true;
+					ntfyPackSN = reqtPack.headPart->header.packSN;
+    			}
+			}
+            if(havePack)
+            {
+#if (defined(LOG_FILE)) || (defined(LOG_CMD))
+				printReqsDataPack(reqtPack);
+#endif
+                break;
+            }
+            boost::this_thread::sleep(boost::posix_time::millisec(timeslice));
+        }
+    }
+
+    /******************************************************************************
+    函数名称:    getCheckSum
+    描述    :    计算数据包的校验和
+    输入参数:   dataPack为数据包，具有包头和正文信息。
+    输出参数:   无
+    返回值  :    返回校验和
+    其它    :
+    ******************************************************************************/
+    unsigned char CommProtocol::getCheckSum(DataPack &dataPack)
+    {
+        unsigned char checkSum = 0;
+        for(int i = 0; i < PACK_HEAD_LENGTH; ++i)
+        {
+            checkSum += dataPack.headPart->head[i];
+        }
+
+        for(int i = 0; i < dataPack.textLength; ++i)
+        {
+            checkSum += dataPack.textPart->text[i];
+        }
+        return -checkSum;
+    }
+
+    /******************************************************************************
+    函数名称:    testCheckSum
+    描述    :    检查数据包的校验和是否正确
+    输入参数:   dataPack为数据包，具有包头和正文信息。
+    输出参数:   无
+    返回值  :    返回校验和检查是否正确
+    其它    :
+    ******************************************************************************/
+	bool CommProtocol::testCheckSum(DataPack &dataPack)
+	{
+        unsigned char checkSum = 0;
+        for(int i = 0; i < PACK_HEAD_LENGTH; ++i)
+        {
+            checkSum += dataPack.headPart->head[i];
+        }
+
+        for(int i = 0; i < dataPack.textLength; ++i)
+        {
+            checkSum += dataPack.textPart->text[i];
+        }
+
+		if(((unsigned char)(checkSum+dataPack.checkSum))==0)
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+    /******************************************************************************
+    函数名称:    createRespPack
+    描述    :    创建应答包
+    输入参数:   commandID指定请求命令标识；para指定请求包参数
+    输出参数:   connectPack为创建的请求包
+    返回值  :    成功返回０；失败返回非０错误码
+    其它    :
+    ******************************************************************************/
+    int CommProtocol::createRespPack(DataPack &connectPack, const unsigned short commandID,
+         unsigned short rqtPackSN, vector<char> *respPara)
+    {
+        //创建包头
+        boost::shared_ptr<DataPackHead> head(new DataPackHead);
+        memset(head.get(), 0, sizeof(DataPackHead));
+        //信息长度＝包头＋１字节校验和＋正文，　　正文由commandID、subInfo、para组成
+        head->header.infoLength = PACK_HEAD_LENGTH + 1 + 3 + respPara->size();
+        head->header.packSN = rqtPackSN;
+
+        //创建正文
+        boost::shared_ptr<DataPackText> text(new DataPackText);
+        memset(text.get(), 0, sizeof(DataPackText));
+        text->reqsPack.commandID = commandID;
+        text->reqsPack.subInfo = 0;
+
+        //将参数reqsPara添加到text->reqsPack.reqsPara中
+        if(respPara->size() > MAX_PACK_TEXT_LENGTH - 3)
+        {
+            return SERVER_PACK_TEXT_LENGTH_ERROR;
+        }
+        int i = 0;
+        vector<char>::iterator iter = respPara->begin();
+        for(; iter != respPara->end(); ++i, ++iter)
+        {
+            text->reqsPack.reqsPara[i] = *iter;
+        }
+
+        connectPack.textLength = 3 + respPara->size();
+        connectPack.headPart = head;
+        connectPack.textPart = text;
+        //计算校验和
+        connectPack.checkSum = getCheckSum(connectPack);
+
+        //for debug  for log  打印回复包
+#if (defined(LOG_FILE)) || (defined(LOG_CMD))
+        printRespDataPack(connectPack);
+#endif
+        return JTAG_OK;
+    }
+
+    /******************************************************************************
+    函数名称:    createNtfyPack
+    描述    :    创建应答包
+    输入参数:   commandID指定请求命令标识；para指定请求包参数
+    输出参数:   connectPack为创建的请求包
+    返回值  :    成功返回０；失败返回非０错误码
+    其它    :
+    ******************************************************************************/
+    int CommProtocol::createNtfyPack(DataPack &connectPack, const unsigned short commandID,
+         vector<char> *ntfyPara)
+    {
+        //创建包头
+        boost::shared_ptr<DataPackHead> head(new DataPackHead);
+        memset(head.get(), 0, sizeof(DataPackHead));
+        //信息长度＝包头＋１字节校验和＋正文，　　正文由commandID、subInfo、para组成
+        head->header.infoLength = PACK_HEAD_LENGTH + 1 + 3 + ntfyPara->size();
+        head->header.packSN = ntfyPackSN;
+
+
+        //创建正文
+        boost::shared_ptr<DataPackText> text(new DataPackText);
+        memset(text.get(), 0, sizeof(DataPackText));
+        text->reqsPack.commandID = commandID;
+        text->reqsPack.subInfo = 0;
+
+        //将参数reqsPara添加到text->reqsPack.reqsPara中
+        if(ntfyPara->size() > MAX_PACK_TEXT_LENGTH - 3)
+        {
+            return SERVER_PACK_TEXT_LENGTH_ERROR;
+        }
+        int i = 0;
+        vector<char>::iterator iter = ntfyPara->begin();
+        for(; iter != ntfyPara->end(); ++i, ++iter)
+        {
+            text->reqsPack.reqsPara[i] = *iter;
+        }
+
+        connectPack.textLength = 3 + ntfyPara->size();
+        connectPack.headPart = head;
+        connectPack.textPart = text;
+        //计算校验和
+        connectPack.checkSum = getCheckSum(connectPack);
+
+        //for debug  for log  打印异步上报包
+#if (defined(LOG_FILE)) || (defined(LOG_CMD))
+        printNtfyDataPack(connectPack);
+#endif
+
+        return JTAG_OK;
+    }
+
+    /******************************************************************************
+    函数名称:    printReqsDataPack
+    描述    :    打印数据包。
+    输入参数:   reqsDataPack为请求数据包
+    输出参数:   无
+    返回值  :   无
+    其它    :
+    ******************************************************************************/
+   void CommProtocol::printReqsDataPack(DataPack &reqsDataPack)
+   {
+	   stringstream ss;
+       ss<<"    [request pack--------------------------------------------------\n";
+       ss<<"    pack head:\n";
+       ss<<"              infolength:"<<reqsDataPack.headPart->header.infoLength<<endl;
+       ss<<"              deviceID  :"<<(unsigned int)reqsDataPack.headPart->header.deviceID<<endl;
+       ss<<"              reserve0  :"<<(unsigned int)reqsDataPack.headPart->header.reserve0<<endl;
+       ss<<"              chipID    :"<<(unsigned int)reqsDataPack.headPart->header.chipID<<endl;
+       ss<<"              reserve1  :"<<(unsigned int)reqsDataPack.headPart->header.reserve1<<endl;
+       ss<<"              packSN    :"<<reqsDataPack.headPart->header.packSN<<endl;
+       ss<<"    pack text:\n";
+       ss<<"              commandID :0X"<<hex<<reqsDataPack.textPart->reqsPack.commandID<<"    "<<commandInfo[reqsDataPack.textPart->reqsPack.commandID]<<endl;
+       ss<<"              subInfo   :"<<(unsigned int)reqsDataPack.textPart->reqsPack.subInfo<<endl;
+       ss<<"              para      :";
+       for(int i = 0; i < reqsDataPack.textLength-3; ++i)
+       {
+           ss<<"0X"<<hex<<setw(2)<<setfill('0')
+               <<(unsigned int)reqsDataPack.textPart->reqsPack.reqsPara[i]<<" ";
+       }
+       ss<<endl;
+       ss<<"    pakc checksum:0X"<<hex<<(unsigned int)reqsDataPack.checkSum<<endl;;
+       ss<<"    --------------------------------------------------request pack]\n";
+	   JTAGLog(0,"%s",ss.str().c_str());
+   }
+
+     /******************************************************************************
+        函数名称:    printRespDataPack
+        描述    :    打印应答数据包。
+        输入参数:   reqsDataPack为应答数据包
+        输出参数:   无
+        返回值  :   无
+        其它    :
+    ******************************************************************************/
+    void CommProtocol::printRespDataPack(DataPack &respDataPack)
+    {
+		stringstream ss;
+        ss<<"    [respond pack--------------------------------------------------\n";
+        ss<<"    pack head:\n";
+        ss<<"              infolength:"<<respDataPack.headPart->header.infoLength<<endl;
+        ss<<"              deviceID  :"<<(unsigned int)respDataPack.headPart->header.deviceID<<endl;
+        ss<<"              reserve0  :"<<(unsigned int)respDataPack.headPart->header.reserve0<<endl;
+        ss<<"              chipID    :"<<(unsigned int)respDataPack.headPart->header.chipID<<endl;
+        ss<<"              reserve1  :"<<(unsigned int)respDataPack.headPart->header.reserve1<<endl;
+        ss<<"              packSN    :"<<respDataPack.headPart->header.packSN<<endl;
+        ss<<"    pack text:\n";
+        ss<<"              commandID :0X"<<hex<<respDataPack.textPart->respPack.commandID<<"    "<<commandInfo[respDataPack.textPart->respPack.commandID]<<endl;
+        ss<<"              subInfo   :"<<(unsigned int)respDataPack.textPart->respPack.subInfo<<endl;
+        ss<<"              result    :0X"<<hex<<(unsigned int)respDataPack.textPart->respPack.result<<endl;
+        ss<<"              para      :";
+        for(int i = 0; i < respDataPack.textLength-4; ++i)
+        {
+            ss<<"0X"<<hex<<setw(2)<<setfill('0')
+                <<(unsigned int)respDataPack.textPart->respPack.respPara[i]<<" ";
+        }
+        ss<<endl;
+        ss<<"    pakc checksum:0X"<<hex<<(unsigned int)respDataPack.checkSum<<endl;
+        ss<<"    --------------------------------------------------respond pack]\n";
+		JTAGLog(0,"%s",ss.str().c_str());
+    }
+
+
+    /******************************************************************************
+                 函数名称:    printNtfyDataPack
+                 描述    :    打印异步上报数据包。
+                 输入参数:   ntfyDataPack为异步上报数据包
+                 输出参数:   无
+                 返回值  :   无
+                 其它    :
+    ******************************************************************************/
+    void CommProtocol::printNtfyDataPack(DataPack &ntfyDataPack)
+    {
+        JTAGLog(0,"[notify pack--------------------------------------------------]\n",0);
+        JTAGLog(0,"pack head:\n",0);
+        JTAGLog(0,"              infolength: %d\n",ntfyDataPack.headPart->header.infoLength);
+        JTAGLog(0,"              deviceID  :%d\n",(unsigned int)ntfyDataPack.headPart->header.deviceID);
+        JTAGLog(0,"              reserve0  :%d\n",(unsigned int)ntfyDataPack.headPart->header.reserve0);
+        JTAGLog(0,"              chipID    :%d\n",(unsigned int)ntfyDataPack.headPart->header.chipID);
+        JTAGLog(0,"              reserve1  :%d\n",(unsigned int)ntfyDataPack.headPart->header.reserve1);
+        JTAGLog(0,"              packSN    :%d\n",ntfyDataPack.headPart->header.packSN);
+        JTAGLog(0,"    pack text:\n",0);
+        JTAGLog(0,"              commandID :0X%x    %s\n",ntfyDataPack.textPart->reqsPack.commandID,commandInfo[ntfyDataPack.textPart->respPack.commandID].c_str());
+        JTAGLog(0,"              subInfo   :%d\n",(unsigned int)ntfyDataPack.textPart->reqsPack.subInfo);
+        JTAGLog(0,"              content      :\n",0);
+        for(int i = 0; i < ntfyDataPack.textLength-3; ++i)
+        {
+			JTAGLog(0,"0x%02x ",(unsigned int)ntfyDataPack.textPart->reqsPack.reqsPara[i]);
+        }
+
+        JTAGLog(0,"\n    pakc checksum:0x%x\n",(unsigned int)ntfyDataPack.checkSum);
+        JTAGLog(0,"    --------------------------------------------------notify pack]\n",0);
+    }
+
+    /******************************************************************************
+       函数名称:    recvDataPack
+       描述    :    接收数据包。接受到一个完整数据包才返回。
+       输入参数:    无
+       输出参数:    无
+       返回值  :    成功返回0，失败返回错误码
+       其它    :    若接收到应答包存放在应答包列表；若接收到通知包存放在通知包列表。
+    ******************************************************************************/
+    int CommProtocol::recvDataPack()
+    {
+        if(searchSyncHead() == SERVER_ETHERNET_RECV_ERROR)
+        {
+			//cout<<"search head error"<<endl;
+            return SERVER_ETHERNET_RECV_ERROR;
+        }
+
+		//cout<<"    recv a respond pack into list----------------------------\n";
+
+        //接收数据包头，8字节。前2字节为信息长度，长度不包括同步字符
+        //new分配内存空间，在解包时释放
+        //DataPackHead *packHead = new DataPackHead;
+        boost::shared_ptr<DataPackHead> packHead(new DataPackHead);
+        if(remoteComm->receive((char *)packHead->head, PACK_HEAD_LENGTH) != JTAG_OK)
+        {
+            return SERVER_ETHERNET_RECV_ERROR;
+        }
+		//cout<<packHead->infoLength<<endl;
+        unsigned short infoLength = packHead->header.infoLength;
+        if(infoLength > MAX_PACK_INFO_LENGTH || infoLength < MIN_PACK_INFO_LENGTH)
+        {
+            return SERVER_PACK_INFO_LENGTH_ERROR;
+        }
+
+        //接收正文信息
+        //正文长度 = 信息长度 - 8字节包头  - 1字节校验和
+        int textLength = infoLength - PACK_HEAD_LENGTH - 1;
+        //new分配内存空间，在解包时释放
+        //DataPackText *packText = new DataPackText;
+        boost::shared_ptr<DataPackText> packText(new DataPackText);
+        if(remoteComm->receive((char *)packText->text, textLength) != JTAG_OK)
+        {
+            return SERVER_ETHERNET_RECV_ERROR;
+        }
+//        unsigned short commandID = packText->reqsPack.commandID;
+
+        //接收1字节校验和
+        unsigned char checkSum = 0;
+        if(remoteComm->receive((char *)&checkSum, 1) != JTAG_OK)
+        {
+            return SERVER_ETHERNET_RECV_ERROR;
+        }
+
+        //组装包
+        DataPack dataPack;
+        dataPack.headPart = packHead;
+        dataPack.textLength = textLength;
+        dataPack.textPart = packText;
+        dataPack.checkSum = checkSum;
+
+		//cout<<dataPack.headPart->infoLength<<endl;
+
+		{
+			boost::mutex::scoped_lock lk(reqtPackListMutex);
+        	reqtPackList.push_back(dataPack);
+        }
+
+        return JTAG_OK;
+    }
+
+    /******************************************************************************
+    函数名称:    sendDataPack
+    描述    :    发送数据包
+    输入参数:    dataPack为数据包
+    输出参数:    无
+    返回值  :    成功返回0，失败返回错误码
+    其它    :
+    ******************************************************************************/
+    int CommProtocol::sendDataPack(DataPack *pack)
+    {
+        char packBuffer[MAX_PACK_LENGTH];
+        memset(packBuffer, 0, MAX_PACK_LENGTH);
+
+        //添加同步字头
+        memcpy(packBuffer, PACK_SYNC_HEAD, 4);
+
+        //添加包头
+        memcpy(packBuffer+4, pack->headPart->head, PACK_HEAD_LENGTH);
+
+        //添加正文
+        memcpy(packBuffer+PACK_HEAD_LENGTH+4, pack->textPart->text, pack->textLength);
+
+        //添加校验和
+        packBuffer[pack->textLength+PACK_HEAD_LENGTH+4] = pack->checkSum;
+
+        int result = 0;
+	{
+		boost::mutex::scoped_lock lk(sendMutex);
+		result = remoteComm->sendout(packBuffer, pack->textLength+PACK_HEAD_LENGTH+4+1);
+	}
+        if(result!= JTAG_OK)
+        {
+           return result;
+        }
+
+        return JTAG_OK;
+    }

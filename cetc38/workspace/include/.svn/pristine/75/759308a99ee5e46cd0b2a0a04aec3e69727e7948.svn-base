@@ -1,0 +1,1491 @@
+
+#include "sc_iss.h"
+
+//======================================================================================
+bool sc_iss::do_slots(unsigned int *p_pSlots, unsigned int *p_pSlotsRes, DSPU32 p_u32LineAddr, DSPU32 p_u32SlotNum, DSPU32 p_u32Phase)
+{
+	DSPU32 i, u32SLKIdx, u32Opcode, u32InstrNum;
+
+	/*#ifdef DECODER_TESTING	
+		if (p_u32Phase > PHASE_DC2)	
+		{
+			return true;	
+		}
+	#endif*/
+
+	if ( p_u32SlotNum > MAX_INUM_LINE )
+	{
+		PrintToCerr("do_slots: parameter is invalid\n");
+		return false;
+	}
+
+	// set "bolHoldInfo" flag of each element
+	if (p_u32Phase == PHASE_DC2)
+	{
+		FillCondDoInfo(p_pSlots, p_pSlotsRes, p_u32SlotNum, PHASE_DC2);
+	}  
+	
+	//--------------------------------------------------------------------------------------------------------------
+	// do instructions need to be excuated at first
+	for (i = 0; i < p_u32SlotNum; i++)
+	{
+		u32SLKIdx = p_pSlotsRes[i];
+		
+		if ( IsExtFirstWord(p_pSlots[i]) )
+		{
+			i++;
+		}
+		else if ( IsInstNoCalc(p_pSlots[i]) )
+		{
+			u32Opcode = GetOpcodeNoCalc(p_pSlots[i]);
+			if ( u32Opcode == op_clr_sf_c )
+			{
+				if(CondPermitted(u32SLKIdx))	
+				{		
+					// DC2 sync done
+					clr_sf_cores(p_pSlots[i], p_pSlotsRes[i], i, p_u32Phase);
+				}
+			}					
+		}
+	}  
+	//--------------------------------------------------------------------------------------------------------------
+	// do instructions in normal sequence
+	for (i = 0; i < p_u32SlotNum; i++)
+	{
+		u32SLKIdx = p_pSlotsRes[i];		
+		
+		if(IS_CHPG_INSN(p_pSlots[i]))
+		{
+			break;		
+		}
+		if ( IsExtFirstWord(p_pSlots[i]))  // double words
+		{			
+			u32Opcode = GetOpcodeExt(p_pSlots[i + 1]);
+			// ext_cond_do_uvw is at the first 2 slots
+			if(IsCondDoInst(p_pSlots[i+1]) )
+			{
+				do_inst_ext(p_pSlots[i], p_pSlots[i + 1], p_pSlotsRes[i], i, p_u32Phase, PC2JITIdx(p_u32LineAddr + i));
+				if(p_u32Phase == PHASE_DC2_POST && IsCondDo_UVW(p_pSlots[i+1]))
+				{
+					FillCondDoInfo(p_pSlots, p_pSlotsRes, p_u32SlotNum, p_u32Phase);
+				}
+				else if(p_u32Phase == PHASE_DC4_POST && IsCondDo_CPred(p_pSlots[i+1]))
+				{
+					FillCondDoInfo(p_pSlots, p_pSlotsRes, p_u32SlotNum, p_u32Phase);
+				}
+				i++;
+			}
+			else
+			{
+				// do instructions after checked condition(liuyu)
+				if(CondPermitted(u32SLKIdx))
+				{
+					do_inst_ext(p_pSlots[i], p_pSlots[i + 1], p_pSlotsRes[i], i, p_u32Phase, PC2JITIdx(p_u32LineAddr + i));
+				}
+				i++;
+			}
+		}
+		else if(IsExtSecondWord(p_pSlots[i]))
+		{
+			continue;
+		}
+		else  // single word
+		{
+			// do instructions after checked condition(liuyu)
+			if(CondPermitted(u32SLKIdx))	
+			{
+				do_inst(p_pSlots[i], p_pSlotsRes[i], p_u32LineAddr, i, p_u32Phase, PC2JITIdx(p_u32LineAddr + i));
+			}			
+		}
+	}
+
+	return true;
+}
+
+/*---------------------------------------------Private---------------------------------------------*/
+bool sc_iss::IsValidDWI(DSPU32 p_u32IWord0, DSPU32 p_u32IWord1)
+{
+	DSPU32 u32Opcode;
+	bool bolValid = false;
+
+	u32Opcode = GetOpcodeExt(p_u32IWord1);
+	if (u32Opcode <= 3)
+	{
+		bolValid = true;
+	}
+	else if (u32Opcode >= 6 && u32Opcode <= 8)
+	{
+		bolValid = true;
+	}
+	else if (u32Opcode >= 11 && u32Opcode <= 15)
+	{
+		bolValid = true;
+	}
+
+	return bolValid;
+}
+//----------------------------------------------------------------------------------------------------
+bool sc_iss::do_inst(DSPU32 p_u32IWord, DSPU32 p_u32SLKIdx, DSPU32 p_u32LineAddr, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx)
+{
+	DSPU32 u32Opcode, u32Temp;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("do_inst: parameter is invalid\n");
+		return false;
+	}
+
+	if ( p_u32Slot >= MAX_INUM_LINE )
+	{
+		PrintToCerr("do_inst: parameter is invalid\n");
+		return false;
+	}
+
+	if ( p_u32Phase >= PHASE_MAX )
+	{
+		PrintToCerr("do_inst: parameter is invalid\n");
+		return false;
+	}
+
+	if ( IsInstNoCalc(p_u32IWord) )
+	{	
+		u32Opcode = GetOpcodeNoCalc(p_u32IWord);
+		switch (u32Opcode)
+		{
+			case  op_areg_add_sub_c: // 1 // sync done
+			{
+				areg_add_sub_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_areg_add_imm_c: //2
+			case op_areg_shf_imm_c: //3
+			{
+				// sync done
+				like_areg_add_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_areg_shf_reg_c: //4
+			case  op_areg_cb_reg_c: //5
+			case  op_areg_abs_sub_c: //6
+			{
+				// sync done
+				// GRQ: the API of op_areg_abs_sub_c should be defined
+				like_areg_shf_reg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_padding_c:
+			{
+				break;
+			}
+			case  op_clr_sf_c: //12
+			{
+				// if needed, already be done in do_slots
+				// do nothing here
+				break;
+			}
+			
+			case op_u_is_imm_c: // 23
+			case op_v_is_imm_c: // 24
+			case op_w_is_imm_c: // 25
+			{
+				like_uvw_is_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_uvw_logical_c:	// 27
+			{
+				uvw_logical_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_addr_is_uvw_c:	//28
+			{
+				addr_is_uvw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_cmp_and_set_u_c://29
+			case op_cmp_and_set_v_c://30
+			case op_cmp_and_set_w_c://31
+			{
+				like_cmp_and_set_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+		} //switch (u32OpCode)
+	} // if ( IsInstNoCalc(p_u32IWord) )
+	else
+	{
+		u32Opcode = GetOpcode(p_u32IWord);
+		switch (u32Opcode)
+		{
+			case  op_add_32_c:	// 0
+			case op_sub_32_c:
+			case op_add_16_c:
+			case op_sub_16_c:
+			case op_addhalf_32_c:
+			case op_subhalf_32_c:
+			case op_addhalf_16_c:
+			case op_subhalf_16_c:
+			case op_cj_add_16_c:
+			case op_cj_sub_16_c:
+			//case op_c_addhalf_16_c:
+			//case op_c_subhalf_16_c:
+			case op_cj_addhalf_16_c:
+			case op_cj_subhalf_16_c:  // 15
+			case op_add_8_c:
+			case op_sub_8_c:
+			case op_add_32_u_c:
+			case op_sub_32_u_c:
+			case op_add_16_u_c:
+			case op_sub_16_u_c:
+			case op_addhalf_32_u_c:
+			case op_subhalf_32_u_c:
+			case op_addhalf_16_u_c:
+			case op_subhalf_16_u_c:
+			case op_add_q8_c:
+			case op_sub_q8_c:
+			{
+				// sync done
+				like_add_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case op_c_add_16_c:
+			case op_c_sub_16_c:
+			case op_add_flo32_c:  // 16
+			case op_sub_flo32_c:
+			case op_addhalf_flo32_c:
+			case op_subhalf_flo32_c:
+			case op_add_abs_32_c:
+			case op_add_abs_f32_c:
+			case op_max_32_c:
+			case op_max_16_c:
+			case op_max_flo32_c:
+			case op_min_32_c:
+			case op_min_16_c:
+			case op_min_flo32_c:
+			case op_max_32_u_c:
+			case op_max_16_u_c:
+			case op_min_32_u_c:
+			case op_min_16_u_c:  // 41
+			{
+				// sync done
+				like_add_flo32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_inc_imm_u_c:  // 42
+			case op_dec_imm_u_c:
+			case op_inc_imm_c:
+			case op_dec_imm_c:    // 45
+			{
+				// sync done
+				like_inc_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_hl_add_sub_c:  // 46
+			{
+				// sync done
+				like_hl_add_sub_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_max_min_hlreg_c:  // 47
+			{
+				// sync done
+				max_min_hlreg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case op_shf_add_8_c:  //48
+			case op_shf_add_8_u_c: //81
+			case op_shf_add_16_c:  //48
+			case op_shf_add_16_u_c: //81
+			{
+				alu_add8or16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case  op_c_add_32_c:  // 49
+			case  op_c_sub_32_c:  // 50
+			case  op_cj_add_32_c: // 51
+			case  op_cj_sub_32_c: // 52
+			case  op_c_addhalf_32_c: // 53
+			case  op_c_subhalf_32_c: // 54
+			case  op_cj_addhalf_32_c: // 55
+			case  op_cj_subhalf_32_c: // 56
+			case  op_c_add_flo32_c: // 57
+			case  op_c_sub_flo32_c: // 58
+			case  op_cj_add_flo32_c: // 59
+			case  op_cj_sub_flo32_c: // 60
+			case  op_c_addhalf_flo32_c: // 61
+			case  op_c_subhalf_flo32_c: // 62
+			case  op_cj_addhalf_flo32_c: // 63
+			case  op_cj_subhalf_flo32_c: // 64
+			{
+				// sync done
+				like_c_add_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_max_min_32_c:         // 65
+            case op_max_min_16_c:          //66
+			case op_max_min_flo32_c:      //67
+			case op_max_min_32_u_c:      //68
+			case op_max_min_16_u_c:      //69
+			{
+				// sync done
+				like_max_min_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_max_min_mn_c:      //70
+			{
+				// sync done
+				max_min_mn_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_conj_c32_c:          //71
+			{
+				// sync done
+				like_conj_c32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_like_addsub_32_c:  // 72
+			{
+				// sync done
+				like_addsub_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_like_c_addsub_32_c: // 73
+			{
+				// sync done
+				like_c_addsub_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}			
+
+			case op_oacc_8_c: //74
+			case op_accum_32_c: // 75
+			case op_accum_16_c:
+			case op_accum_32_u_c:
+			case op_accum_16_u_c:
+			case op_acc_add_q8_c:
+			case op_accum_flo32_c:
+			/*case op_accum_c16_c: // 81*/
+			{
+				// sync done
+				like_accum_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case op_ht_c:
+			case op_he_c:
+			{
+				like_ht_he_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_alu_sub16_to_32_c:
+			case op_alu_sub16_to_32_u_c:
+			case op_alu_sub8_to_16_c:
+			case op_alu_sub8_to_16_u_c:
+			{
+				alu_sub8or16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+				
+			case op_expand_c:
+			{
+				like_expand_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+		
+			case op_acf_is_ht_32_c: // 88
+			case op_acf_is_ht_d16_c: //89
+			case op_acf_is_ht_f32_c:  //90
+			{
+				// sync done
+				like_acf_is_ht_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_acc_addsub_d16_c:  //91  // sync done
+			case op_add_32_ca_c:           //92  // sync done
+			case op_acc_max_fix32_c:     //93  // sync done
+			case op_acc_max_4fix16_c:   //94  // sync done
+			// opcode 95 implemented in other group
+			case op_acc_maxr_2fix32_MN_c:  //96  // sync done
+			case op_acc_maxr_2fix16_c:         //97  // sync done
+			// opcode 98 implemented in other group
+			case op_acc_fix16_manh_c:          //99  // sync done
+			{
+				like_acc_addsub_d16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_acc_max_reg_acc_c: // 95 // sync done
+			{
+				like_acc_max_reg_acc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_acc_maxr_reg_acc_c:      //98  // sync done
+			{
+				switch ((p_u32IWord >> 12) & 0x7)  // mode
+				{
+					case 0:
+					case 1:
+					case 2:
+					case 3:
+						like_acc_max_reg_acc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);						
+						break;
+					case 4:
+					case 5:
+					case 6:
+					case 7:
+						like_acc_addsub_d16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						break;
+				}
+				break;
+			}
+			// opcode 99 implemented in other group
+			case  op_ht_hlreg_tohl_c:  // 100  // sync done
+			case  op_he_hlreg_tohl_c:  // 101 // sync done
+			case  op_is_eq_16_sz_c:        // 102  // sync done
+			{
+				like_ht_hlreg_tohl_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_reg_shf_acf_c: // 103 // sync done
+			{
+				reg_shf_acf_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_reg_is_acc_c:  // 104 // sync done
+			{
+				like_reg_is_acc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+	
+			case  op_rd_wr_acc_c:  // 105 // sync done
+			{
+				if ( ( (p_u32IWord >> 5) & 1) == 0 )
+				{
+					rd_wr_acc_mode0_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else
+				{
+					rd_wr_acc_mode1_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}				
+				break;
+			} 
+
+			case  op_sar_cpred_bit_c:  // 106
+			{
+				//Rs=CPred[k],CPred[k]=Rm
+				u32Temp = (p_u32IWord & 0x1U);
+				if(u32Temp == 0)
+					save_cpred_bit_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				else
+					restore_cpred_bit_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case op_accum_c32_c:           //108
+			case op_accum_cflo32_c:       //109
+			{
+				// sync done
+				like_accum_c32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_like_acc_is_zero_c:  // 110
+			{
+				// sync done
+				u32Temp = ((p_u32IWord>>16) & 0x3U);
+				if(u32Temp == 0) //ALU
+				{
+					like_acc_is_zero_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else if(u32Temp == 1) //MUL
+				{
+					macc_is_zero_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else if(u32Temp == 2) //SHF
+				{
+					shf_fr_zero_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+			
+			case  op_mul_32_c:              // 112
+			case op_mul_32_u_c:           //113
+			case op_mul_16_c:               //114
+			case op_mul_16_u_c:            //115
+			case op_mul_flo32_c:            //116
+			case op_mul_s16_ll_c:           //117
+			case op_mul_s16_HH_c:         //118
+			case op_mul_s16_lH_c:          //119
+			case op_mul_c16_h16_c:         //120
+			case op_mul_c16_l16_c:         //121
+			case op_mul_c16_c:                //122
+			case op_mul_c16_conj_c:        //123
+			case op_mul_c16conj_c:           //124
+			{
+				like_mul_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_square_hl16_c: //125
+			{
+				like_square_hl16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mul_c32_32_c: //126
+			case op_mul_cflo32_flo32_c: //127
+			{
+				like_mul_c32_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mul_c32_c: //128
+			{
+				mul_c32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mul_c32_conj_c: //129
+			{
+				mul_c32_conj_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mul_c32conj_c: //130
+			{
+				mul_c32conj_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mul_cf32_etc_c:       // 131
+			{
+				u32Temp = ( (p_u32IWord >> 12) & 0xf);
+				switch (u32Temp)
+				{
+				    case 0:	// QFRm+1:m_n+1:n=CFRm+1:m*CFRn+1:n
+				    	mul_cf32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				    	break;
+					case 1:  // CRm+1_n+1=CRm+1:m*Dconj(CRn+1:n)
+						mul_c32_dconj_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						break;
+					case 2:  // CRm+1_n+1=conj(CRm+1:m)*Dconj(CRn+1:n)
+						mul_conj_dconj_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						break;
+					case 8:  // QMACCH+=CRm+1:m*CRn+1:n
+					case 9:  // QMACCL+=CRm+1:m*CRn+1:n
+					case 10:  // QMACCH=CRm+1:m*CRn+1:n
+					case 11:  // QMACCL=CRm+1:m*CRn+1:n
+						macc_c32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						break;
+					case 12: //QMACCH=DFRm+1:m*DFRn+1:n
+					case 13: //QMACCL=DFRm+1:m*DFRn+1:n
+						QMacc_DF32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						break;
+					case 14: //DFRs+1:s=QMACCH
+					case 15: //DFRs+1:s=QMACCH
+						QMacc_To_DF64_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						break;
+					//case 5:  // Clr {x,y,z,t}MACCm
+						//macc_is_zero_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+						//break;
+				}
+				
+				break;
+			} 
+			case op_like_mulacc_32_c: //132
+			case op_like_mulacc_16_c: //133
+			case op_mul_c8_16_c: //145
+			{
+				like_mulacc_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mulacc_8_etc_c: //134
+			case op_macc_c16_etc_c: //135
+			case op_mac_c16_m_fix8_c: //136
+			{
+				mulacc_8_etc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_mac_is_reg_etc_c: //137
+			{
+				mac_is_reg_etc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_dfmul_c:  
+			{
+				writemacc_etc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_hmac_is_reg_etc_c:
+			{
+				hmacc_is_reg_etc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			} 
+
+			case op_reg_is_macc_etc_c: //139
+			// opcode 140 implemented in other group
+			case op_omacc_to_32_etc_c: // 141
+			{
+				reg_is_macc_etc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_hmacc_to_32_c: //140
+			{
+				u32Temp = ( (p_u32IWord >> 9) & 1);
+				if(u32Temp==0)
+				{
+					hmacc_to_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else
+				{
+					readmacc_to_reg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+			
+			case  op_mulfr_to_reg_c:  // 146
+			{
+				//QFRs+3:s=CFRm+1:m*CFRn+1:n
+				mul_cfloat_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_square_32_c:                //144
+			case op_square_32_u_c:            //145
+			{
+				like_square_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_shiftr_32_c:                    //146
+			case op_shift0_32_c:                   //147
+			case op_rot_32_c:                        //148
+			case op_shiftr_c16_c:                  //149
+			case op_shift1_32_c:                   //150
+			case op_minv_32_c:                   //151
+			case op_mclr_32_c:                     //152
+			case op_mset_32_c:                    //153
+			case op_lxor_32_c:                     //154
+			case op_rxor_32_c:                     //155
+			case op_count0_32_c:                 //156
+			case op_count0_16_c:                 //157
+			case op_onecount_reg_c:           //158
+			case op_onecount_hreg_c:         //159
+			case op_oneposi_reg_c:             //160
+			case op_oneposi_hreg_c:           //161
+			case op_and_32_c:                     //162
+			case op_or_32_c:                        //163
+			case op_nand_32_c:                   //164
+			case op_nor_32_c:                     //165
+			case op_xor_32_c:                      //166
+			// opcode 167 implemented in other group
+			case op_jlh_32_c:                        //168
+			case op_jlh_d16_c:                      //169
+			case op_jlh_q8_c:                        //170
+			case op_expan_chreg_c: //214
+			case op_arshift_32_c:
+			case op_lrshift_32_c:
+			case op_rrot_32_c:
+			{
+				like_shiftr_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_shiftr_32_imm_c:           //171
+			case op_shift1_32_imm_c:           //172
+			case op_shift0_32_imm_c:           //173
+			case op_rot_32_imm_c:               //174
+			case op_like_h16_to_f32_c:         //181
+			case op_get_exp_mant_c:           //188
+			{
+				like_shiftr_32_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_expan_hhreg_etc_c: 
+			{
+				DSPU32  u32Temp1;
+				u32Temp1 = ( (p_u32IWord >> 17) & 1);
+				if(u32Temp1 == 1)
+				{
+					u32Temp = ( (p_u32IWord >> 14) & 7);
+					if ( (u32Temp == 0) || (u32Temp == 2))
+					{
+						expan_hhreg_etc_mode0_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					else if(u32Temp == 4 || u32Temp == 5)
+					{
+						compact_expan_etc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					else//1,3,6,7
+					{
+						expan_hhreg_etc_mode1_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+				}
+				else
+				{
+					shf_add_sub_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			} 
+			case op_not_32_c: //Rs=! Rm
+			{
+				like_not_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_cpat_creg_imm_c: //176
+			{
+				cpat_creg_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			} 
+			case op_bclr_32_c:           //177
+			case op_bset_32_c:           //178
+			case op_binv_32_c:               //179
+			// opcode 180 implemented in other group
+			// opcode 181 implemented in other group
+			// opcode 182 implemented in other group
+			// opcode 183 implemented in other group
+			case op_oneposi_imm_c:           //184
+			case op_zerocount_imm_c:         //185
+			case op_onecount_imm_c:          //186
+			{
+				like_bclr_32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+	   		case op_like_fix_flo32_c: // 187
+			{
+				like_fix_flo32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			} 
+			// opcode 188 implemented in other group
+			case op_exp_is_imm_c: //180
+			{
+				exp_is_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_abs_c:  // 182
+			{
+				abs_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_conj_c16_c: //183
+			{
+				conj_c16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_insert_to_sacc_c:
+			{
+				insert_to_sacc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_abs2_sacc_c:  ///198
+			case op_abs3_sacc_c:  ///199
+			{
+				abs2_sacc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_sacc_xor_c: ///200
+			{
+				sacc_xor_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_sigma_b1_to_sacc_c:
+			case op_sigma_b2_to_sacc_c:
+			case op_sigma_b4h_to_sacc_c:
+			case op_sigma_b4l_to_sacc_c:
+			case op_sigma_b1_add_sacc_c:
+			case op_sigma_b2_add_sacc_c:
+			case op_sigma_b4h_add_sacc_c:
+			case op_sigma_b4l_add_sacc_c:
+			{
+				sigma_sacc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_tab_to_reg_c:
+			case op_tab_to_horeg_c:
+			{
+				tab_reg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_reg_to_tab_c:
+			case op_horeg_to_tab_c:
+			case op_otab_add_const_c:
+				{
+					write_tab_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				}
+			case op_shift_sc_c:
+			{
+				rlshift_sc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_vmin_c:
+			{
+				vmin_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case op_stab_add_c:
+			{
+				u32Temp = ( (p_u32IWord >> 4) & 3);
+				if(u32Temp==0 || u32Temp==1)
+				{
+					shf_tab_add_reg16_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else
+				{
+					shf_tab_add_imm_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+			
+			case op_sigma_sc_c:
+			{
+				sigma_sc_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);	
+				break;
+			}
+			case op_shiftr_c32_c: // 213
+			case op_cpat_creg_c: //215
+			{
+				like_shiftr_c32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_lxor_d32_c:  // 216
+			case  op_rxor_d32_c:  // 217
+			{
+				like_lxor_d32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_shiftr_c32_imm_c: // 218
+			// opcode 220 implemented in other group
+			{
+				c16_to_cf32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			
+			// opcode 221 implemented in other group
+
+			// liuyu: save and restrore one bit of cpred
+			case op_sin_cos_c: // 222
+			{
+				u32Temp = ( (p_u32IWord >> 4) & 3);
+				if(u32Temp == 0)
+				{
+					sin_cos_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else if(u32Temp == 1)
+				{
+					log_abs_f32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else if(u32Temp == 2)
+				{
+					sqrt_abs_flo32_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+			
+			case op_arctg_c:
+				arctg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			case op_wr_addr_sw_c:
+			{
+				//[Un+C] = {x,y,z,t}Rm, [Vn+C] = {x,y,z,t}Rm, [Wn+C] = {x,y,z,t}Rm
+				wr_addr_sw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_rd_addr_sw_c: // 225
+			{
+				//{x,y,z,t}Rs=[Un+C], {x,y,z,t}Rs=[Vn+C], {x,y,z,t}Rs=[Wn+C]
+				rd_addr_sw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_rd_u_dw_c: //226
+            case op_rd_u_dw_base_off_c: //230
+            case op_rd_v_dw_c: //232
+            case op_rd_v_dw_base_off_c: //234
+            case op_rd_w_dw_c: //236
+            case op_rd_w_dw_base_off_c: //238
+			{
+				like_rd_u_dw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_rd_u_sw_c: //229
+            case op_rd_u_sw_base_off_c: //231
+            case op_rd_v_sw_c: //233
+            case op_rd_v_sw_base_off_c: //235
+            case op_rd_w_sw_c: //237
+            case op_rd_w_sw_base_off_c: //239
+			{
+				like_rd_u_sw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_wr_u_dw_c: //240
+            case op_wr_u_dw_base_off_c: //242
+            case op_wr_v_dw_c: //244
+            case op_wr_v_dw_base_off_c: //246
+            case op_wr_w_dw_c: //248
+            case op_wr_w_dw_base_off_c: //250
+			{
+				like_wr_u_dw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+
+			case op_wr_u_sw_c: //241
+            case op_wr_u_sw_base_off_c: //243
+            case op_wr_v_sw_c: //245
+            case op_wr_v_sw_base_off_c: //247
+            case op_wr_w_sw_c: //249
+            case op_wr_w_sw_base_off_c: //251
+			{
+				like_wr_u_sw_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case op_greg_is_areg_etc_c: // sync done
+			{
+				u32Temp = (p_u32IWord & 1);
+				if (u32Temp == 0)
+				{
+					greg_is_areg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else
+				{
+					areg_is_greg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+
+				break;
+			}
+		    case op_reg_trans_cores_c:
+			{
+				if ( (p_u32IWord & 1) == 0 )
+				{
+					reg_trans_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else
+				{
+					imafr_is_reg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+		    case op_dreg_trans_cores_c:
+		    {
+		    	ima_sigma_add_32(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+		    	break;
+		    }
+		    case op_sigma_reg_etc_cores_c:
+		    {
+		    	ima_sigma_add_64(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+		    	break;
+		    }
+			case op_sigma_add_q16:
+			{
+				ima_sigma_add_q16(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				break;
+			}
+			case  op_set_spec_reg_c:
+			{
+				u32Temp = (p_u32IWord >> 6) & 0xFFF; // 12位编址
+				u32Temp = (u32Temp >> 10) & 0x3;		// 12位编址高2位
+				if(u32Temp == 3) // ALUFR等运算部件与用寄存器
+				{
+					set_spec_reg_cores_alufr_etc(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else   // 其它可用[addr]=C写的寄存器
+				{
+					set_spec_reg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+			case  op_read_spec_reg_c:
+			{
+				u32Temp = p_u32IWord & 0xFFF; // 12位编址
+				u32Temp = (u32Temp >> 10) & 0x3;		// 12位编址高2位
+
+				if(u32Temp == 3) // ALUFR等运算部件与用寄存器
+				{
+					read_spec_reg_cores_alufr_etc(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				else   // 其它可用[addr]=C写的寄存器
+				{
+					read_spec_reg_cores(p_u32IWord, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+				}
+				break;
+			}
+
+			default:
+			{
+				if (p_u32Phase == PHASE_DC2)
+				{
+					PrintToCerr("do_inst: The opcode is invalid\n");
+				}
+			}
+		} //switch
+	}
+	return true;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+bool sc_iss::do_inst_ext(DSPU32 p_u32IWord0, DSPU32 p_u32IWord1, DSPU32 p_u32SLKIdx, DSPU32 p_u32Slot, DSPU32 p_u32Phase, DSPU32 p_u32JITIdx)
+{
+	DSPU32 u32Opcode, u32Temp;
+
+	if ( (p_u32SLKIdx == 0) || (p_u32SLKIdx >= RES_SLK_SIZE ) )
+	{
+		PrintToCerr("do_inst_ext: parameter is invalid\n");
+		return false;
+	}
+
+	if ( p_u32Slot >= MAX_INUM_LINE )
+	{
+		PrintToCerr("do_inst_ext: parameter is invalid\n");
+		return false;
+	}
+
+	if ( p_u32Phase >= PHASE_MAX )
+	{
+		PrintToCerr("do_inst_ext: parameter is invalid\n");
+		return false;
+	}
+
+	u32Opcode = GetOpcodeExt(p_u32IWord1);
+	switch (u32Opcode)
+	{
+		case  op_ext_sw_m8_etc_c:	// sync done
+		{
+			u32Temp = ((p_u32IWord1 >> 13) & 0x3);
+			switch (u32Temp)
+			{
+				case 0: // 模8单字读/写访存指令
+				case 1: // 双模8单字读/写访存指令
+					if (((p_u32IWord1 >> 20) & 1) == 1)
+					{
+						ext_like_rd_sw_m8_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					else
+					{
+						ext_like_wr_sw_m8_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					break;
+				case 2: // 模8双字读/写访存指令
+				case 3: // 双模8双字读/写访存指令
+					if (((p_u32IWord1 >> 20) & 1) == 1)
+					{
+						ext_like_rd_dw_m8_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					else
+					{
+						ext_like_wr_dw_m8_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					break;
+			}			
+			
+			break;
+		}
+
+		case op_ext_br_dw_etc_c:  // sync done
+		{
+			u32Temp = ((p_u32IWord1 >> 19) & 0x3);
+			switch (u32Temp)
+			{
+				case 0: // write, brc
+				case 1: // write, brq
+					ext_like_wr_br_dw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+				case 2: // read, brc
+				case 3: // read, brq
+					ext_like_rd_br_dw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+			}
+			break;
+		}
+
+		case op_ext_rd_sw_etc_c: // sync done
+		{
+			u32Temp = ((p_u32IWord1 >> 18) & 0x7);
+			switch (u32Temp)
+			{
+				case 0:
+					ext_wr_sw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 1:
+					ext_wr_dw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				/*
+				case 2:
+					//BT[Un+Um,Uk]={x,y,z,t}Rs
+					//BT[Vn+Vm,Vk]={x,y,z,t}Rs
+					//BT[Wn+Wm,Wk]={x,y,z,t}Rs
+					
+					ext_atom_wr_sw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);				
+					break;
+				*/
+				case 4:
+					ext_rd_sw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 5:
+					ext_rd_dw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				/*
+				case 6:
+					//{x,y,z,t}Rs=BT[Un+Um,Uk] 
+					//{x,y,z,t}Rs=BT[Vn+Vm,Vk] 
+					//{x,y,z,t}Rs=BT[Wn+Wm,Wk] 
+
+					ext_atom_rd_sw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);				
+					break;
+				*/
+				
+			}
+			break;
+		}
+
+		case op_ext_shf_64_etc_c: // 3
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 18, 3);
+			switch (u32Temp)
+			{
+				case 0:
+					// DC2 sync done
+					ext_shf_64_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+				case 1:
+					// DC2 sync done
+					ext_fext_reg_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 2:
+					// DC2 sync done
+					ext_sacc_insert_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+				case 3:
+					// DC2 sync done
+					ext_sigma_b1_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+				case 4:
+					//STABd(Rn,Rs,Rm)(k)
+				    rd_wrt_onestab_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+			}
+			break;
+		}
+		
+		case op_dw_fext_ext_etc_c: // 4 // sync done
+		{
+			if((p_u32IWord1 >> 18) & 0x1)  //占用2个SHF
+			{
+				u32Temp = ((p_u32IWord1 >> 19) & 0x3);
+				switch (u32Temp)
+				{	
+				case 0: //Rs1Rs2=exchange(Rm,Rn,a)
+				case 1: //Rs1Rs2=s_exchange(Rm,Rn,a)
+					ext_exchange_cores_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 2: //Rs1Rs2=Rm Insert Rn (p:q, f:g)
+					ext_insert_cores_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 3: //Rs1Rs2=Rm Ext Rn (f:g)
+					ext_ext_cores_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				}
+			}
+			else  //占用1个SHF
+			{
+				u32Temp = ((p_u32IWord1 >> 19) & 0x3);
+				switch (u32Temp)
+				{	
+				case 0: //Rs1Rs2=exchange(Rm,Rn,a)
+				case 1: //Rs1Rs2=s_exchange(Rm,Rn,a)
+					ext_exchange_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 2: //Rs1Rs2=Rm Insert Rn (p:q, f:g)
+					ext_insert_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 3: //Rs1Rs2=Rm Ext Rn (f:g)
+					ext_ext_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				}
+			}
+			break;
+		}
+
+		case op_ext_fext_etc_c:  // 5
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 18, 3);
+			switch (u32Temp)
+			{
+				case 0:
+					// sync done
+					//ext_fext_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					if(ExtractBinStr(p_u32IWord1, 17, 1)==0)
+						ext_fext_cores_new(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					else
+						ext_fext_cores_new_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 1: 
+					// sync done
+					//ext_like_append_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					if(ExtractBinStr(p_u32IWord1, 17, 1)==0)
+						ext_like_append_cores_new(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					else
+						ext_like_append_cores_new_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 2:
+					// dc2 sync done
+					if(ExtractBinStr(p_u32IWord1, 17, 1)==0)
+						ext_compact_cores_new(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					else
+						ext_compact_cores_new_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 3:
+					// sync done
+					if(ExtractBinStr(p_u32IWord1, 5, 1)==0)
+						ext_reg_mask_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					else
+						ext_reg_mask_cores_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 4:
+					// dc2 sync done
+					//ext_fix_reg_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					ext_fix_reg_cores_new(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 5:
+					// dc2 sync done
+					//ext_double_reg_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					ext_double_reg_cores_new(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 6:
+					ext_fix_float_reg_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 7:
+					//ext_compact_expand_cors(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					if(ExtractBinStr(p_u32IWord1, 17, 1)==0)
+						ext_compact_expand_cors_new(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					else
+						ext_compact_expand_cors_new_2(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+			}
+			break;
+		}
+		
+		case op_ext_b_cmp_etc_c:  // 6
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 20, 1);
+			bool flag = ExtractBinStr(p_u32IWord1, 19, 1);
+			switch (u32Temp)
+			{
+				case 0:
+					// DC2 sync done
+					// If {x,y,z,t}Rm>Rn(U) B <pro>
+					ext_b_cmp_etc_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 1:
+					// DC2 sync done
+					if(flag==0)
+						// If {x,y,z,t}HHRm[HHRn]==C BN <pro>
+						ext_b_cmp_imm_etc_cores0(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					else
+						// If {x,y,z,t}HHRm>C(U) BN <pro>
+						ext_b_cmp_imm_etc_cores1(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+			}
+			
+			break;
+		}		
+
+		case op_ext_b_on_bit_etc_c: // 7
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 18, 3);
+			switch (u32Temp)
+			{
+				case 0:
+					// DC2 sync done
+					ext_b_bit_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 1:
+					// DC2 sync done
+					ext_fix16_is_on_cmp_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 2:
+					ext_Float32_Add_C_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+			}
+					break;
+		}
+
+		case op_ext_cond_do_etc_c:  // 8
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 18, 3);
+			switch (u32Temp)
+			{				
+				case 0:
+					// DC2 sync done
+					ext_uvw_is_imm_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 1:
+					// DC2 sync done
+					ext_cond_do_uvw_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 2:
+					ext_cpred_do_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+			}
+			
+			break;
+		}
+
+		case op_ext_bn_on_u_cmp_c: // 9
+		case op_ext_bn_on_v_cmp_c: // 10
+		case op_ext_bn_on_w_cmp_c: // 11
+		{
+			// DC2 sync done
+			ext_bn_on_areg_cmp_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+			break;
+		}		
+
+		case op_ext_reg_is_fix_etc_c:  //12  // sync done
+		{
+			u32Temp = ((p_u32IWord1 >> 18) & 0x7);
+			switch (u32Temp)
+			{
+				case 0:
+					ext_reg_is_fix_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 1:
+					ext_reg_is_flo32_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+				case 3:
+					ext_set_spec_reg_imm_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);					
+					break;
+				case 4:
+					if( ((p_u32IWord1 >> 17) & 1) == 0)
+					{
+						set_reg_bit_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					else
+					{
+						clr_reg_bit_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}
+					break;
+			}
+			break;
+		}
+
+		case op_ext_maxmin_hlacc_etc_c: // 13
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 18, 3);
+			if (u32Temp == 0)
+			{
+				// DC2 sync done
+				ext_maxmin_hlacc_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+			}
+			else if (u32Temp == 1)
+			{
+				// DC2 sync done
+				ext_cond_to_cpred_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+			}
+			else if(u32Temp == 2)
+			{
+				ext_cmp_acf_reg_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+			}
+
+			break;
+		}
+
+		case op_ext_b_lbl_etc_c: // 14
+		{
+			u32Temp = ExtractBinStr(p_u32IWord1, 19, 2);
+			switch (u32Temp)
+			{
+				case 0:
+					zloop_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					break;
+				case 3:
+					if(ExtractBinStr(p_u32IWord1, 18, 1) == 0)
+					{
+						ext_atom_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+					}					
+					break;
+			}
+			break;
+		}
+
+		case op_ext_shf_c_add_32_c: // 15
+		{
+			// sync done
+			ext_shf_c_add_32_cores(p_u32IWord0, p_u32IWord1, p_u32SLKIdx, p_u32Slot, p_u32Phase, p_u32JITIdx, u32Opcode);
+			break;
+		}
+
+		default:
+		{
+			if (p_u32Phase == PHASE_DC2)
+			{
+				PrintToCerr("do_inst_ext: The opcode is invalid\n");
+				printf("do_inst_ext: opcode is 0x%08x\n", u32Opcode);
+			}
+		}
+	}
+	return true;
+}
+
+#if 0
+//-------------------------------------------------------------------------------------------------------------------------------
+// Is the first word of InstExt
+//
+bool sc_iss::IsExtFirstWord(DSPU32 p_u32IWord)
+{
+	bool bolTemp;
+	unsigned int u32Temp;
+
+	u32Temp = ExtractBinStr(p_u32IWord, 25, 2);
+	bolTemp = (u32Temp == 3)? true:false;
+
+	return bolTemp;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+// Is the second word of InstExt
+//
+bool sc_iss::IsExtSecondWord(DSPU32 p_u32IWord)
+{
+	bool bolTemp;
+	unsigned int u32Temp;
+
+	u32Temp = ExtractBinStr(p_u32IWord, 25, 2);
+	bolTemp = (u32Temp == 2)? true:false;
+
+	return bolTemp;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+bool sc_iss::IsInstNoCalc(DSPU32 p_u32IWord)
+{
+	bool bolIsNoCalc = false;
+
+	if ( (!IsExtFirstWord(p_u32IWord)) && (!IsExtSecondWord(p_u32IWord)) )
+	{
+		if ( ExtractBinStr(p_u32IWord, 27, 4) == 0 )
+		{
+			bolIsNoCalc = true;
+		}
+	}
+
+	return bolIsNoCalc;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+DSPU32 sc_iss::GetOpcodeExt(DSPU32 p_u32IWord)
+{
+	DSPU32 u32Opcode;
+
+	u32Opcode = ExtractBinStr(p_u32IWord, 21, 4);
+
+	return u32Opcode;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+DSPU32 sc_iss::GetOpcodeNoCalc(DSPU32 p_u32IWord)
+{
+	DSPU32 u32Opcode;
+
+	u32Opcode = ExtractBinStr(p_u32IWord, 18, 5);
+
+	return u32Opcode;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+DSPU32 sc_iss::GetOpcode(DSPU32 p_u32IWord)
+{
+	DSPU32 u32Opcode;
+
+	u32Opcode = ExtractBinStr(p_u32IWord, 18, 8);
+
+	return u32Opcode;
+}
+//-------------------------------------------------------------------------------------------------------------------------------
+
+#endif
+
+
+
+

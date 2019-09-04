@@ -1,0 +1,3531 @@
+/*
+ * icache_module_new.cpp
+ *
+ *  Created on: Jan 6, 2014
+ *      Author: liugu
+ */
+#include "icache_module_new.h"
+
+#ifdef SC_ICACHE 
+#include "extension.h"
+#endif
+#include <math.h>
+
+using namespace BWDSP104X;
+#ifdef SC_ICACHE
+icache_module_new::icache_module_new(sc_module_name nm, unsigned int *p_pBPB, unsigned int BPBsize)
+	:module_name(nm),p_BPB(p_pBPB),sizeBPB(BPBsize)
+{
+	init_socket_to_sram.bind(*this);
+
+/*
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+
+	dont_initialize();
+*/
+#ifdef INNER_SRAM_SC_INOUT
+			SC_METHOD(proc_inner_sram_jtg_signals);
+			sensitive<<sc_inner_sram_jtg_en<<sc_inner_sram_jtg_wr<<sc_inner_sram_jtg_addr
+				<<sc_inner_sram_jtg_wdat<<sc_inner_sram_jtg_rdat;
+
+			SC_METHOD(proc_inner_sram_jtg_rdat);
+			sensitive<<sc_inner_sram_jtg_addr;
+#endif
+
+	//reset();
+	DEBUG_INFO_STREAM("EVENT: icache module "<<nm<<" created successfully\n");
+	return;
+}
+
+void icache_module_new::clock_tick()
+{
+	//This function is not part of the cache module
+	//It is only used as test function
+	cout<<"#["<<sc_time_stamp()<<"@"<<module_name<<"]#	icache module running"<<endl;
+
+	//Test 1: send REQUEST every  cycle
+	L2_irq_pc_w = 0;
+	send_REQUEST();
+	
+}
+#else
+icache_module_new::icache_module_new(std::string nm, unsigned int *p_pBPB, unsigned int BPBsize)
+	:name(nm),p_BPB(p_pBPB),sizeBPB(BPBsize)
+{
+	reset();
+	DEBUG_INFO_STREAM("EVENT: icache module "<<nm<<" created successfully\n");
+	return;
+}
+#endif
+
+
+void icache_module_new::reset(unsigned int boot_addr)
+{
+	ResetCacheReg(boot_addr);
+
+	/*Inner SRAM reset*/
+	reset_inner_sram();
+
+	//Submodule
+	ICACHE_RAM.reset();
+	//L2MMC.reset();
+
+	//Load L2 from file
+#ifdef USING_L2_INTERNAL_MEM
+	L2MMC.setMode(L2_mmc_new::L2_NOP_MEM,0,0);		//for coverage test
+	L2MMC.setMode(L2_mmc_new::L2_EXTERN_MEM,0,0x2000);	//for coverage test
+	L2MMC.setMode(L2_mmc_new::L2_INTERNAL_MEM,0,0x2000);
+	DEBUG_INFO_STREAM("Event: icache initialize using L2 loaded from \"a.out.img\"\n");
+	if(!L2MMC.LoadInnerMem()){
+		DEBUG_INFO_STREAM("Error: L2 memory load failed\n");
+		exit(1);
+	}
+#endif
+
+	//Trace file and stimulus file initialize
+#ifdef ICACHE_TRACE_ON
+	initTraceFile();
+#endif
+#ifdef GEN_STIMULATION
+	initStmFile();
+#endif
+	return;
+}
+
+void icache_module_new::reset_inner_sram()
+{
+		/*Set address and size*/
+		inner_sram_start_addr = InnerSRAMStart;
+		inner_sram_end_addr   = InnerSRAMEnd;
+		inner_sram_size		  = 0x10000;
+		/*Allocate space for inner_sram*/
+
+		//inner_sram[0] = 0x06000002;
+		//inner_sram[1] = 0x85c80000;
+
+		isFE0InnerSRAM_w = false;
+		isFE0ShareSRAM_w = false;
+		isFE2InnerSRAM.reset();
+		isFE2ShareSRAM.reset();
+		share_sram_irq_plus.reset();
+		inner_sram_inst.reset();
+
+		inner_sram_mod = true;
+		inner_sram_cen = false;
+		inner_sram_wrn = false;
+		inner_sram_addr = 0;
+		inner_sram_wrdata.reset();
+		inner_sram_rddata.reset();
+
+		inner_sram_jtg_addr_1d.reset();
+		inner_sram_rddata_1d.reset();
+
+		inner_sram_rddata_buf.reset();
+
+		inner_sram_jtg_en = true;		//0 valid
+		inner_sram_jtg_wr = false;
+		inner_sram_jtg_addr = 0;
+		inner_sram_jtg_wdat = 0;
+		inner_sram_jtg_rdat = 0;
+
+		share_sram_ack_pc = 0x5a5aa5a5;
+		share_sram_ack_inst.reset();
+		
+		inner_sram_rddata_bak_en.reset();
+		inner_sram_rddata_bak_data.reset();
+
+}
+
+void icache_module_new::initTraceFile()
+{
+	//Initialize icache_in.log file
+	FILE * fp = NULL;
+	(fp = fopen("icache_in.log","w"));
+	fclose(fp);
+
+	//Initialize icache_out.log file
+	FILE * fp1 = NULL;
+	(fp1 = fopen("icache_out.log","w"));
+	fclose(fp1);
+	return;
+}
+
+void icache_module_new::initStmFile()
+{
+	FILE * fp_stm = NULL;
+	(fp_stm = fopen("input.txt","w"));
+	fclose(fp_stm);
+	FILE * fp_ref = NULL;
+	(fp_ref = fopen("output.txt","w"));
+	fclose(fp_ref);
+}
+
+void icache_module_new::SetStartPC(unsigned int p_u32StartPC)
+{
+		PCFE0_w = p_u32StartPC;
+		PCFE0.set(p_u32StartPC);
+		return;
+}
+
+void icache_module_new::ResetCacheReg(unsigned int boot_addr)
+{
+	//Mode and cycle counter
+		//mode = ICACHE_NORMAL;
+		local_cycle_L = local_cycle_H = 0;
+		//Input
+		IAB_HALT = false;
+
+		dsp_en = true;
+		
+		ro_CJMP = 0;
+		ro_LC[0] = ro_LC[1] = ro_LC[2] = ro_LC[3] = 0;
+		exFlush = false;
+		exFlushPC = exFlushPri = 0;
+		isFlushRETI = false;
+		INT_PC = INT_pri = 0;
+		//Output
+		isFE1_load_w = false;
+		submitToIAB_w = false;
+		insnLine_toIAB.reset();
+		hitFE2_w = isFE2B_w = false;
+		PCFE2B_w = 0;
+		firstBPos = 0;
+		iab_launchB_maks = 0;
+		//PCFE0_w = 0;
+		/*if(mode == ICACHE_NORMAL){
+			PCFE0_w = ICACHE_PROGMEM_BASE_ADDR;
+			PCFE0.set(ICACHE_PROGMEM_BASE_ADDR);
+		}else if(mode == ICACHE_SRAM){
+			PCFE0_w = ICACHE_BASE_ADDR;
+			PCFE0.set(ICACHE_BASE_ADDR);
+		}*/
+		PCFE0_w = boot_addr;
+		PCFE0.set(boot_addr);
+
+		icWbDelay_2nd_w = false;
+		//Pipeline register
+		//PCFE0.reset();
+		priFE0.reset();
+		//PCFE0_en.reset();
+		PCFE0_en.set(true);
+		PCFE1.reset();
+		ISRFirstLine_FE0.reset();
+		IsNormalSeq_FE0.reset();
+
+		ISRFirstLine_FE0_w = false;
+		IsNormalSeq_FE0_w = false;
+		//isFE1BUB.reset();
+		isFE1BUB.set(true);
+		priFE1.reset();
+		ISRFirstLine_FE1.reset();
+		IsNormalSeq_FE1.reset();
+		PCFE2.reset();
+		//isFE2BUB.reset();
+		isFE2BUB.set(true);
+		priFE2.reset();
+		ISRFirstLine_FE2.reset();
+		IsNormalSeq_FE2.reset();
+		bufCacheLine.reset();
+		//Dedicated register
+		ICGC.set(0x100);
+		ICACNT.reset();
+		ICMCNT.reset();
+		//ICFLUSH_CON.reset();
+		ICFLUSH_CON.set(0x1);
+		ICDMA_CON.set(0x4);
+		ICDMA_LEN.reset();
+		ICDMA_DST_ADDR.reset();
+		ICDMA_SRC_ADDR.reset();
+		ICDMA_AUTOLEN.reset();
+
+		//Internal signals
+		L2_ack_w = false;
+		L2_ack_pc_w = 0;
+		L2_ack_insn_w.reset();
+		L2_irq_w = false;
+		L2_irq_pc_w = 0;
+		L2_ack_true = false;
+		L2_ack_true_tmp.reset();
+		write_En = false;
+		write_PC = 0;
+		write_Line.reset();
+		for(int i=0;i<4;i++){
+			cacheOutput[i].reset();
+		}
+		hitFromFE2Buffer_w = false;
+		hitway_w = 0;
+		insnLine_toIAB.reset();
+		branpredhasdone.reset();
+		lastLineNotComplete.reset();
+		isFPCUsed_w = false;
+
+		//INT related
+
+		calcPCFromPMASK = false;
+		isExRETI_1d.reset();
+		isExRETI_2d.reset();
+
+		//DMA related
+		DDRAddrStart = DEFAULT_DDR_ADDR_START;
+		DDRAddrEnd = DEFAULT_DDR_ADDR_END;
+		autoDMAPC =  0;
+		icDMAProc = false;
+		icDMAFirst3Addr_w = false;
+		icDMASelfMiss = false;
+		icDMAAck = false;
+		icDMATerminal = false;
+		icDMABoot = false;
+		icDMAPCEn = false;
+		icDMAPCEn_1d.reset();
+		icDMAPCEn_2d.reset();
+		icdma_cnt.reset();
+		icDMAProc_1d.reset();
+		dmaTerminalSet.reset();
+		autoDMASet.reset();
+		isFE2PCDDR.reset();
+		icDMAPC.reset();
+		icDMARdAddr.reset();
+		icDMAProc_d[0].reset();
+		icDMAProc_d[1].reset();
+		icDMAProc_d[2].reset();
+		innerOptBakPC.reset();
+		innerOptBakPri.reset();
+		currentBakPC_w = 0;
+		currentBakPri_w = 0;
+		currentBakISRFirstLn_w = 0;
+
+
+		for(int i=0;i<4;i++){
+			imme_wr[i] = false;
+			imme_wAddr[i] = 0;
+			imme_wData[i] = 0;
+		}
+
+		L2_irq_pc.reset();
+
+		ICDMA_AUTOLEN.set(0xf);
+
+		nextPC = 0;
+		nextPC_extern = 0;
+
+		extern_INT_w = false;
+		extern_ExFlush_w = false;
+		extern_ExFlush_PC_w = 0;
+		extern_ExFlush_pri_w = 0;
+
+		calcPCFromPMASK_new = false;
+		//TODO: some signals are not initialized
+
+#ifdef SC_ICACHE
+		L2_ack_reg.reset();
+		L2_ack_pc_reg.reset();
+		L2_ack_insn_w.reset();
+
+		m_send_new_request = true;
+		m_last_trans_finished = true;
+#endif
+#ifdef TEST_REQUEST
+		tr_pro.reset();
+		l2_irq_pc_1d.reset();
+		l2_irq_1d.reset();
+		tr_bypass.reset();
+#endif
+#ifdef TLM_SHARED_SRAM
+		share_sram_ack_pc_reg.set(0x5a5aa5a5);
+		share_sram_ack_inst_reg.reset();
+#endif
+
+		insnLine_toIAB_w.reset();
+		hitFE2Inst_w.reset();
+		inner_sram_inst.reset();
+		share_sram_ack_inst.reset();
+		L2_ack_insn_w.reset();
+		L2_ack_insn_reg.reset();
+
+		dsp_en_reg.reset();
+
+		return;
+}
+
+void icache_module_new::ResetCacheMem()
+{
+	ICACHE_RAM.reset();
+}
+
+bool icache_module_new::readREG_in(ICACHE_REG_TYPE reg_id,unsigned int *value)
+{
+	//ICACHE_ICGC,ICACHE_ICACNT,ICACHE_ICMCNT,ICACHE_ICFLUSH_CON,ICACHE_ICDMA_CON,
+	//ICACHE_ICDMA_LEN,ICACHE_ICDMA_DST_ADDR,ICACHE_ICDMA_SRC_ADDR,ICACHE_ICDMA_AUTOLEN
+	bool ret = true;
+	switch(reg_id){
+	case ICACHE_ICGC: 	*value = ICGC.val_in;break;
+	case ICACHE_ICACNT: *value = ICACNT.val_in;break;
+	case ICACHE_ICMCNT: *value = ICMCNT.val_in;break;
+	case ICACHE_ICFLUSH_CON:	*value = ICFLUSH_CON.val_in;break;
+	case ICACHE_ICDMA_CON:		*value = ICDMA_CON.val_in;break;
+	case ICACHE_ICDMA_LEN:		*value = ICDMA_LEN.val_in;break;
+	case ICACHE_ICDMA_DST_ADDR:	*value = ICDMA_DST_ADDR.val_in;break;
+	case ICACHE_ICDMA_SRC_ADDR:	*value = ICDMA_SRC_ADDR.val_in;break;
+	case ICACHE_ICDMA_AUTOLEN:	*value = ICDMA_AUTOLEN.val_in;break;
+	default:	ret= false;
+				DEBUG_INFO_STREAM("Error: try to read a register with wrong ID"<<std::endl);
+				break;
+	}
+	return ret;
+}
+
+bool icache_module_new::readREG(ICACHE_REG_TYPE reg_id,unsigned int *value)
+{
+	//ICACHE_ICGC,ICACHE_ICACNT,ICACHE_ICMCNT,ICACHE_ICFLUSH_CON,ICACHE_ICDMA_CON,
+	//ICACHE_ICDMA_LEN,ICACHE_ICDMA_DST_ADDR,ICACHE_ICDMA_SRC_ADDR,ICACHE_ICDMA_AUTOLEN
+	bool ret = true;
+	switch(reg_id){
+	case ICACHE_ICGC: 	*value = ICGC.read();break;
+	case ICACHE_ICACNT: *value = ICACNT.read();break;
+	case ICACHE_ICMCNT: *value = ICMCNT.read();break;
+	case ICACHE_ICFLUSH_CON:	*value = ICFLUSH_CON.read();break;
+	case ICACHE_ICDMA_CON:		*value = ICDMA_CON.read();break;
+	case ICACHE_ICDMA_LEN:		*value = ICDMA_LEN.read();break;
+	case ICACHE_ICDMA_DST_ADDR:	*value = ICDMA_DST_ADDR.read();break;
+	case ICACHE_ICDMA_SRC_ADDR:	*value = ICDMA_SRC_ADDR.read();break;
+	case ICACHE_ICDMA_AUTOLEN:	*value = ICDMA_AUTOLEN.read();break;
+	default:	ret= false;
+				DEBUG_INFO_STREAM("Error: try to read a register with wrong ID"<<std::endl);
+				break;
+	}
+	return ret;
+}
+
+bool icache_module_new::writeREG(ICACHE_REG_TYPE reg_id,unsigned int value)
+{
+	bool ret = true;
+	switch(reg_id){
+	case ICACHE_ICGC: 	ICGC.write(value);break;
+	case ICACHE_ICACNT: ICACNT.write(value);break;
+	case ICACHE_ICMCNT: ICMCNT.write(value);break;
+	case ICACHE_ICFLUSH_CON:	ICFLUSH_CON.write(value);break;
+	case ICACHE_ICDMA_CON:		ICDMA_CON.write(value);break;
+	case ICACHE_ICDMA_LEN:		ICDMA_LEN.write(value);break;
+	case ICACHE_ICDMA_DST_ADDR:	ICDMA_DST_ADDR.write(value);break;
+	case ICACHE_ICDMA_SRC_ADDR:	ICDMA_SRC_ADDR.write(value);break;
+	case ICACHE_ICDMA_AUTOLEN:	ICDMA_AUTOLEN.write(value);break;
+	default:	ret= false;
+				DEBUG_INFO_STREAM("Error: try to write a register with wrong ID"<<std::endl);
+				break;
+	}
+	if(ret){
+		DEBUG_INFO_STREAM("Event: successfully write to register "<<reg_id<<" = 0x"<<std::hex<<value<<std::endl);
+	}
+	return ret;
+}
+
+//bool icache_module_new::LoadCacheFromFile()
+//{
+//	//This function load InternalMem[32K=0x8000] using file a.out.img in SRAM mode only
+//	assert(mode == ICACHE_SRAM);
+//	FILE *fp = NULL;
+//	unsigned int u32Value, u32BaseAddr;
+//
+//	assert((fp = fopen("a.out.img", "r")));
+//
+//	u32BaseAddr = ICACHE_BASE_ADDR;
+//	for (int i = 0; i < 0x8000; i++)
+//	{
+//		if (((i + 1) % 16) == 0)
+//		{
+//			fscanf(fp, "%08x \n", &u32Value);
+//		}
+//		else
+//		{
+//			fscanf(fp, "%08x ", &u32Value);
+//		}
+//		WrCacheMem(u32BaseAddr+i,u32Value);
+//	}
+//	fclose(fp);
+//	return true;
+//
+//}
+
+void icache_module_new::SetMode(icache_mode m)
+{
+	DEBUG_INFO_STREAM("Event: icache mode is set to "<<m<<std::endl);
+	mode = m;
+
+	switch(m){
+		case ICACHE_NORMAL:
+			setBitREG(ICACHE_ICGC,8);
+			break;
+		case ICACHE_SRAM:
+			clrBitREG(ICACHE_ICGC,8);
+			break;
+		default:
+			break;
+	}
+
+	return;
+}
+
+void icache_module_new::incCycle()
+{
+	local_cycle_L ++;
+	if(local_cycle_L == 0){
+		local_cycle_H ++;
+	}
+	return;
+}
+
+void icache_module_new::CacheDoCycle()
+{
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"CacheDoCycle: cycle = 0x%x\n",local_cycle_L);
+	fclose(fp);*/
+
+	exFlush = exFlush ;
+	extern_ExFlush_w = extern_ExFlush_w;
+
+	if(dsp_en){
+		evaluate();
+	}
+	return;
+}
+
+void icache_module_new::CacheShiftReg()
+{
+	if(dsp_en){
+		update();
+	}
+	incCycle();
+	return;
+}
+
+void icache_module_new::WrFPC(DSPU32 p_u32PCNotAlign,bool p_bolISRFirstLine,DSPU32 p_u32INTLvl,bool p_bolIsNormalSeq)
+{
+	//Check if nextPC is correct
+	//assert( p_u32PCNotAlign == nextPC);
+	//std::cout<<"["<<local_cycle_L<<"] WrFPC 0x"<<p_u32PCNotAlign<<std::endl;
+	nextPC_extern = p_u32PCNotAlign;
+
+	externalPC_w  = p_u32PCNotAlign;
+	externalPri_w = p_u32INTLvl;
+
+	ISRFirstLine_FE0_w = p_bolISRFirstLine;
+	IsNormalSeq_FE0_w = p_bolIsNormalSeq;
+
+	//This interface is actually not used anymore
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+	(fp = fopen("icache_in.log","a+"));
+
+	fprintf(fp,"newFPC=0x%x\n",p_u32PCNotAlign);
+	fprintf(fp,"newFPCpri=0x%x\n",p_u32INTLvl);
+	fprintf(fp,"newISRFirstLine=%d\n",p_bolISRFirstLine);
+	fprintf(fp,"newIsNormalSeq=%d\n",p_bolIsNormalSeq);
+	fclose(fp);
+#endif
+	return;
+}
+
+DSPU32 icache_module_new::RdFPC()
+{
+	return PCFE0.read();
+}
+
+DSPU32 icache_module_new::RdNextActivePC()
+{
+	return currentBakPC_w;
+}
+
+bool icache_module_new::WrCacheReg(DSPU32 p_u32RegAddr, DSPU32 p_u32Value)
+{
+	switch(p_u32RegAddr){//See BWDSP104x address space spec. table 2-2-19
+	case 0x5a5a5a00:	ICGC.write((unsigned int)p_u32Value); break;
+	case 0x5a5a5a01:	ICACNT.write((unsigned int)p_u32Value);
+		INFO_STREAM("Warning: Try to write a read-only register with address: 0x"<<
+			std::hex<<p_u32RegAddr<<std::dec<<std::endl);
+		break;	//RO
+	case 0x5a5a5a02:	ICMCNT.write((unsigned int)p_u32Value);
+		INFO_STREAM("Warning: Try to write a read-only register with address: 0x"<<
+			std::hex<<p_u32RegAddr<<std::dec<<std::endl);
+		break;	//RO
+	case 0x5a5a5a03:	ICFLUSH_CON.write((unsigned int)p_u32Value); break;
+	case 0x5a5a5a04:	ICDMA_CON.write((unsigned int)p_u32Value); break;
+	case 0x5a5a5a05:	ICDMA_LEN.write((unsigned int)p_u32Value); break;
+	case 0x5a5a5a06:	ICDMA_DST_ADDR.write((unsigned int)p_u32Value); break;
+	case 0x5a5a5a07:	ICDMA_SRC_ADDR.write((unsigned int)p_u32Value); break;
+	case 0x5a5a5a08:	ICDMA_AUTOLEN.write((unsigned int)p_u32Value); break;
+	default:	INFO_STREAM("Error: Try to write icache register with wrong address: 0x"<<std::hex
+					<<p_u32RegAddr<<std::dec<<std::endl);
+		return false;
+	}//end of switch
+
+	DEBUG_INFO_STREAM("Reg: successefully write to reg #"<<std::hex<<p_u32RegAddr<<" = 0x"<<p_u32Value<<std::endl);
+
+	return true;
+}
+
+bool icache_module_new::RdCacheReg(DSPU32 p_u32RegAddr, DSPU32 *p_pValue)
+{
+	switch(p_u32RegAddr){
+	case 0x01208800:	*p_pValue = ICGC.read(); break;
+	case 0x01208801:	*p_pValue = ICACNT.read(); break;
+	case 0x01208802:	*p_pValue = ICMCNT.read(); break;
+	case 0x01208803:	*p_pValue = ICFLUSH_CON.read(); break;
+	case 0x01208804:	*p_pValue = ICDMA_CON.read(); break;
+	case 0x01208805:	*p_pValue = ICDMA_LEN.read(); break;
+	case 0x01208806:	*p_pValue = ICDMA_DST_ADDR.read(); break;
+	case 0x01208807:	*p_pValue = ICDMA_SRC_ADDR.read(); break;
+	case 0x01208808:	*p_pValue = ICDMA_AUTOLEN.read(); break;
+	default:	INFO_STREAM("Error: Try to read icache register with wrong address: 0x"<<std::hex
+					<<p_u32RegAddr<<std::dec<<std::endl);
+		return false;
+	}//end of switch
+	return true;
+}
+
+bool icache_module_new::WrCacheReg_dbg(DSPU32 p_u32RegAddr,DSPU32 p_u32Value)
+{
+	DSPU32 old_value = 0;
+	RdCacheReg_dbg(p_u32RegAddr, &old_value);
+
+	switch(p_u32RegAddr){
+	case 0x800:	ICGC.write( (old_value & ~MASK_ICGC) | (   ((unsigned int)p_u32Value) & MASK_ICGC) ); break;
+	case 0x801:	//ICACNT.write((((unsigned int)p_u32Value) & MASK_ICACNT) );
+		INFO_STREAM("Warning: Try to write a read-only register with address: 0x"<<
+			std::hex<<p_u32RegAddr<<std::dec<<std::endl);
+		break;	//RO
+	case 0x802:	//ICMCNT.write( (((unsigned int)p_u32Value) & MASK_ICMCNT) );
+		INFO_STREAM("Warning: Try to write a read-only register with address: 0x"<<
+			std::hex<<p_u32RegAddr<<std::dec<<std::endl);
+		break;	//RO
+	case 0x803:	ICFLUSH_CON.write((old_value & ~MASK_ICFLUSH_CON) | (((unsigned int)p_u32Value) & MASK_ICFLUSH_CON) ); break;
+	case 0x804:	ICDMA_CON.write((old_value & ~MASK_ICDMA_CON) |( ((unsigned int)p_u32Value) & MASK_ICDMA_CON) ); break;
+	case 0x805:	ICDMA_LEN.write( (((unsigned int)p_u32Value) & MASK_ICDMA_LEN) ); break;
+	case 0x806:	ICDMA_DST_ADDR.write((((unsigned int)p_u32Value) & MASK_ICDMA_DST_ADDR) ); break;
+	case 0x807:	ICDMA_SRC_ADDR.write((((unsigned int)p_u32Value) & MASK_ICDMA_SRC_ADDR) ); break;
+	case 0x808:	ICDMA_AUTOLEN.write((((unsigned int)p_u32Value) & MASK_ICDMA_AUTOLEN) ); break;
+	default:	INFO_STREAM("Error: Try to write icache register with wrong address: 0x"<<std::hex
+					<<p_u32RegAddr<<std::dec<<std::endl);
+		return false;
+	}//end of switch
+
+	DEBUG_INFO_STREAM("Reg: successefully write to reg #"<<std::hex<<p_u32RegAddr<<" = 0x"<<p_u32Value<<std::endl);
+
+#ifdef TEST_LOG_OUT
+	DEBUG_INFO_STREAM("[TEST:B]Write to reg #"<<std::hex<<p_u32RegAddr<<" = 0x"<<p_u32Value<<std::endl);
+#endif
+
+	return true;
+}
+
+bool icache_module_new::RdCacheReg_dbg(DSPU32 p_u32RegAddr, DSPU32 *p_pValue)
+{
+	switch(p_u32RegAddr){
+	case 0x800:	*p_pValue = ICGC.read(); break;
+	case 0x801:	*p_pValue = ICACNT.read(); break;
+	case 0x802:	*p_pValue = ICMCNT.read(); break;
+	case 0x803:	*p_pValue = ICFLUSH_CON.read(); break;
+	case 0x804:	*p_pValue = ICDMA_CON.read(); break;
+	case 0x805:	*p_pValue = ICDMA_LEN.read(); break;
+	case 0x806:	*p_pValue = ICDMA_DST_ADDR.read(); break;
+	case 0x807:	*p_pValue = ICDMA_SRC_ADDR.read(); break;
+	case 0x808:	*p_pValue = ICDMA_AUTOLEN.read(); break;
+	default:	INFO_STREAM("Error: Try to read icache register with wrong address: 0x"<<std::hex
+					<<p_u32RegAddr<<std::dec<<std::endl);
+		return false;
+	}//end of switch
+	return true;
+}
+
+//---------------------------------------------------------------------------------
+bool icache_module_new::WrCacheReg_Jtag(DSPU32 p_u32RegAddr,DSPU32 p_u32Value)
+{
+	DSPU32 old_value = 0;
+	RdCacheReg_dbg(p_u32RegAddr & 0xFFF, &old_value);
+
+	switch(p_u32RegAddr & 0xFFF){
+	case 0x800:	ICGC.set( (   ((unsigned int)p_u32Value) & MASK_ICGC) ); break;
+	case 0x803:	ICFLUSH_CON.set((((unsigned int)p_u32Value) & MASK_ICFLUSH_CON) ); break;
+	case 0x804:	ICDMA_CON.set(( ((unsigned int)p_u32Value) & MASK_ICDMA_CON) ); break;
+	case 0x805:	ICDMA_LEN.set( (((unsigned int)p_u32Value) & MASK_ICDMA_LEN) ); break;
+	case 0x806:	ICDMA_DST_ADDR.set((((unsigned int)p_u32Value) & MASK_ICDMA_DST_ADDR) ); break;
+	case 0x807:	ICDMA_SRC_ADDR.set((((unsigned int)p_u32Value) & MASK_ICDMA_SRC_ADDR) ); break;
+	case 0x808:	ICDMA_AUTOLEN.set((((unsigned int)p_u32Value) & MASK_ICDMA_AUTOLEN) ); break;
+	default:	INFO_STREAM("Error: Try to write icache register with wrong address: 0x"<<std::hex
+					<<p_u32RegAddr<<std::dec<<std::endl);
+		return false;
+	}//end of switch
+
+	DEBUG_INFO_STREAM("Reg: successefully write to reg #"<<std::hex<<p_u32RegAddr<<" = 0x"<<p_u32Value<<std::endl);
+
+	return true;
+}
+
+//---------------------------------------------------------------------------------
+
+bool icache_module_new::GetCacheBusyStatus()
+{
+#ifdef TEST_LOG_OUT
+	if(IsCacheBusy()){
+		DEBUG_INFO_STREAM("[TEST:G]Cache status is busy and notify core\n");
+	}
+#endif
+	return IsCacheBusy();
+
+//	return icFlushProc || icFlushProc_1d.read().val || icDMAProc || icDMAProc_1d.read().val;
+}
+
+bool icache_module_new::getBitREG(ICACHE_REG_TYPE reg_id,unsigned int idx)
+{
+	unsigned int value;
+	readREG(reg_id,&value);
+	return (((value >> idx) & 0x1)==1) ? true : false;
+}
+
+bool icache_module_new::setBitREG(ICACHE_REG_TYPE reg_id,unsigned int idx)
+{
+	unsigned int value;
+	readREG_in(reg_id,&value);
+	value |=  (0x1<<idx);
+
+	DEBUG_INFO_STREAM("Event: set Registr "<<reg_id<< "["<<idx<<"]"<<std::endl);
+
+	return writeREG(reg_id,value);
+}
+
+bool icache_module_new::clrBitREG(ICACHE_REG_TYPE reg_id,unsigned int idx)
+{
+	unsigned int value;
+	readREG_in(reg_id,&value);
+	value &= ~(0x1<<idx);
+
+	DEBUG_INFO_STREAM("Event: clr Registr "<<reg_id<< "["<<idx<<"]"<<std::endl);
+
+	return writeREG(reg_id,value);
+}
+
+void icache_module_new::ReadCacheSlots(bool *p_pHit, PIPE_FE_REG_CONTENT *p_pPipeRegContent)
+{
+	*p_pHit = submitToIAB_w;
+	if(!isFE2BUB.read()){
+		p_pPipeRegContent->u32_LinePC = PCFE2.read() & 0xfffffff0;
+	}else{
+		p_pPipeRegContent->u32_LinePC =0;
+	}
+
+	p_pPipeRegContent->u32_NestLvl = priFE2.read();
+	p_pPipeRegContent->u32_SlotNum = 16;
+	for(int i=0;i<16;i++){
+		p_pPipeRegContent->u32_slot[i] = insnLine_toIAB_w.insnSlot[i];
+	}
+	p_pPipeRegContent->bol_ISRFirstLn = ISRFirstLine_FE2.read().val;
+	p_pPipeRegContent->u32_SeqCounter =0;
+	for(unsigned int i=0;i<4;i++){
+		p_pPipeRegContent->arrFE2ActionInfo[i].bol_BPT=branchInfo[i].bol_BPT;
+		p_pPipeRegContent->arrFE2ActionInfo[i].bol_SlotDone=branchInfo[i].bol_SlotDone;
+		p_pPipeRegContent->arrFE2ActionInfo[i].u32_RetBPC=branchInfo[i].u32_RetBPC;
+	}
+	/*
+	if(submitToIAB_w){
+		fprintf(stdout,"PC = %x,PCFE2 = %x\n",p_pPipeRegContent->u32_LinePC,PCFE2.read());
+		for(int i=0;i<16;i++){
+			fprintf(stdout,"0x%x\t",p_pPipeRegContent->u32_slot[i]);
+		}
+		fprintf(stdout,"\n");
+		for(int i=0;i<16;i++){
+			fprintf(stdout,"0x%x\t",hitFE2Inst_w.insnSlot[i]);
+		}
+		fprintf(stdout,"\n");
+	}
+	*/
+#ifdef ICACHE_TRACE_ON
+		FILE * fp = NULL;
+
+		(fp = fopen("icache_out.log","a+"));
+
+		fprintf(fp,"p_pHit=%d\n",*p_pHit);
+		fprintf(fp,"u32_LinePC=0x%x\n",p_pPipeRegContent->u32_LinePC);
+		fprintf(fp,"u32_NestLvl=0x%x\n",p_pPipeRegContent->u32_NestLvl);
+		fprintf(fp,"bol_ISRFirstLn=%d\n",p_pPipeRegContent->bol_ISRFirstLn);
+		fprintf(fp,"IABSlots=\n");
+		for(int i=0;i<16;i++){
+			fprintf(fp,"0x%x\n",p_pPipeRegContent->u32_slot[i]);
+		}
+
+		for(int i=0;i<4;i++){
+			fprintf(fp,"arrFE2ActionInfo[%d]:",i);
+			fprintf(fp,"bo_BPT=%d,bol_SlotDone=%d,u32_RetBPC=0x%x\n",
+				p_pPipeRegContent->arrFE2ActionInfo[i].bol_BPT,
+				p_pPipeRegContent->arrFE2ActionInfo[i].bol_SlotDone,
+				p_pPipeRegContent->arrFE2ActionInfo[i].u32_RetBPC);
+		}
+
+		fclose(fp);
+#endif
+	return;
+}
+
+void icache_module_new::jtagReadCacheSlots(bool *p_pHit,PIPE_FE_REG_CONTENT *p_pPipeRegContent)
+{
+	bool tmp_hitFE2_w = (isReflush_proc.read()) || (!isFE2BUB.read() &&(calcHitCache()));		//L2 ack is not known yet
+	*p_pHit = (!isReflush_proc.read())&&(tmp_hitFE2_w) ;
+
+	if(!isFE2BUB.read()){
+		p_pPipeRegContent->u32_LinePC = PCFE2.read() & 0xfffffff0;
+	}else{
+		p_pPipeRegContent->u32_LinePC =0;
+	}
+	p_pPipeRegContent->u32_NestLvl = priFE2.read();
+	p_pPipeRegContent->u32_SlotNum = 16;
+	for(int i=0;i<16;i++){
+		if(tmp_hitFE2_w == true){
+			p_pPipeRegContent->u32_slot[i] = bufCacheLine.read().dataLine[hitway_w].insnSlot[i];
+		}else{
+			p_pPipeRegContent->u32_slot[i] = 0x0;		//not hit
+		}
+	}
+	p_pPipeRegContent->bol_ISRFirstLn = ISRFirstLine_FE2.read().val;
+	p_pPipeRegContent->u32_SeqCounter =0;
+	return;
+}
+
+void icache_module_new::jtagReadCacheSlots_noalign(bool *p_pHit,PIPE_FE_REG_CONTENT *p_pPipeRegContent)
+{
+	bool tmp_hitFE2_w = (isReflush_proc.read()) || (!isFE2BUB.read() &&(calcHitCache()));		//L2 ack is not known yet
+	*p_pHit = (!isReflush_proc.read())&&(tmp_hitFE2_w) ;
+
+	bool tmp_pcFE2_launch_en_w = dsp_en && hitFE2_w && (!IAB_HALT) && (!icDMAProc_1d.read()) && (!isFE2BUB.read());
+
+//	if(!isFE2BUB.read()){
+	if(tmp_pcFE2_launch_en_w){
+		p_pPipeRegContent->u32_LinePC = PCFE2.read() ;
+	}else{
+		p_pPipeRegContent->u32_LinePC =0;
+	}
+	p_pPipeRegContent->u32_NestLvl = priFE2.read();
+	p_pPipeRegContent->u32_SlotNum = 16;
+	for(int i=0;i<16;i++){
+		if(tmp_hitFE2_w == true){
+			p_pPipeRegContent->u32_slot[i] = bufCacheLine.read().dataLine[hitway_w].insnSlot[i];
+		}else{
+			p_pPipeRegContent->u32_slot[i] = 0x0;		//not hit
+		}
+	}
+	p_pPipeRegContent->bol_ISRFirstLn = ISRFirstLine_FE2.read().val;
+	p_pPipeRegContent->u32_SeqCounter =0;
+	return;
+}
+
+
+
+void icache_module_new::GetFE2BraInfo(bool *p_pFE2BraTaken, DSPU32 *p_pFE2TgtAddr, DSPU32 *p_pFE2INTLvl, bool *p_bolIsFrmL2)
+{
+	*p_pFE2BraTaken = isFE2B_w;
+	*p_pFE2TgtAddr = isFE2B_w ? PCFE2B_w : 0;
+	*p_pFE2INTLvl = priFE2.read();
+	//*p_bolIsFrmL2 = false;//L2_ackB_w ;
+	*p_bolIsFrmL2 = L2_ackB_w ;
+
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_out.log","a+"));
+	fprintf(fp,"\nCycle:%d\n",local_cycle_L);
+	fprintf(fp,"FE2BraTaken=%d\n",*p_pFE2BraTaken);
+	fprintf(fp,"FE2TgtAddr=0x%x\n",*p_pFE2TgtAddr);
+	fprintf(fp,"FE2INTLvl=0x%x\n",*p_pFE2INTLvl);
+	fclose(fp);
+#endif
+
+	
+
+	return;
+}
+
+void icache_module_new::GetFPCReserveInfo(bool* p_pbolReservedPCUpdate, DSPU32* p_pu32Addr, DSPU32* p_pu32INTLvl)
+{
+	//Must be call after evaluate()
+	*p_pbolReservedPCUpdate = (exflush_during_internal_process || extern_ExFlush_w) && (((icFlushProc_1d.read().val == true)&&(icFlushProc==false))
+			||((icDMAProc_1d.read().val == true) && (icDMAProc == false)));		//true only at exit point of DMA/FLUSH
+	if(*p_pbolReservedPCUpdate){
+		*p_pu32Addr = extern_ExFlush_w ? extern_ExFlush_PC_w : innerOptBakPC.read();
+		*p_pu32INTLvl = extern_ExFlush_w ? extern_ExFlush_pri_w : innerOptBakPri.read();
+	}else{
+		*p_pu32Addr = 0x0;
+		*p_pu32INTLvl = 0x0;
+	}
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_out.log","a+"));
+	fprintf(fp,"pUpdate=%d\n",*p_pbolReservedPCUpdate);
+	fprintf(fp,"pAddr=0x%x\n",*p_pu32Addr);
+
+	fprintf(fp,"pINTLvl=0x%x\n",*p_pu32INTLvl);
+
+	fclose(fp);
+#endif
+	return;
+}
+
+bool icache_module_new::IsFPCUsed()
+{
+	//This interface is not used anymore actually
+	bool ret = false;//isFPCUsed_w;
+	if(icFlushProc){
+		ret = false;
+	}else if(icDMAProc){
+		ret = false;
+	}else if(((icFlushProc_1d.read().val == true)&&(icFlushProc==false))
+			||((icDMAProc_1d.read().val == true) && (icDMAProc == false))){
+		//Case 1: Restore using reserved PC
+		//if((!exflush_during_internal_process && !(extern_ExFlush_w && !INT_proc)) ){
+		if(INT_proc){
+			ret = false;
+		}else	if((!exflush_during_internal_process  && !(extern_ExFlush_w &&(!isFlushRETI) /*&& !INT_proc*/))){
+			ret = false;
+		}
+		//Case 2: Restore using exFlush PC, obtained from external PC
+		else{
+			//ret = true;
+			ret = false;
+		}
+		
+	}
+	else if(extern_INT_w){
+		ret = true;
+	}
+	else if(extern_ExFlush_w){
+		ret = true;
+	}
+	else if(icWbDelay_2nd_w){
+		ret  = false;
+	}else if(L2_ackB_w){
+		DEBUG_INFO_STREAM("L2_ackB_w = "<<L2_ackB_w<<" in isFPCUsed"<<std::endl);
+		//ret = false;
+		ret = true;
+	}
+	else if(isFE1BUB.read() || isFE2BUB.read() || ( hitFE2_w &&( !IAB_HALT || isFE2B_w ||icDMAProc_1d.read().val))){
+		ret = true;
+	}else{
+		ret = false;
+	}
+
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_out.log","a+"));
+	fprintf(fp,"IsFPCUesd=%d\n",ret);
+	fclose(fp);
+#endif
+	
+	isFPCUsed_w = ret;
+
+	return ret;
+
+}
+
+bool icache_module_new::IsCacheSlotsReady()
+{
+	bool isEmptyLine = true;
+	if(submitToIAB_w){	
+		for(int i=0;i<16;i++){
+			if(insnLine_toIAB_w.insnSlot[i] != 0x0){
+				isEmptyLine = false;
+				break;
+			}
+		}
+		return submitToIAB_w && (!isEmptyLine);
+	}
+	return false;
+}
+
+void icache_module_new::NotifyIABHalt(bool p_bolHalt)
+{
+	IAB_HALT = p_bolHalt;
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_in.log","a+"));
+	fprintf(fp,"\nCycle:%d\n",local_cycle_L);
+	fprintf(fp,"IAB_HALT=%d\n",p_bolHalt);
+	fclose(fp);
+#endif
+	return;
+}
+
+void icache_module_new::NotifyDspen(bool p_bolDspen)
+{
+	dsp_en = p_bolDspen;
+	return;
+}
+
+void icache_module_new::NotifyPipeBefFlushInfo(bool p_bolPipeBefFlushed, DSPU32 p_u32INTLvl)
+{
+	exFlush = p_bolPipeBefFlushed;
+	exFlushPri = p_u32INTLvl;
+
+	extern_ExFlush_w = p_bolPipeBefFlushed;
+	extern_ExFlush_pri_w = p_u32INTLvl;
+
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_in.log","a+"));
+	fprintf(fp,"exFlush=%d\n",p_bolPipeBefFlushed);
+	fprintf(fp,"exFlushPri=%d\n",p_u32INTLvl);
+	fclose(fp);
+#endif
+	return;
+}
+
+void icache_module_new::NotifyPipeBefFlushInfo_software(bool p_bolPipeBefFlushed, DSPU32 p_u32INTLvl, DSPU32 p_u32TargetPC)
+{
+	exFlush = p_bolPipeBefFlushed;
+	exFlushPri = p_u32INTLvl;
+
+	extern_ExFlush_w = p_bolPipeBefFlushed;
+	exFlushPC = extern_ExFlush_PC_w = p_u32TargetPC;
+	extern_ExFlush_pri_w = p_u32INTLvl;
+
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_in.log","a+"));
+	fprintf(fp,"exFlush=%d\n",p_bolPipeBefFlushed);
+	fprintf(fp,"exFlushPri=%d\n",p_u32INTLvl);
+	fclose(fp);
+#endif
+	return;
+}
+
+void icache_module_new::NotifyIntInfo(bool p_bolINT, DSPU32 p_u32INTLvl)
+{
+	INT_proc = p_bolINT;
+	INT_pri = p_u32INTLvl;
+
+	extern_INT_w = p_bolINT;
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_in.log","a+"));
+	fprintf(fp, "INT_proc=%d\n",p_bolINT);
+	fclose(fp);
+#endif
+	return;
+}
+
+void icache_module_new::NotifyIntInfo_software(bool p_bolINT)
+{
+	INT_proc = p_bolINT;
+
+
+	extern_INT_w = p_bolINT;
+
+	return;
+}
+
+void icache_module_new::NotifyIntPC(DSPU32 p_u32INTPC)
+{
+	INT_PC = p_u32INTPC;
+	return;
+}
+
+void icache_module_new::NotifyExFlushPC(DSPU32 p_u32ExFlushPC)
+{
+	exFlushPC = p_u32ExFlushPC;
+	return;
+}
+
+void icache_module_new::NotifyRETI(bool p_bolIsRETI)
+{
+	isFlushRETI = p_bolIsRETI;
+	return;
+}
+
+void icache_module_new::NotifyCgcr0IntFlush(bool p_bolCgcr0IntFlush)
+{
+	cgcr0IntFlush_w = p_bolCgcr0IntFlush;
+	return;
+}
+
+void icache_module_new::NotifyCJMPValue(DSPU32 p_u32Value)
+{
+	ro_CJMP = p_u32Value;
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_in.log","a+"));
+	fprintf(fp,"ro_CJMP=%d\n",p_u32Value);
+	fclose(fp);
+#endif
+	return;
+}
+
+void icache_module_new::NotifyLCValue(DSPU32 p_u32LCIdx, DSPU32 p_u32Value)
+{
+	assert(p_u32LCIdx<4);
+	ro_LC[p_u32LCIdx] = p_u32Value;
+#ifdef ICACHE_TRACE_ON
+	FILE * fp = NULL;
+
+	(fp = fopen("icache_in.log","a+"));
+	fprintf(fp,"ro_LC[%d]=%d\n",p_u32LCIdx,p_u32Value);
+	fclose(fp);
+#endif
+	return;
+}
+
+bool icache_module_new::WrCacheMem(DSPU32 p_u32Addr, DSPU32 p_u32Value)
+{
+	if(p_u32Addr >= 0xE0B800 && p_u32Addr <= 0xE0BFFF){
+		return WrCacheReg_Jtag(p_u32Addr,p_u32Value);
+	}else{
+		return ICACHE_RAM.set(p_u32Addr,p_u32Value);
+	}
+}
+
+bool icache_module_new::RdCacheMem(DSPU32 p_u32Addr, DSPU32 *p_pValue)
+{
+	if(p_u32Addr >= 0xE0B800 && p_u32Addr <= 0xE0BFFF){
+		return RdCacheReg_dbg(p_u32Addr & 0xFFF,p_pValue);
+	}else{
+		return ICACHE_RAM.get(p_u32Addr,p_pValue);	
+	}
+	
+}
+
+void icache_module_new::SetBPB(unsigned int *p_pBPB, unsigned int p_u32BPBSize )
+{
+	p_BPB = p_pBPB;
+	sizeBPB = p_u32BPBSize;
+	DEBUG_INFO_STREAM("EVENT: BPB info in icache have been set up\n");
+	return;
+}
+
+void icache_module_new::SetCacheSpace(DSPU32 p_LowAddr)
+{
+	/*if(mode != ICACHE_SRAM){
+		DEBUG_INFO_STREAM("Warning: it is not SRAM mode, can't set cache space"<<std::endl);
+		return;
+	}*/
+
+	//printf("SetCacheSpace to 0x%x\n",p_LowAddr);
+	ICACHE_RAM.setSpaceAddr(p_LowAddr);
+	return;
+}
+
+void icache_module_new::evaluate()
+{
+
+
+	evaluate_ex();
+
+	evaluate_FE2();
+	evaluate_FE1();
+//	if(exFlush){
+//		exFlushProc_logic();
+//	}
+	evaluate_REG();
+	//evaluate_FE0();
+	
+	evaluate_FE0_software_pre();
+	
+	return;
+}
+
+void icache_module_new::update()
+{
+	PCFE0.update();
+	priFE0.update();
+	PCFE0_en.update();
+	ISRFirstLine_FE0.update();
+	IsNormalSeq_FE0.update();
+	PCFE1.update();
+	priFE1.update();
+	isFE1BUB.update();
+	ISRFirstLine_FE1.update();
+	IsNormalSeq_FE1.update();
+	PCFE2.update();
+	priFE2.update();
+	isFE2BUB.update();
+	ISRFirstLine_FE2.update();
+	IsNormalSeq_FE2.update();
+	bufCacheLine.update();
+	ICGC.update();
+	ICACNT.update();
+	ICMCNT.update();
+	ICFLUSH_CON.update();
+	ICDMA_CON.update();
+	ICDMA_LEN.update();
+	ICDMA_DST_ADDR.update();
+	ICDMA_SRC_ADDR.update();
+	ICDMA_AUTOLEN.update();
+	ICACHE_RAM.update();
+	//L2MMC.update();
+	L2_ack_true_tmp.update();
+	branpredhasdone.update();
+	lastLineNotComplete.update();
+	isReflush_proc.update();
+
+
+	isExRETI_1d.update();
+	isExRETI_2d.update();
+
+	icDMAPCEn_1d.update();
+	icDMAPCEn_2d.update();
+	icdma_cnt.update();
+	icDMAProc_1d.update();
+	dmaTerminalSet.update();
+	autoDMASet.update();
+	isFE2PCDDR.update();
+	icDMAPC.update();
+	icDMARdAddr.update();
+	icDMAProc_d[0].update();
+	icDMAProc_d[1].update();
+	icDMAProc_d[2].update();
+
+	innerOptBakPC.update();
+	innerOptBakPri.update();
+	innerOptBakISRFirstLn.update();
+
+	icFlushPC.update();
+	icFlushProc_1d.update();
+
+	L2_irq_pc.update();
+
+#ifdef  SC_ICACHE
+	L2_ack_reg.update();
+	L2_ack_pc_reg.update();
+	L2_ack_insn_reg.update();
+#endif
+#ifdef TEST_REQUEST
+	l2_irq_pc_1d.update();
+	tr_pro.update();
+	l2_irq_1d.update();
+	tr_bypass.update();
+#endif
+
+	//inner SRAM
+	isFE2InnerSRAM.update();
+	inner_sram_rddata_buf.update();
+	inner_sram_jtg_addr_1d.update();
+	inner_sram_rddata_1d.update();
+	isFE2ShareSRAM.update();
+	share_sram_irq_plus.update();
+	
+	inner_sram_rddata_bak_en.update();
+	inner_sram_rddata_bak_data.update();
+	
+#ifdef TLM_SHARED_SRAM
+	share_sram_ack_pc_reg.update();
+	share_sram_ack_inst_reg.update();
+#endif
+
+	//dsp_en_reg.update();
+	
+	return;
+}
+
+
+//void icache_module_new::exFlushProc_logic()
+//{
+//	assert(exFlush == true);
+//
+//}
+
+void icache_module_new::evaluate_REG()
+{
+	//DMA related registers evaluating(icacheReg.v line:355-362)
+	icDMAAck = (L2_ack_true_tmp.read().val || hitFE2_w ) && icDMAProc_1d.read().val;
+	autoDMAPC = PCFE2.read();
+
+	icDMAFirst3Addr_w = (icDMAProc && !icDMAProc_d[0].read().val)
+			||(icDMAProc_d[0].read().val && ! icDMAProc_d[1].read().val)
+			||(icDMAProc_d[1].read().val && ! icDMAProc_d[2].read().val);
+	icDMAPCEn = icDMAProc && ( icDMAFirst3Addr_w || icDMAAck);
+	icDMASelfMiss = getBitREG(ICACHE_ICDMA_CON,4) || getBitREG(ICACHE_ICDMA_CON,5);
+
+	if(!(icWbDelay_2nd_w && icDMAProc_d[0].read().val)){
+		icDMAProc_d[2].write(icDMAProc_d[1].read().val);
+		icDMAProc_d[1].write(icDMAProc_d[0].read().val);
+		icDMAProc_d[0].write(icDMAProc);
+	}
+
+	icDMAProc_1d.write(icDMAProc);
+	icDMAPCEn_1d.write(icDMAPCEn && icDMAProc);
+	icDMAPCEn_2d.write(icDMAPCEn_1d.read());
+
+	icDMATerminal = getBitREG(ICACHE_ICDMA_CON, 8);
+	icDMABoot = getBitREG(ICACHE_ICDMA_CON,16);
+
+	//Auto DMA Settings: when miss PC is in DDR start a AUTODMA
+	if(icDMAProc){
+		isFE2PCDDR.write(false);
+	}else if(isFE1_load_w){
+		if(PCFE1.read() >= DDRAddrStart && (PCFE1.read() <= DDRAddrEnd)){
+			isFE2PCDDR.write(true);
+		}else{
+			isFE2PCDDR.write(false);
+		}
+	}
+	if(!isFE2BUB.read().val && !hitFromFE2Buffer_w && isFE2PCDDR.read().val && getBitREG(ICACHE_ICGC,8)
+			&&!(getBitREG(ICACHE_ICDMA_CON,4)||getBitREG(ICACHE_ICDMA_CON,5)||autoDMASet.read().val)){
+		autoDMASet.write(true);
+	}else{
+		autoDMASet.write(false);
+	}
+	//Manual DMA State: ICDMA_CON[2:0] (icacheReg.v line:384~400)
+	if( (getBitREG(ICACHE_ICDMA_CON, 0) && !getBitREG(ICACHE_ICFLUSH_CON,1)&& !getBitREG(ICACHE_ICDMA_CON,1)&&!getBitREG(ICACHE_ICDMA_CON,5)&&!getBitREG(ICACHE_ICDMA_CON,4)&&!getBitREG(ICACHE_ICFLUSH_CON,0))||
+			getBitREG(ICACHE_ICDMA_CON,8)){
+		clrBitREG(ICACHE_ICDMA_CON,0);
+	}
+
+	if(((icdma_cnt.read() == 0)&& icDMAAck)
+			||getBitREG(ICACHE_ICDMA_CON,8)){
+
+		DEBUG_INFO_STREAM("***********\n");
+		DEBUG_INFO_STREAM("icDMAProc = "<<icDMAProc);
+			DEBUG_INFO_STREAM(" icdma_cnt = "<<icdma_cnt.read());
+			DEBUG_INFO_STREAM(" icDMAAck ="<<icDMAAck<<std::endl);
+
+		clrBitREG(ICACHE_ICDMA_CON,1);
+	}else if(getBitREG(ICACHE_ICDMA_CON,0)&&!getBitREG(ICACHE_ICFLUSH_CON,1)&&!getBitREG(ICACHE_ICDMA_CON,1)&&
+			!getBitREG(ICACHE_ICDMA_CON,5)&&!getBitREG(ICACHE_ICDMA_CON,4)&&!getBitREG(ICACHE_ICFLUSH_CON,0)){
+		setBitREG(ICACHE_ICDMA_CON,1);
+	}
+	if(getBitREG(ICACHE_ICDMA_CON,0) || getBitREG(ICACHE_ICDMA_CON,1)){
+		clrBitREG(ICACHE_ICDMA_CON,2);
+	}else{
+		setBitREG(ICACHE_ICDMA_CON,2);
+	}
+
+	//Auto DMA State: ICDMA_CON[6:4](icacheReg.v line:403-431)
+	if(autoDMASet.read().val){
+		setBitREG(ICACHE_ICDMA_CON,4);
+	}
+	else if((getBitREG(ICACHE_ICDMA_CON,4) && !getBitREG(ICACHE_ICFLUSH_CON,1) && !getBitREG(ICACHE_ICDMA_CON,1) && !getBitREG(ICACHE_ICDMA_CON,5))
+			|| (getBitREG(ICACHE_ICDMA_CON,8))){
+		clrBitREG(ICACHE_ICDMA_CON,4);
+	}
+	if(((icdma_cnt.read() == 0) && icDMAAck)
+			|| getBitREG(ICACHE_ICDMA_CON,8)){
+		clrBitREG(ICACHE_ICDMA_CON,5);
+	}else if (getBitREG(ICACHE_ICDMA_CON,4) && !getBitREG(ICACHE_ICFLUSH_CON,1) && !getBitREG(ICACHE_ICDMA_CON,1)
+			&& !getBitREG(ICACHE_ICDMA_CON,5)){
+		setBitREG(ICACHE_ICDMA_CON,5);
+	}
+	if(getBitREG(ICACHE_ICDMA_CON,4) || getBitREG(ICACHE_ICDMA_CON,5)){
+		clrBitREG(ICACHE_ICDMA_CON,6);
+	}else{
+		setBitREG(ICACHE_ICDMA_CON,6);
+	}
+
+	if(dmaTerminalSet.read().val){
+		setBitREG(ICACHE_ICDMA_CON,8);
+	}else{
+		clrBitREG(ICACHE_ICDMA_CON,8);
+	}
+	//DMA counter and DMA PC decreasing(icacheReg.v line:432-458)
+
+#if 0
+	if(!(getBitREG(ICACHE_ICDMA_CON,1)|| getBitREG(ICACHE_ICDMA_CON,5))){
+		if(getBitREG(ICACHE_ICDMA_CON,4)){	//got a AUTO DMA request
+			icdma_cnt.write(ICDMA_AUTOLEN.read() + 3);
+			icDMAPC.write(autoDMAPC);
+		}
+		else if(getBitREG(ICACHE_ICDMA_CON,0)){	//got a MAN DMA request
+			icdma_cnt.write(ICDMA_LEN.read() + 3);
+			icDMAPC.write(ICDMA_DST_ADDR.read());
+		}
+	}
+	else if((icDMAFirst3Addr_w || icDMAAck) && !(icWbDelay_2nd_w && icDMAProc_d[0].read().val)){
+		icdma_cnt.write(icdma_cnt.read() - 1);
+		icDMAPC.write(icDMAPC.read() + 0x10);
+	}
+#endif
+	//icDMARdAddr
+	
+    
+  if(!(getBitREG(ICACHE_ICDMA_CON,1)|| getBitREG(ICACHE_ICDMA_CON,5))){
+  	if(getBitREG(ICACHE_ICDMA_CON,4)){
+  		icDMARdAddr.write(autoDMAPC);
+  	}
+  	else if(getBitREG(ICACHE_ICDMA_CON,0)){
+  		icDMARdAddr.write(getBitREG(ICACHE_ICDMA_CON,16) ? ICDMA_SRC_ADDR.read() : ICDMA_DST_ADDR.read() );
+  	}
+  }
+  else if(icDMAAck && !icDMAFirst3Addr_w){
+  	icDMARdAddr.write(icDMARdAddr.read() + 0x10);
+  }
+    
+
+
+
+	//when INT happens, terminate DMA
+	if((INT_pri > priFE0.read()) && icDMAProc && icDMASelfMiss ){
+		dmaTerminalSet.write(true);
+	}else{
+		dmaTerminalSet.write(false);
+	}
+
+	//ICFLUSH_CON(icacheReg.v line289~310)
+	if(getBitREG(ICACHE_ICFLUSH_CON,0) && !getBitREG(ICACHE_ICFLUSH_CON,1) &&
+			!getBitREG(ICACHE_ICDMA_CON,1) && !getBitREG(ICACHE_ICDMA_CON,5) &&
+			!getBitREG(ICACHE_ICDMA_CON,4)){
+		clrBitREG(ICACHE_ICFLUSH_CON,0);
+	}
+
+	if(getBitREG(ICACHE_ICFLUSH_CON,0) && !getBitREG(ICACHE_ICFLUSH_CON,1) &&
+				!getBitREG(ICACHE_ICDMA_CON,1) && !getBitREG(ICACHE_ICDMA_CON,5) &&
+				!getBitREG(ICACHE_ICDMA_CON,4)){
+		setBitREG(ICACHE_ICFLUSH_CON,1);
+	}else if (ExtractBinStr(icFlushPC.read(),6,7) == 0x7f){
+		clrBitREG(ICACHE_ICFLUSH_CON,1);
+	}
+
+	if(getBitREG(ICACHE_ICFLUSH_CON,0) || getBitREG(ICACHE_ICFLUSH_CON,1)){
+		clrBitREG(ICACHE_ICFLUSH_CON,2);
+	}else {
+		setBitREG(ICACHE_ICFLUSH_CON,2);
+	}
+
+	if(!getBitREG(ICACHE_ICFLUSH_CON,1) && getBitREG(ICACHE_ICFLUSH_CON,0)){
+		icFlushPC.write(0x0);
+	}else if(getBitREG(ICACHE_ICFLUSH_CON,1)){
+		icFlushPC.write(icFlushPC.read() + 0x40);		//Flush PC: 0x0, 0x40, 0x80,...0x49C0
+	}
+
+	//ICCNT and ICMCNT
+	if(submitToIAB_w){
+		ICACNT.write(ICACNT.read() +1);
+		if(L2_ack_true || L2_ack_true_tmp.read().val){
+			ICMCNT.write(ICMCNT.read() +1);
+		}
+	}
+
+	
+
+	if((icDMAProc || icFlushProc) && !getBitREG(ICACHE_ICGC,9) ){
+		setBitREG(ICACHE_ICGC,9);
+	}
+	if(((!icDMAProc) && (!icFlushProc)) && getBitREG(ICACHE_ICGC,9)){
+		clrBitREG(ICACHE_ICGC,9);
+	}
+
+	if(getBitREG(ICACHE_ICGC,16)){
+		//Reset ICACNT & ICMCT
+		ICACNT.write(0x0);
+		ICMCNT.write(0x0);
+		clrBitREG(ICACHE_ICGC,16);
+	}
+
+	if(getBitREG(ICACHE_ICGC,24)){
+		//Lock enable
+		//cache_lock = true;
+		//printf("Lock here, Cycle:%x\n",local_cycle_L);
+	}else{
+		//cache_lock = false;
+	}
+
+	//immediate write channel
+	//ImmeWrReg();
+
+	return;
+}
+
+void icache_module_new::evaluate_ex()
+{
+	//TODO: When DMA and Flush is added, this logic should change a bit
+
+	icFlushProc = getBitREG(ICACHE_ICFLUSH_CON,1);
+	icFlushProc_1d.write(icFlushProc);
+
+
+	//TODO: this signal may be different from RTL
+	calcPCFromPMASK = ((INT_pri > priFE0.read()) ||	(isExRETI_2d.read().val && !(isExRETI_1d.read().val)))
+				&& !icFlushProc && !icDMAProc && !icFlushProc_1d.read().val && !icDMAProc_1d.read().val;
+
+//	calcPCFromPMASK_new = (extern_INT_w || ((INT_pri > priFE0.read()) ||	(isExRETI_2d.read().val && !(isExRETI_1d.read().val))))
+//			&& !icFlushProc && !icDMAProc && !icFlushProc_1d.read().val && !icDMAProc_1d.read().val;
+
+	calcPCFromPMASK_new = (
+			extern_INT_w 
+			|| (INT_pri > priFE0.read()) 
+			||	(isFlushRETI && (priFE0.read() <= extern_ExFlush_pri_w))
+			||  isExRETI_1d.read().val
+			)
+			&& !icFlushProc && !icDMAProc && !icFlushProc_1d.read().val && !icDMAProc_1d.read().val;
+
+
+
+	icDMAProc = getBitREG(ICACHE_ICDMA_CON,1) || getBitREG(ICACHE_ICDMA_CON,5);				//DEBUG: icDMAProc should be evaluate first from 2 registers
+																						 	//then can evaluate isExRETI_1d register. Or their whill be a hazzard.
+
+	//Register isExRETI_1d and isExRETI_2d evaluation
+	/*if((isFlushRETI && (priFE0.read() <= exFlushPri)) ||
+			(isExRETI_2d.read().val && (icFlushProc || icDMAProc))){
+		isExRETI_1d.write(true);
+	}else if (!(icDMAProc || icFlushProc)){
+		isExRETI_1d.write(false);
+	}*/
+	if(isExRETI_1d.read().val && !(icFlushProc || icDMAProc || icDMAProc_1d.read().val || icFlushProc_1d.read().val)){
+		isExRETI_1d.write(false);
+	}else if(isFlushRETI && (priFE0.read() <= extern_ExFlush_pri_w) && (icFlushProc || icDMAProc || icFlushProc_1d.read().val || icDMAProc_1d.read().val)){
+		isExRETI_1d.write(true);
+	}
+	isExRETI_2d.write(isExRETI_1d.read());
+
+
+	//if(icDMAProc){ DEBUG_INFO_STREAM("DMA: Enter dma status here"<<std::endl); }
+	if(!(icFlushProc_1d.read() || icDMAProc_1d.read()) && exflush_during_internal_process){
+		exflush_during_internal_process = false;
+	}
+	
+	if(extern_ExFlush_w && (extern_ExFlush_pri_w >= priFE0.read()) /* &&(!INT_proc)*/ && (!isFlushRETI) && ( icFlushProc || icDMAProc )){
+		exflush_during_internal_process = true;
+	}
+
+/*	if(!(icFlushProc_1d.read() || icDMAProc_1d.read()) && exflush_during_internal_process){
+		exflush_during_internal_process = false;
+	}*/
+
+
+	return;
+}
+
+
+void icache_module_new::evaluate_FE2()
+{
+	//This phase simulate the FE2 logic
+
+	//L2MMC.emitOutputSignals(&L2_ack_w,&L2_ack_pc_w,&L2_ack_insn_w);
+#ifdef SC_ICACHE
+	L2_ack_w = L2_ack_reg.read().val;
+	L2_ack_pc_w = L2_ack_pc_reg.read();
+	L2_ack_insn_w = L2_ack_insn_reg.read();
+
+	if(L2_ack_w){
+		L2_ack_reg.write(false);		//L2_ack_w == 1 only last for one cycle: It is a bad idea, L2_ack_w should be driven only by mmac!!!!
+	}
+#endif 
+	
+	cacheHit_logic();
+	L2ireq_logic();
+
+	//L2MMC.gatherInputSignals(L2_irq_w,L2_irq_pc_w);
+	//L2MMC.evaluate();
+	branchPred_logic();
+	submitIAB_logic();
+	writeBack_logic();
+
+
+//	//exFlush logic
+//	if(exFlush && ( exFlushPri >= priFE2.read())){
+//		DEBUG_INFO_STREAM("Event: Exflushing FE2 level"<<std::endl);
+//		PCFE2.write(0);
+//		priFE2.write(exFlushPri);
+//		isFE2BUB.write(true);
+//		ISRFirstLine_FE2.write(false);
+//		IsNormalSeq_FE1.write(false);
+//		bufCacheLine.reset();
+//		branpredhasdone.write(false);
+//	}
+//	//INT logic
+//	else if((INT_proc && (INT_pri > priFE0.read())) ){	//CalcPCFromPMASK TODO: RETI is not considered
+//		DEBUG_INFO_STREAM("Event: Interruption flushing FE2 level"<<std::endl);
+//		PCFE2.write(0);
+//		priFE2.write(INT_pri);
+//		isFE2BUB.write(true);
+//		ISRFirstLine_FE2.write(false);
+//		IsNormalSeq_FE1.write(false);
+//		bufCacheLine.reset();
+//		branpredhasdone.write(false);
+//	}
+	return;
+}
+
+void icache_module_new::evaluate_FE1()
+{
+	//Step 0: Get Output signals from ICACHE_RAM submodule
+	ICACHE_RAM.emitOutputSignals(cacheOutput);
+	//Step 1: Generate signal: isFE1_load_w, which indicates that timing to submit to FE2 level registers
+	//(pipeFE0toFE2.v line 247~275)
+	isFE1_load_w = (icDMAPCEn_2d.read().val||true)&&(((!isFE1BUB.read().val) && (isFE2BUB.read().val)) || (hitFE2_w && (!IAB_HALT||icDMAProc_1d.read().val)));
+
+	
+	//Inner SRAM and share SRAM
+	if(isFE1_load_w){
+			isFE2InnerSRAM.write(
+							(!isFE1BUB.read())
+							&&(PCFE1.read()/16 >= inner_sram_start_addr/16)
+							&&(PCFE1.read()/16 <= inner_sram_end_addr/16));
+			/*printf("isFE2InnerSRAM = %d\n",(!isFE1BUB.read())
+							&&(PCFE1.read()/16 >= inner_sram_start_addr/16)
+							&&(PCFE1.read()/16 <= inner_sram_end_addr/16)
+				  );*/
+				  
+#ifdef TEST_LOG_OUT
+			if((!isFE1BUB.read())
+				&&(PCFE1.read()/16 >= inner_sram_start_addr/16)
+				&&(PCFE1.read()/16 <= inner_sram_end_addr/16)){
+				DEBUG_INFO_STREAM("[TEST:I]Access inner memory with PC = 0x"<<PCFE1.read()<<std::endl);
+			}
+#endif
+				  
+				  
+			isFE2ShareSRAM.write(
+							(!isFE1BUB.read())
+							&&(PCFE1.read()/16 >= ShareSRAMStart/16)
+							&&(PCFE1.read()/16 <= ShareSRAMEnd/16)
+							);
+
+
+
+	}
+	
+	share_sram_irq_plus.write(
+					isFE1_load_w ?																	//sample value of last cycle 
+					(!isFE1BUB.read() && !isFE2B_w
+					&&((PCFE1.read()/16 >= ShareSRAMStart/16) && (PCFE1.read()/16 <= ShareSRAMEnd/16))) :
+					false
+					);
+					
+#ifdef TLM_SHARED_SRAM
+	bool send_irq_to_shared_sram =
+					isFE1_load_w ?																	//sample value of last cycle 
+					(!isFE1BUB.read() && !isFE2B_w
+					&&((PCFE1.read()/16 >= ShareSRAMStart/16) && (PCFE1.read()/16 <= ShareSRAMEnd/16))) :
+					false;
+	if((PCFE1.read()/16 >= ShareSRAMStart/16) && (PCFE1.read()/16 <= ShareSRAMEnd/16)){
+		send_REQUEST_to_Shared_SRAM(send_irq_to_shared_sram, true);
+	}
+#endif
+
+#ifdef TEST_LOG_OUT
+	if(send_irq_to_shared_sram){
+		DEBUG_INFO_STREAM("[TEST:C]Send read request to Shared Memory with addr = 0x"<<std::hex<<PCFE1.read()<<std::endl);
+	}
+#endif
+
+	//Step 2: Generate signal: tmpFE2_0_w, which indicates that FE2 is BUBBLE next cycle
+	bool tmpFE2_0_w = calcPCFromPMASK_new||(exFlush && (exFlushPri >= priFE1.read()) && !icDMAProc) ||
+			(isFE1BUB.read() && (isFE2BUB.read()|| !IAB_HALT)) ||
+			(hitFE2_w && (!IAB_HALT) && isFE2B_w);
+	//Step 3: Submit to FE2 level
+	if(isFE1_load_w){
+		PCFE2.write(PCFE1.read());
+		priFE2.write(priFE1.read());
+
+		ISRFirstLine_FE2.write(ISRFirstLine_FE1.read().val);
+		IsNormalSeq_FE2.write(IsNormalSeq_FE1.read().val);
+
+		unsigned int bank_sel = PCFE1.read() >> 4 & 0x3;
+		DEBUG_INFO_STREAM("Event: FE1 select bank="<<bank_sel<<" Content =");
+		for(int j=0;j<4;j++){
+			for(int i=0;i<16;i++){
+				DEBUG_INFO_STREAM(cacheOutput[bank_sel].dataLine[j].insnSlot[i]<<" ");
+			}
+			DEBUG_INFO_STREAM("\n");
+		}
+
+		bufCacheLine.write(cacheOutput[bank_sel]);
+	}
+
+	if(calcPCFromPMASK_new){
+		//priFE2.write(externalPri_w);
+		branpredhasdone.write(false);
+	}
+
+	if(tmpFE2_0_w|| icFlushProc || icFlushProc_1d.read().val || (icDMAProc != icDMAProc_1d.read().val)){
+		isFE2BUB.write(true);
+		branpredhasdone.write(false);
+	}else{
+		isFE2BUB.write(false);
+	}
+
+	return;
+}
+
+void icache_module_new::evaluate_FE0()
+{
+	if(!dsp_en){
+		return;			//early return
+	}
+
+	//This stage is actually implemented twice, but this part is more accurate
+	//Step 1: Generate signal: PCFE0_w(pipeFE0toFE2.v line:164)
+	PCFE0_w = (hitFE2_w && isFE2B_w)? PCFE2B_w : PCFE0.read();
+
+	//Step 3: ICACHE RAM submodule
+	ICACHE_RAM.notifyCC(local_cycle_L);
+
+	ICACHE_RAM.gatherInputSignals(icFlushProc_1d.read().val, PCFE0_w,PCFE0_en.read().val,write_PC,write_En,write_Line);
+	ICACHE_RAM.evaluate();
+	icWbDelay_2nd_w = ICACHE_RAM.getWb2nd();
+
+	//Step 2: Update registers: PCFE0(pipeFE0toFE2.v line:165~214 )
+
+	isFPCUsed_w  = true;
+	if(icFlushProc){
+		isFPCUsed_w = false;
+		nextPC = icFlushPC.read();
+		//PCFE0.write(nextPC);
+		PCFE0_en.write(true);
+	}else if(icDMAProc){
+		isFPCUsed_w = false;
+		nextPC = (icDMAPCEn && !(icWbDelay_2nd_w && icDMAProc_1d.read().val)) ? icDMAPC.read() : PCFE0.read();
+		//PCFE0.write(nextPC);
+		PCFE0_en.write(icDMAPCEn);
+	}else if(((icFlushProc_1d.read().val == true)&&(icFlushProc==false))
+			||((icDMAProc_1d.read().val == true) && (icDMAProc == false))){
+
+		isFPCUsed_w = false;		//TODO: check when exFLUSH happens
+		nextPC = ( exFlush && !isFlushRETI) ? exFlushPC : innerOptBakPC.read();
+		//PCFE0.write(nextPC);
+		priFE0.write(innerOptBakPri.read());
+		PCFE0_en.write(true);
+	}
+
+	else if(calcPCFromPMASK){
+
+		isFPCUsed_w = true;
+
+		nextPC = INT_PC;
+
+		//PCFE0.write(INT_PC);
+		priFE0.write(INT_pri);
+		PCFE0_en.write(true);
+
+		DEBUG_INFO_STREAM("Event: Interruption #"<<INT_pri<<" detected, branch to 0x"<<std::hex<<INT_PC<<std::endl);
+
+	}
+
+	else if(exFlush && ( exFlushPri == priFE0.read())){
+
+		isFPCUsed_w = true;
+		nextPC = exFlushPC;
+		//PCFE0.write(exFlushPC);
+		PCFE0_en.write(true);
+	}
+
+	else if(L2_ackB_w || icWbDelay_2nd_w){
+
+		isFPCUsed_w  = false;
+		nextPC = PCFE0_w;
+		//PCFE0.write(PCFE0_w);
+		PCFE0_en.write(true);
+	}else if(isFE1BUB.read() || isFE2BUB.read() || ( hitFE2_w &&( !IAB_HALT || isFE2B_w ||icDMAProc_1d.read().val))){
+		isFPCUsed_w = true;
+		nextPC = (PCFE0_w & 0xfffffff0) + 0x10;
+		//PCFE0.write(nextPC);
+		PCFE0_en.write(true);
+	}else{
+		isFPCUsed_w = false;
+		PCFE0_en.write(false);
+	}
+
+	//Step 2.5: compare two nextPC
+	PCFE0.write(nextPC);
+
+	if((nextPC != nextPC_extern) && (isFPCUsed_w)){
+		/*std::cout<<"[CC="<<std::hex<<local_cycle_L
+				<<"]NextPC is different: nextPC_internal = 0x"<<std::hex
+				<<nextPC<<", while nextPC_extern = 0x"<<nextPC_extern<<std::endl;
+		std::cout<<"IsFPCUsed = "<<isFPCUsed_w<<std::endl;*/
+		//PCFE0.write(nextPC_extern);
+	}
+
+
+	//Step 3: Update FE1 level pipeline registers(pipeFE0toFE2.v line:216~244)
+	bool tmpFE1_0_w = isFE1BUB.read() || isFE2BUB.read();
+	bool tmpFE1_1_w = hitFE2_w && ( (!IAB_HALT) || isFE2B_w||icDMAProc_1d.read().val);
+	bool tmpFE1_2_w = calcPCFromPMASK || (exFlush && (exFlushPri >= priFE0.read()) &&!icDMAProc)||L2_ackB_w;
+	if((icDMAPCEn_1d.read().val||true)&&(tmpFE1_0_w || tmpFE1_1_w)){
+		PCFE1.write(PCFE0_w);
+
+		ISRFirstLine_FE1.write(ISRFirstLine_FE0.read());
+		IsNormalSeq_FE1.write(IsNormalSeq_FE0.read());
+
+	}
+
+	if(calcPCFromPMASK){
+		priFE1.write(INT_pri);
+
+	}
+
+	if(tmpFE1_2_w||icFlushProc||icFlushProc_1d.read().val||(icDMAProc != icDMAProc_1d.read().val)||icWbDelay_2nd_w){
+		isFE1BUB.write(true);
+
+	}else{
+		isFE1BUB.write(false);
+	}
+
+	//DMA should backup PC and Pri for resume(pipeFE0toFE2.v line 141~163)
+	if(!isFE2BUB.read().val && !(hitFE2_w && !IAB_HALT)){
+		currentBakPC_w = PCFE2.read();
+		currentBakPri_w = priFE2.read();
+	}
+	else if(!isFE1BUB.read().val && !(hitFE2_w && isFE2B_w)){
+		currentBakPC_w = PCFE1.read();
+		currentBakPri_w = priFE1.read();
+	}
+	else{
+		currentBakPC_w = PCFE0_w;
+		currentBakPri_w = priFE0.read();
+	}
+
+	if((icFlushProc_1d.read().val || icDMAProc_1d.read().val) &&
+			(exFlush && !isFlushRETI) && ( exFlushPri == innerOptBakPri.read())){
+		innerOptBakPC.write(exFlushPC);
+		innerOptBakPri.write(exFlushPri);
+	}else if(((icFlushProc_1d.read().val == false)&&(icFlushProc == true) ) ||
+			((icDMAProc_1d.read().val == false)&&(icDMAProc==true))){
+		//printf("Save currentBakPC_w = %x",currentBakPC_w);
+		innerOptBakPC.write( (exFlush && !isFlushRETI && (exFlushPri == priFE0.read())) ?
+				exFlushPC : currentBakPC_w);
+		innerOptBakPri.write( (exFlush && !isFlushRETI && (exFlushPri == priFE0.read())) ?
+				exFlushPri : currentBakPri_w);
+	}
+
+
+	return;
+}
+
+void icache_module_new::evaluate_FE0_software_pre()
+{
+	//Step1: Calculate the readPC for ICACHE_RAM. It could be modified by FE2 branch prediction.
+	//Evaluating the ICACHE_RAM and generating icWbDelay_2nd_w signal.
+	
+	
+	PCFE0_w = (hitFE2_w && isFE2B_w) ? PCFE2B_w : PCFE0.read();
+
+	isFE0InnerSRAM_w = (PCFE0_w/16 >= inner_sram_start_addr/16) && (PCFE0_w/16 <= inner_sram_end_addr/16);
+	isFE0ShareSRAM_w = (PCFE0_w/16 >= ShareSRAMStart/16) && (PCFE0_w/16 <= ShareSRAMEnd/16);
+
+
+	
+
+	ICACHE_RAM.notifyCC(local_cycle_L);
+
+	ICACHE_RAM.gatherInputSignals(icFlushProc_1d.read().val, PCFE0_w,
+					PCFE0_en.read().val && (!L2_ackB_w) && (!isFE0InnerSRAM_w) && (!isFE0ShareSRAM_w),
+					write_PC,write_En,write_Line);
+	//ICACHE_RAM.gatherInputSignals(icFlushProc_1d.read().val, PCFE0_w,
+	//	(PCFE0_en.read().val||(!getBitREG(ICACHE_ICGC,8)&&isFE2B_w)) && (!L2_ackB_w) && (!isFE0InnerSRAM_w) && (!isFE0ShareSRAM_w),
+	//	write_PC,write_En,write_Line);
+	ICACHE_RAM.evaluate();
+	icWbDelay_2nd_w = ICACHE_RAM.getWb2nd();
+	
+	if(!(getBitREG(ICACHE_ICDMA_CON,1)|| getBitREG(ICACHE_ICDMA_CON,5))){
+		if(getBitREG(ICACHE_ICDMA_CON,4)){	//got a AUTO DMA request
+			icdma_cnt.write(ICDMA_AUTOLEN.read() + 3);
+			icDMAPC.write(autoDMAPC);
+		}
+		else if(getBitREG(ICACHE_ICDMA_CON,0)){	//got a MAN DMA request
+			icdma_cnt.write(ICDMA_LEN.read() + 3);
+			icDMAPC.write(ICDMA_DST_ADDR.read());
+		}
+	}
+	else if((icDMAFirst3Addr_w || icDMAAck) && !(icWbDelay_2nd_w && icDMAProc_d[0].read().val)){
+		icdma_cnt.write(icdma_cnt.read() - 1);
+		icDMAPC.write(icDMAPC.read() + 0x10);
+	}
+
+	//Access inner sram
+	access_inner_sram();
+}
+
+void icache_module_new::access_inner_sram()
+{
+		inner_sram_addr = inner_sram_mod ? (PCFE0_w/16) : (inner_sram_jtg_addr/16);
+		//inner_sram_cen = inner_sram_mod ? !((PCFE0_en.read().val||isFE2B_w) && isFE0InnerSRAM_w) : !inner_sram_jtg_en;
+		inner_sram_cen = inner_sram_mod ? !(PCFE0_en.read().val && isFE0InnerSRAM_w) : !inner_sram_jtg_en;
+		inner_sram_wrn = inner_sram_mod ? true : !(inner_sram_jtg_wr);	//TODO:not correct!
+
+		//printf("inner_sram_addr = 0x%x, cen = %d, wrn = %d\n",inner_sram_addr,inner_sram_cen,inner_sram_wrn);
+
+		if(!inner_sram_cen){	//chip enable, 0 valid
+				if(inner_sram_wrn){		//1-read, 0-write
+						/*Read inner sram*/
+						insnLine512 tmp_rddata;
+						tmp_rddata.reset();
+						for(int i=0;i<16;i++){
+								tmp_rddata.insnSlot[i] = inner_sram[(inner_sram_addr&0xFFF)*16+i];
+		//						printf("READ inner_sram[%d], 0x%x\n",(inner_sram_addr&0x1000)*16+i,inner_sram[(inner_sram_addr&0x1000)*16+i]);
+						}
+						inner_sram_rddata_buf.write(tmp_rddata);
+
+						inner_sram_rddata = inner_sram_rddata_buf.read();
+				}else{
+						/*Write inner sram*/
+						for(int i=0;i<16;i++){
+								inner_sram[(inner_sram_addr&0xFFF)*16+i] = inner_sram_wrdata.insnSlot[i];
+						}
+
+				}
+		}
+
+		if(isFE1_load_w || isFE1BUB.read().val){
+			inner_sram_rddata_bak_en.write(false);
+		}
+		else if(PCFE0_en.read() &&
+			isFE0InnerSRAM_w &&
+			!isFE2B_w&&
+			!(isFE1BUB.read().val)){
+				inner_sram_rddata_bak_en.write(true);
+				inner_sram_rddata_bak_data.write(inner_sram_rddata);
+		}
+		if(isFE1_load_w){
+				if(inner_sram_rddata_bak_en.read().val){
+					inner_sram_rddata_1d.write(inner_sram_rddata_bak_data.read());
+				}else{
+					inner_sram_rddata_1d.write(inner_sram_rddata);
+				}
+		}
+		/*
+		printf("PCFE1 = 0x%x:\n",PCFE1.read());
+		printf("inner_sram_rddata_bak_en = %d\n",inner_sram_rddata_bak_en.read().val);
+		printf("inner_sram_rddata_bak_data = ");
+		for(int i=0;i<16;i++)
+			printf("0x%x ",inner_sram_rddata_bak_data.read().insnSlot[i]);
+		printf("\n");
+		printf("inner_sram_rddata = ");
+		for(int i=0;i<16;i++)
+			printf("0x%x ",inner_sram_rddata.insnSlot[i]);
+		printf("\n");
+		*/
+		
+		
+		
+}
+
+bool icache_module_new::read_inner_sram(unsigned int addr , unsigned int *value)
+{
+	if((addr < inner_sram_start_addr) || (addr > inner_sram_end_addr)){
+		return false;
+	}else{
+		*value = inner_sram[addr&0xFFFF];
+		return true;
+	}
+}
+
+bool icache_module_new::write_inner_sram(unsigned int addr , unsigned int value)
+{
+	if((addr < inner_sram_start_addr) || (addr > inner_sram_end_addr)){
+		return false;
+	}else{
+		inner_sram[addr&0xFFFF] = value;
+		//printf("Write inner sram[%d] = 0x%x,addr = 0x%x\n",addr&0xFFFF,inner_sram[addr&0xFFFF], addr);
+		return true;
+	}
+
+}
+
+void icache_module_new::evaluate_FE0_software()
+{
+	bool tmp_ISRFirstLine_FE0_w = 0;
+	bool flag_icWbDelay_2nd_w = false;
+
+	//Step2: Calculate the nextPC for register PCFE0. Also with PCFE0_en and priFE0 registers.
+	//In some situations, the nextPC is given by external pipeline with externalPC_w.
+	unsigned int nextPC_w=0;
+	bool nextPC_readen_w=false;
+	bool modify_pri_w= false;
+	unsigned int nextPri_w;
+	if(icFlushProc){
+		nextPC_w = icFlushPC.read();
+		nextPC_readen_w = true;
+#ifdef TEST_LOG_OUT
+		DEBUG_INFO_STREAM("[TEST:K]cache in Flush process\n");
+#endif
+	}
+	else if (icDMAProc){
+		nextPC_w = (icDMAPCEn && !(icWbDelay_2nd_w && icDMAProc_1d.read().val)) ? icDMAPC.read() : PCFE0.read();
+		nextPC_readen_w = true;
+#ifdef TEST_LOG_OUT
+		DEBUG_INFO_STREAM("[TEST:L]cache in DMA process\n");
+#endif
+	}
+	else if(((icFlushProc_1d.read().val == true)&&(icFlushProc==false))
+				||((icDMAProc_1d.read().val == true) && (icDMAProc == false))){
+		//Case 1: Restore using reserved PC
+		//if((!exflush_during_internal_process && !extern_ExFlush_w)||(extern_ExFlush_w &&(exFlushPri>innerOptBakPri.read())) ){
+#ifdef TEST_LOG_OUT
+		if((icFlushProc_1d.read().val == true)&&(icFlushProc==false)){
+			DEBUG_INFO_STREAM("[TEST:K]cache exit Flush status\n");
+		}
+		if((icDMAProc_1d.read().val == true) && (icDMAProc == false)){
+			DEBUG_INFO_STREAM("[TEST:L]cache exit DMA status\n");
+		}
+#endif
+		if((!exflush_during_internal_process && !(extern_ExFlush_w &&(!isFlushRETI) /*&& !INT_proc*/))){
+			nextPC_w = innerOptBakPC.read();
+			nextPri_w = innerOptBakPri.read();
+			ISRFirstLine_FE0_w = innerOptBakISRFirstLn.read().val;
+			//printf("DMA-end: preserved pc = 0x%x\n",innerOptBakPC.read());
+		}
+		//Case 2: Restore using exFlush PC, obtained from external PC
+		else{			
+				if(extern_ExFlush_w &&(!isFlushRETI)){
+					nextPC_w = exFlushPC;
+					nextPri_w = exFlushPri;
+				}	else{
+					nextPC_w = innerOptBakPC.read();//externalPC_w;
+					nextPri_w = innerOptBakPri.read();//externalPri_w;
+				}
+				//printf("DMA-end: external pc = 0x%x\n",nextPC_w);
+		}
+		modify_pri_w = true;
+		nextPC_readen_w = true;
+	}
+	else if(calcPCFromPMASK_new){
+		nextPC_w = externalPC_w;
+		nextPC_readen_w = true;
+		modify_pri_w = true;
+		nextPri_w = externalPri_w;
+
+#ifdef TEST_LOG_OUT
+		if(calcPCFromPMASK_new){
+			DEBUG_INFO_STREAM("[TEST:D]Interrupt happens @0x"<<externalPC_w<<" with priority = 0x"<<externalPri_w<<std::endl);
+		}
+#endif
+	}
+	else if(extern_ExFlush_w && ( exFlushPri >= priFE0.read())){
+		nextPC_w = externalPC_w;
+		nextPC_readen_w = true;
+
+#ifdef TEST_LOG_OUT
+		if(extern_ExFlush_w && ( exFlushPri >= priFE0.read())){
+			DEBUG_INFO_STREAM("[TEST:E]Exflush happens @0x"<<externalPC_w<<std::endl);
+		}
+#endif
+
+	}
+	else if(L2_ackB_w || icWbDelay_2nd_w){
+		nextPC_w = PCFE0_w;
+		tmp_ISRFirstLine_FE0_w = ISRFirstLine_FE0.read().val;
+		nextPC_readen_w = true;
+		flag_icWbDelay_2nd_w = true;
+	}
+	else if(isFE1BUB.read() || isFE2BUB.read() || ( hitFE2_w &&( !IAB_HALT || isFE2B_w ||icDMAProc_1d.read().val))){
+		nextPC_w = externalPC_w;
+		nextPC_readen_w = true;
+	}
+	else{
+		nextPC_readen_w = false;
+	}
+
+	//registers writing
+	if(nextPC_readen_w){
+		PCFE0.write(nextPC_w);
+		ISRFirstLine_FE0.write(ISRFirstLine_FE0_w);
+		if(flag_icWbDelay_2nd_w){
+			ISRFirstLine_FE0.write(tmp_ISRFirstLine_FE0_w);
+		}
+		IsNormalSeq_FE0.write(IsNormalSeq_FE0_w);
+
+	}
+	PCFE0_en.write(nextPC_readen_w);
+	//if(modify_pri_w){
+		priFE0.write(externalPri_w);
+	//}
+
+	//Step 3: Update FE1 level pipeline registers(pipeFE0toFE2.v line:216~244) TODO: to be checked from outside
+	bool tmpFE1_0_w = isFE1BUB.read() || isFE2BUB.read();
+	bool tmpFE1_1_w = hitFE2_w && ( (!IAB_HALT) || isFE2B_w||icDMAProc_1d.read().val);
+	bool tmpFE1_2_w = calcPCFromPMASK_new || (extern_ExFlush_w && (exFlushPri >= priFE0.read()) &&!icDMAProc)||L2_ackB_w;
+	if((icDMAPCEn_1d.read().val||true)&&(tmpFE1_0_w || tmpFE1_1_w)){
+		PCFE1.write(PCFE0_w);
+
+		ISRFirstLine_FE1.write(ISRFirstLine_FE0.read());
+		IsNormalSeq_FE1.write(IsNormalSeq_FE0.read());
+	}
+
+	//if(calcPCFromPMASK_new){
+	priFE1.write(priFE0.read());
+
+	//}
+
+	if(tmpFE1_2_w||icFlushProc||icFlushProc_1d.read().val||(icDMAProc != icDMAProc_1d.read().val)||icWbDelay_2nd_w){
+		isFE1BUB.write(true);
+
+	}else{
+		isFE1BUB.write(false);
+	}
+
+	//DMA should backup PC and Pri for resume(pipeFE0toFE2.v line 141~163)
+	if(!isFE2BUB.read().val && !(hitFE2_w && !IAB_HALT)){
+		//printf("FE2\n");
+		currentBakPC_w = PCFE2.read();
+		currentBakPri_w = priFE2.read();
+		currentBakISRFirstLn_w = ISRFirstLine_FE2.read().val;
+	}
+	else if(!isFE1BUB.read().val && !(hitFE2_w && isFE2B_w)){
+		//printf("FE1\n");
+		currentBakPC_w = PCFE1.read();
+		currentBakPri_w = priFE1.read();
+		currentBakISRFirstLn_w = ISRFirstLine_FE1.read().val;
+	}
+	else{
+		//printf("FE0_w\n");
+		currentBakPC_w = PCFE0_w;
+		currentBakPri_w = priFE0.read();
+		currentBakISRFirstLn_w = ISRFirstLine_FE0.read().val;
+	}
+
+	if((icFlushProc_1d.read().val || icDMAProc_1d.read().val) &&
+			(exFlush && !isFlushRETI) && ( exFlushPri == innerOptBakPri.read())){
+		innerOptBakPC.write(exFlushPC);
+		innerOptBakPri.write(exFlushPri);
+	}else if(((icFlushProc_1d.read().val == false)&&(icFlushProc == true) ) ||
+			((icDMAProc_1d.read().val == false)&&(icDMAProc==true))){
+	//printf("Save currentBakPC_w = %x",currentBakPC_w);
+
+		innerOptBakPC.write( (exFlush/*&& (!INT_proc)*/ && !isFlushRETI && (exFlushPri == priFE0.read())) ?
+				exFlushPC : currentBakPC_w);
+		innerOptBakPri.write( (exFlush/*&&(!INT_proc)*/ && !isFlushRETI && (exFlushPri == priFE0.read())) ?
+				exFlushPri : currentBakPri_w);
+		innerOptBakISRFirstLn.write(currentBakISRFirstLn_w);
+	}
+
+
+	return;
+}
+
+
+void icache_module_new::cacheHit_logic()
+{
+	//This logic generate hitFE2_w and hitFE2Inst_w
+	//Step 1: Generate signals L2_ack_true and l2_ack_true_tmp(reg)  (icache.v line311~327)
+#ifdef TEST_REQUEST
+	//L2_ack_true = L2_ack_w && !tr_bypass.read().val && (ExtractBinStr(L2_ack_pc_w,4,28) == ExtractBinStr(PCFE2.read(),4,28));
+	L2_ack_true = L2_ack_w && !tr_bypass.read().val && (ExtractBinStr(L2_ack_pc_w,4,28) == ExtractBinStr(L2_irq_pc_w,4,28));
+
+#else 
+	//L2_ack_true = L2_ack_w && (ExtractBinStr(L2_ack_pc_w,4,28) == ExtractBinStr(PCFE2.read(),4,28));
+	L2_ack_true = L2_ack_w && (ExtractBinStr(L2_ack_pc_w,4,28) == ExtractBinStr(L2_irq_pc_w,4,28));
+
+#endif
+	//L2_ack_true = L2_ack_w && (ExtractBinStr(L2_ack_pc_w,4,28) == ExtractBinStr(L2_irq_pc.read(),4,28));
+	//L2_ack_pc[4..31] == L2_irq_pc[4..31]
+	if((L2_ack_true_tmp.read().val && !IAB_HALT) || isFE2BUB.read().val || icDMATerminal ){
+		L2_ack_true_tmp.write(false);
+	}else if( L2_ack_true && (IAB_HALT && !icDMAProc_1d.read().val)){
+		L2_ack_true_tmp.write(true);
+	}
+	
+
+	//Step 2: Generate signals hitFE2_w(icache.v line 400~403 )
+	
+#ifdef TLM_SHARED_SRAM
+	//share_sram_ack_pc = share_sram_ack_pc_reg.read();
+	//share_sram_ack_inst = share_sram_ack_inst_reg.read();
+#else
+	share_sram_ack_pc = L2_irq_pc_w; //not correct
+#endif
+
+		
+					
+	
+
+
+
+
+
+	hitFromFE2Buffer_w = calcHitCache();
+	hitFE2_w = (icHit_w[0]||icHit_w[1]||icHit_w[2]||icHit_w[3]) || (L2_ack_true || L2_ack_true_tmp.read().val)
+			||isFE2InnerSRAM.read().val
+			||(isFE2ShareSRAM.read().val
+#ifdef TLM_SHARED_SRAM
+			&& (PCFE2.read()/16==share_sram_ack_pc/16)
+#endif
+			);
+			
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"hitFE2_w = 0x%x,PCFE1 = 0x%x, PCFE2 = 0x%x, share_sram_ack_pc = 0x%x\n",hitFE2_w,PCFE1.read(),PCFE2.read(),share_sram_ack_pc);
+	fclose(fp);*/
+
+
+	/*if(hitFE2_w && (PCFE2.read()/16==share_sram_ack_pc/16)){
+			cout<<"["<<sc_time_stamp()<<"]";
+			printf("icache hit share_sram_ack_pc = %x, hitFE2_w = %d\n",share_sram_ack_pc,hitFE2_w);
+	}*/
+				
+	pcFE2_launch_en_w = hitFE2_w && !IAB_HALT && !icDMAProc_1d.read().val && !isFE2BUB.read().val;
+
+#ifdef TEST_LOG_OUT
+	if(IAB_HALT && (hitFE2_w  && !icDMAProc_1d.read().val && !isFE2BUB.read().val)){
+		DEBUG_INFO_STREAM("[TEST:A]No submission when IAB_HALT is set(even if hit in cache)"<<std::endl);
+	}
+	
+#endif
+
+	//Step 3: Generate signals hitFE2Inst_w(icache.v line 405~413)
+	inner_sram_inst = inner_sram_rddata_1d.read();
+	if(isFE2InnerSRAM.read().val &&(!branpredhasdone.read().val) ){
+			hitFE2Inst_w  = inner_sram_inst;
+			//printf("Read a line from inner SRAM\n");
+			//for(int i=0;i<16;i++)
+			//	printf("0x%x	", inner_sram_inst.insnSlot[i]);
+			//printf("\n");
+#ifdef TEST_LOG_OUT
+			DEBUG_INFO_STREAM("[TEST:J]Read inner memory with PC = 0x"<<PCFE2.read());
+			DEBUG_INFO_STREAM(" Cache line content: ");
+			for(int i=0;i<16;i++){
+				DEBUG_INFO_STREAM("0x"<<hitFE2Inst_w.insnSlot[i]<<"\t");
+			}
+			DEBUG_INFO_STREAM("\n");
+#endif
+	}else if(isFE2ShareSRAM.read().val &&(!branpredhasdone.read().val)
+#ifdef TLM_SHARED_SRAM
+			 && (PCFE2.read()/16 == share_sram_ack_pc/16)
+#endif
+			 ){
+			hitFE2Inst_w  = share_sram_ack_inst;
+
+			/*FILE * fp = fopen("tlm.txt","at");
+			fprintf(fp,"using share_sram_ack pc = 0x%x\n",share_sram_ack_pc);
+			fclose(fp);*/
+
+
+#ifdef TEST_LOG_OUT
+	DEBUG_INFO_STREAM("[TEST:F]Send cache line to IAB from Shared memory with addr = 0x"<<PCFE2.read());
+	DEBUG_INFO_STREAM(" Cache line content: ");
+	for(int i=0;i<16;i++){
+		DEBUG_INFO_STREAM("0x"<<hitFE2Inst_w.insnSlot[i]<<"\t");
+	}
+	DEBUG_INFO_STREAM("\n");
+#endif
+
+	}else if(hitFE2_w&&(!branpredhasdone.read().val)){
+		if(hitFromFE2Buffer_w){
+			hitFE2Inst_w = bufCacheLine.read().dataLine[hitway_w];
+		}else{
+			hitFE2Inst_w = L2_ack_insn_w;
+		}
+	}else{//miss
+		//hitFE2Inst_w.reset();
+	}
+
+#ifdef TEST_LOG_OUT
+	if(hitFromFE2Buffer_w){
+		DEBUG_INFO_STREAM("[TEST:C]Hit in cache with addr = 0x"<<std::hex<<PCFE2.read());
+		DEBUG_INFO_STREAM(" Cache line content: ");
+		for(int i=0;i<16;i++){
+			DEBUG_INFO_STREAM("0x"<<hitFE2Inst_w.insnSlot[i]<<"\t");
+		}
+		DEBUG_INFO_STREAM("\n");
+	}
+	
+#endif
+
+	//Step 4: Modify hitFE2Inst_w according to PCFE2
+	if(!isAlignTo16(PCFE2.read())){			//PC is not aligned to 16, insn Line to IAB should be cut short
+		unsigned int i = 0;
+		for(i = 0; i<PCFE2.read() %16; i++ ){
+			hitFE2Inst_w.insnSlot[i] = 0;
+		}
+		//PC may be point to a second word in DW instruction, modify to nop
+		bool isHead = false;
+		if(isSecondWordInDW(hitFE2Inst_w.insnSlot[PCFE2.read() %16], &isHead)){
+			//For debug 20140208
+			hitFE2Inst_w.insnSlot[PCFE2.read() % 16] = (isHead ? 0x80200000 : 0x00200000);
+			//hitFE2Inst_w.insnSlot[PCFE2.read() % 16] = 0x80200000;//(isHead ? 0x80200000 : 0x00200000);
+		}
+	}
+	return;
+}
+
+void icache_module_new::L2ireq_logic()
+{
+	//This logic generate L2_irq_w and L2_irq_pc_w(icache.v line 308~309)
+	//Step 1: Generate signal L2_irq_w
+//	L2_irq_w = (!isFE2BUB.read().val) && (!hitFromFE2Buffer_w) && (!L2_ack_true_tmp.read().val)
+	L2_irq_w = (!isFE2BUB.read().val) && (!hitFromFE2Buffer_w) && (!L2_ack_true_tmp.read().val)			//try
+
+			&&!(!icDMAProc && icDMAProc_1d.read().val) && !isFE2PCDDR.read().val
+			&& (!isFE2InnerSRAM.read().val)
+			&& (!isFE2ShareSRAM.read().val);
+	//Step 2: Generate signal L2_irq_pc_w
+	L2_irq_pc_w = (icDMABoot && icDMAProc_1d.read().val && !(isFE2ShareSRAM.read().val)) ? icDMARdAddr.read() : PCFE2.read();
+	if(L2_irq_w){
+		L2_irq_pc.write(L2_irq_pc_w);
+	}
+#ifdef TEST_REQUEST
+	l2_irq_pc_1d.write(L2_irq_pc.read());
+
+
+	if(L2_ack_w){
+		tr_bypass.write(false);
+	}else if(tr_pro.read().val &&
+			((!L2_irq_w && !L2_ack_w)
+			 ||
+			 (L2_irq_w && (L2_irq_pc_w !=  L2_irq_pc.read()))
+			 )){
+		tr_bypass.write(true);
+	}
+
+
+
+	if((tr_pro.read().val == 0) 
+			&& ((L2_irq_w && ! (l2_irq_1d.read().val)) 
+				||(L2_irq_w && (L2_irq_pc_w != L2_irq_pc.read())) 
+				)){
+		l2_irq_1d.write(L2_irq_w);
+		L2_irq_pc.write(L2_irq_pc_w);
+		tr_pro.write(true);
+	}
+
+	else if(L2_ack_w){
+		l2_irq_1d.write(false);
+		L2_irq_pc.write(0x5a5a5a5a);
+		tr_pro.write(false);
+	}
+
+	if(L2_irq_w && !tr_pro.read().val){
+		send_REQUEST();
+	}
+
+#endif
+#if 0
+#ifdef SC_ICACHE
+	//According to the L2_irq_w and L2_irq_pc_w, send transaction with phase BEGIN_REQ_CACHE_LINE
+	if(L2_irq_w){
+		//if((m_last_trans_finished && (!IAB_HALT) && (L2_irq_pc_w == L2_irq_pc.read()))  //maybe right
+			if((m_last_trans_finished && (!IAB_HALT) )
+			//if((L2_ack_true && (!IAB_HALT) )
+			|| (L2_irq_pc_w != L2_irq_pc.read())){
+			//last transaction recieved a BEGIN_RESP_CACHE_LINE from target,
+			//or L2_irq_pc_w is changed since last trans has not finished
+
+			if(L2_ack_true && (L2_irq_pc_w == L2_ack_pc_w)){
+			}else{
+			//TODO: send a new trans
+			send_REQUEST();
+
+			//Turn off m_last_trans_finished
+			//m_last_trans_finished = false;
+			}
+			m_last_trans_finished = L2_ack_true;
+		}
+	}
+	
+
+#endif
+#endif
+	
+	return;
+}
+
+void icache_module_new::branchPred_logic()
+{
+	//This logic generate isFE2B_w and PCFE2B_w and L2_ackB_w
+	//Only do branch prediction once when instruction hit happens
+	if((!isFE2BUB.read().val)&&hitFE2_w && (!branpredhasdone.read().val) &&(!icDMAProc_1d.read().val)){
+		//Do branch prediction here
+		DEBUG_INFO_STREAM("Event: Do branch prediction"<<std::endl);
+		branchPred_analysis();
+		if(isFE2B_w || L2_ackB_w){
+			DEBUG_INFO_STREAM("Pred: branch taken at PC = 0x"<<PCFE2B_w<<std::endl);
+		}
+
+		branpredhasdone.write(true);
+
+#ifdef TEST_LOG_OUT
+		if(isFE2B_w || L2_ackB_w){
+			DEBUG_INFO_STREAM("[TEST:H]Branch predition @ 0x"<<PCFE2.read());
+			DEBUG_INFO_STREAM(" result: ");	
+			DEBUG_INFO_STREAM("target PC = 0x"<<PCFE2B_w);
+			DEBUG_INFO_STREAM(std::endl);
+		}
+		
+#endif
+	}else{
+		//No branch
+		isFE2B_w = false;
+		PCFE2B_w = 0x0;
+		L2_ackB_w = false;
+	}
+	return;
+}
+
+void icache_module_new::submitIAB_logic()
+{
+	//This logic generates signals: submitToIAB_w, insnLine_toIAB_w
+	//Step 1: Generate signal submitToIAB_w
+	submitToIAB_w = pcFE2_launch_en_w;//hitFE2_w &&(!IAB_HALT) && (!isFE2BUB.read().val);
+	//Step 2: Generate signal insnLine_toIAB_w
+	//if(hitFE2_w){
+	if(hitFE2_w){
+		insnLine_toIAB_w = hitFE2Inst_w;
+	}
+	//Step 3: Submit to IAB
+	if(submitToIAB_w){
+		DEBUG_INFO_STREAM("Event: Submit to IAB with PC = "<<PCFE2.read()<<std::endl);
+		DEBUG_INFO_STREAM("Submit content =");
+		for(int i=0;i<16;i++){
+			DEBUG_INFO_STREAM(insnLine_toIAB_w.insnSlot[i]<<" ");
+		}
+		DEBUG_INFO_STREAM("\n");
+	}
+	//Step 4: Unlock the branch prediction when submit
+	if(submitToIAB_w){
+		branpredhasdone.write(false);
+	}
+
+	return;
+}
+
+void icache_module_new::writeBack_logic()
+{
+	//ICGC
+	if(getBitREG(ICACHE_ICGC,8)){
+		//cache mode set to CACHE
+		mode = ICACHE_NORMAL;
+		cache_lock = false;
+	}else if(!getBitREG(ICACHE_ICGC,8)){
+		//cache mode set to SRAM
+		mode = ICACHE_SRAM;
+		cache_lock = true;
+	}
+	
+	//Default signals
+	write_En = false;
+	write_PC = 0;
+	write_Line.reset();
+	
+	//This logic generate signals: write_En, write_PC, write_Line
+	//Write back only in NORMAL mode and not locked
+	//if((mode == ICACHE_SRAM) || ( (mode == ICACHE_NORMAL) && cache_lock)){
+	if(((mode == ICACHE_SRAM)&&!(getBitREG(ICACHE_ICGC,9))) || ( (mode == ICACHE_NORMAL) && cache_lock)){
+		if((mode == ICACHE_NORMAL) && cache_lock){
+			std::cout<<"Cache locked,can't update addr @ 0x"<<std::hex<<PCFE2.read()<<std::endl;
+			printf("Cache locked, can't update addr @ 0x%x\n",PCFE2.read());
+		}
+		//printf("early return: cycle0x%x, mode=%d,cache_lock=%d\n",local_cycle_L,mode,cache_lock);
+		return;
+	}
+
+	bool tmp_wb_DMA = icDMAProc_1d.read().val && hitFE2_w && !isFE2BUB.read().val;		//Liugu: 20140310, write back to icache ram when DMA and flush
+
+	
+	//Write back when submit
+	if((submitToIAB_w || tmp_wb_DMA)&&(!isFE2InnerSRAM.read().val)&&(!isFE2ShareSRAM.read().val) ){
+		write_En = true;
+		write_PC = PCFE2.read();
+		cacheLine2136 tmp_wb_line;
+		tmp_wb_line.reset();
+		tmp_wb_line = bufCacheLine.read();
+		if(L2_ack_true || L2_ack_true_tmp.read().val){//return from L2, update the whole line
+			unsigned int victim = pickVictimLine();
+			DEBUG_INFO_STREAM("Event: Cache line replace: bank"<<ExtractBinStr(PCFE2.read(),4,2)<<
+		"\tway:"<<victim<<"\tentry:"<<ExtractBinStr(PCFE2.read(),6,7)<<std::endl);
+			//modify tag line
+			tmp_wb_line.tagLine.valid[victim] = 1;
+			tmp_wb_line.tagLine.tag[victim] = ExtractBinStr(PCFE2.read(),13,19);
+			DEBUG_INFO_STREAM("LRU before: 0x"<<std::hex<<(unsigned int)(tmp_wb_line.tagLine.lru)<<std::endl);
+			switch(victim){
+			case 0:{tmp_wb_line.tagLine.lru |= 6; break;}		//xxx => 11x
+			case 1:{tmp_wb_line.tagLine.lru &= 1;tmp_wb_line.tagLine.lru +=4; break;}	//xxx => 10x
+			case 2:{tmp_wb_line.tagLine.lru &= 2;tmp_wb_line.tagLine.lru +=1; break;}	//xxx => 0x1
+			case 3:{tmp_wb_line.tagLine.lru &= 2; break;}	//xxx => 0x0
+			}
+			DEBUG_INFO_STREAM("LRU after: 0x"<<std::hex<<(unsigned int)(tmp_wb_line.tagLine.lru)<<std::endl);
+			//modify data line
+			tmp_wb_line.dataLine[victim] = L2_ack_insn_w;
+
+			//Notify victim to ICACHE_RAM
+			ICACHE_RAM.notifyVictimWay(victim);
+
+		}else{//it hit in bufCacheline, only update lru
+			DEBUG_INFO_STREAM("Event: Cache hit lru update: bank"<<ExtractBinStr(PCFE2.read(),4,2)<<
+				"\tway:"<<hitway_w<<"\tentry:"<<ExtractBinStr(PCFE2.read(),6,7)<<std::endl);
+
+			DEBUG_INFO_STREAM("LRU before: 0x"<<std::hex<<(unsigned int)(tmp_wb_line.tagLine.lru)<<std::endl);
+
+			switch(hitway_w){
+
+			case 0:{tmp_wb_line.tagLine.lru |= 6; break;}		//xxx => 11x
+			case 1:{tmp_wb_line.tagLine.lru &= 1;tmp_wb_line.tagLine.lru +=4; break;}	//xxx => 10x
+			case 2:{tmp_wb_line.tagLine.lru &= 2;tmp_wb_line.tagLine.lru +=1; break;}	//xxx => 0x1
+			case 3:{tmp_wb_line.tagLine.lru &= 2; break;}	//xxx => 0x0
+			}
+
+			DEBUG_INFO_STREAM("LRU after: 0x"<<std::hex<<(unsigned int)(tmp_wb_line.tagLine.lru)<<std::endl);
+			//Notify the way to ICACHE_RAhiM
+			ICACHE_RAM.notifyVictimWay(hitway_w);
+
+		}
+		//write to icache wb input register
+		write_Line = tmp_wb_line;
+
+
+	}else{
+		write_En = false;
+	}
+	return;
+}
+
+bool icache_module_new::calcHitCache()
+{
+	bool ret = false;
+	unsigned int PCaddr = PCFE2.read();
+	unsigned int tag_value = (PCaddr>>13) & 0x7ffff;	//tag = PCaddr[13..31]	19bits
+
+	cacheLine2136 cache_line = bufCacheLine.read();
+
+	for(int i=0;i<4;i++){//4 ways
+		if((cache_line.tagLine.tag[i] == tag_value)&&(cache_line.tagLine.valid[i] == 1)){
+			//Found a match
+			hitway_w = i;
+			//ret = true;
+
+			icHit_w[i] = !isFE2BUB.read().val;
+		}else{
+			icHit_w[i] =  false;
+		}
+	}
+	icHitWbEn_w = (!IAB_HALT || icDMAProc_1d.read().val) && (icHit_w[0] || icHit_w[1] || icHit_w[2] || icHit_w[3])
+			&&(!isFE2InnerSRAM.read().val)&&(!isFE2ShareSRAM.read().val);
+	ret =icHit_w[0] || icHit_w[1] || icHit_w[2] || icHit_w[3];
+	return ret;
+
+}
+
+void icache_module_new::branchPred_analysis()
+{
+	//This function analyze hitFE2Inst_w to generate isFE2B_w, PCFE2B_w and L2_ackB_w,
+	//and other branch prediction info.
+	//Default value
+	isFE2B_w = false;
+	PCFE2B_w = 0;
+	L2_ackB_w = false;
+	iab_launchB_maks =0;
+
+
+	unsigned int p_begin,p_end, p_flush;
+	p_begin = p_end = PCFE2.read() & 0xf;		//Offset of PCFE2
+	p_flush = 16;		//Not cut short
+
+	bool branpred_taken_done_tmp = false;
+	for(unsigned int i=0;i<16;i+=4){		//Analyze Slot[0],Slot[4],Slot[8],Slot[12]
+		//Default value
+		branchInfo[i/4].bol_BPT = false;
+		branchInfo[i/4].bol_SlotDone = false;
+		branchInfo[i/4].u32_RetBPC = 0;
+
+
+		if(i<(PCFE2.read() & 0xf)){
+			//No prediction
+		}else{
+			if(isBranchInsn(i)){		//Slot[i] is branch instruction(RETI, D6,7,9,10,11,14)
+				//Make sure this branch instruction is at the first slot, although RTL is not
+				if( ((i==0) && (lastLineNotComplete.read().val) ) || ((i>0) && (!isEndOfLine(i-1)))){
+					DEBUG_INFO_STREAM("Error: branch instruction is not at the first slot of line"<<std::endl);
+					//exit(1);
+				}
+				//Make sure this line is ended
+				p_begin = p_end = i;
+				while((p_end<16) && (!isEndOfLine(p_end))){
+					p_end++;
+				}
+				if(p_end<16){
+					//Found a line end,then predict it
+					if(!branpred_taken_done_tmp){
+						//Step 1: RET instruction
+						if(isRetInsn(i)){
+							branpred_taken_done_tmp = true;		//taken
+							isFE2B_w = true;
+							PCFE2B_w = ro_CJMP;					//return PC register
+							firstBPos = i;
+							iab_launchB_maks = (unsigned int)(pow(16.0,(int)i/4));
+
+							branchInfo[i/4].bol_BPT = true;
+							branchInfo[i/4].bol_SlotDone =true;
+							branchInfo[i/4].u32_RetBPC = ro_CJMP;
+						}
+						else if(isBNInsn(i)){
+							branpred_taken_done_tmp = true;		//taken
+							isFE2B_w = true;
+							PCFE2B_w = (PCFE2.read() & 0xfffffff0) + i +
+											GSignExtend(ExtractBinStr(hitFE2Inst_w.insnSlot[i],0,17),17);
+							firstBPos = i;
+							iab_launchB_maks = (unsigned int)(pow(16.0,(int)i/4));
+
+							branchInfo[i/4].bol_BPT = true;
+							branchInfo[i/4].bol_SlotDone = true;
+							branchInfo[i/4].u32_RetBPC = 0;
+						}
+						//Step 2: Double word branch instructions
+						if(isDoubleInsn(i)){
+							unsigned int opcode = ((hitFE2Inst_w.insnSlot[i+1]) & 0x01e00000 ) >> 21;
+							unsigned int TgtAddr = 0;
+							unsigned int BPBValue = p_BPB[(((PCFE2.read() & 0xfffffff0) + i ) & 0x1ffc) >> 2];		//Look up BPB table
+							if(opcode == 6){//D6
+								if(((hitFE2Inst_w.insnSlot[i+1]) & 0x00100000) == 0x0)	{//If xRm>Rn B <pro>
+									TgtAddr = ((hitFE2Inst_w.insnSlot[i+1] & 0xe0000) << 12) +		//pro[31..29] = word_0[19..17]
+										((hitFE2Inst_w.insnSlot[i] & 0x78000000) >> 2) +			//pro[28..25] = word_1[30..27]
+										(hitFE2Inst_w.insnSlot[i] & 0x01ffffff);					//pro[24..0]= word_1[24..0]
+								}else{//If HHRm[HHRn] == C BN <pro> Or If Rm > C BN <pro>
+									TgtAddr = (PCFE2.read() & 0xfffffff0) + i +
+											GSignExtend(ExtractBinStr(hitFE2Inst_w.insnSlot[i],0,17),17);
+								}
+								branpred_taken_done_tmp = predTaken(BPBValue);
+								isFE2B_w = predTaken(BPBValue);
+								PCFE2B_w = TgtAddr;
+								firstBPos = i;
+								iab_launchB_maks = isFE2B_w ? (unsigned int)(pow(16.0,(int)i/4)) : 0;
+
+								branchInfo[i/4].bol_BPT = predTaken(BPBValue);
+								branchInfo[i/4].bol_SlotDone = true;
+								branchInfo[i/4].u32_RetBPC = 0;
+							}
+							if(opcode == 7){//D7
+								if(ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],18,3) == 0){//If Rm[bit]==0 B <pro>
+									TgtAddr = ExtractBinStr(hitFE2Inst_w.insnSlot[i],0,25)
+										|(ExtractBinStr(hitFE2Inst_w.insnSlot[i],27,4)<<25)
+										|(ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],12,3)<<29);
+									branpred_taken_done_tmp = predTaken(BPBValue);
+									isFE2B_w = predTaken(BPBValue);
+									PCFE2B_w = TgtAddr;
+									firstBPos = i;
+									iab_launchB_maks = isFE2B_w ? (unsigned int)(pow(16.0,(int)i/4)) : 0;
+
+									branchInfo[i/4].bol_BPT = predTaken(BPBValue);
+									branchInfo[i/4].bol_SlotDone = true;
+									branchInfo[i/4].u32_RetBPC = 0;
+								}
+							}
+							if(opcode == 9 || (opcode == 10) || (opcode == 11)){//D9,D10,D11
+								TgtAddr = (PCFE2.read() & 0xfffffff0) + i + GSignExtend(ExtractBinStr(hitFE2Inst_w.insnSlot[i],0,17),17);
+								branpred_taken_done_tmp = predTaken(BPBValue);
+								isFE2B_w = predTaken(BPBValue);
+								PCFE2B_w = TgtAddr;
+								firstBPos = i;
+								iab_launchB_maks = isFE2B_w ? (unsigned int)(pow(16.0,(int)i/4)) : 0;
+
+								branchInfo[i/4].bol_BPT = predTaken(BPBValue);
+								branchInfo[i/4].bol_SlotDone = true;
+								branchInfo[i/4].u32_RetBPC = 0;
+							}
+							if(opcode == 14){//D14
+								TgtAddr = ExtractBinStr(hitFE2Inst_w.insnSlot[i],0,25)|(hitFE2Inst_w.insnSlot[i+1]<<25);
+								if(ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],19,2) == 0){
+									unsigned int LC_idx = ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],10,2);
+									unsigned int LC_cond = ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],9,1);
+									if(LC_cond){//If LCn B <pro>
+										branpred_taken_done_tmp = (ro_LC[LC_idx] !=1);		//2014-07-02
+										isFE2B_w = (ro_LC[LC_idx] != 1);
+										PCFE2B_w = TgtAddr;
+										firstBPos = i;
+										iab_launchB_maks = isFE2B_w ? (unsigned int)(pow(16.0,(int)i/4)) : 0;
+
+										branchInfo[i/4].bol_BPT = (ro_LC[LC_idx] != 1);
+										branchInfo[i/4].bol_SlotDone = true;
+										branchInfo[i/4].u32_RetBPC = TgtAddr;
+									}else{//If nLCn B <pro>
+										branpred_taken_done_tmp = (ro_LC[LC_idx] ==1);
+										isFE2B_w = (ro_LC[LC_idx] == 1);
+										PCFE2B_w = TgtAddr;
+										firstBPos = i;
+										iab_launchB_maks = isFE2B_w ? (unsigned int)(pow(16.0,(int)i/4)) : 0;
+
+										branchInfo[i/4].bol_BPT = (ro_LC[LC_idx] == 1);
+										branchInfo[i/4].bol_SlotDone = true;
+										branchInfo[i/4].u32_RetBPC = 0;
+									}
+								}
+								if(ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],19,2) == 1){//B <label>
+									branpred_taken_done_tmp = true;
+									isFE2B_w = true;
+									PCFE2B_w = TgtAddr;
+									firstBPos = i;
+									iab_launchB_maks = (unsigned int)(pow(16.0,(int)i/4));
+
+									branchInfo[i/4].bol_BPT =true;
+									branchInfo[i/4].bol_SlotDone = true;
+									branchInfo[i/4].u32_RetBPC = 0;
+								}
+								if(ExtractBinStr(hitFE2Inst_w.insnSlot[i+1],19,2) == 2){//Call <label>
+									branpred_taken_done_tmp = true;
+									isFE2B_w = true;
+									PCFE2B_w = TgtAddr;
+									firstBPos = i;
+									iab_launchB_maks = (unsigned int)(pow(16.0,(int)i/4));
+
+									branchInfo[i/4].bol_BPT =true;
+									branchInfo[i/4].bol_SlotDone = true;
+									branchInfo[i/4].u32_RetBPC = 0;
+								}
+							}//D14
+						}//DW branch instruction
+
+						if(branpred_taken_done_tmp){
+							p_flush = p_end;
+						}
+
+					}else{
+						//only predict the first taken branch slot
+					}
+				}else{
+					//Not a complete line,no prediction
+					DEBUG_INFO_STREAM("Event: Find a branch instruction but not complete line, no prediction"<<std::endl);
+				}
+			}
+		}//else
+	}//for
+	//Generate L2_ackB_w
+	/*if(isFE2B_w){
+		if(L2_ack_true_tmp.read().val || L2_ack_true){
+			L2_ackB_w =true;
+		}
+		else{
+			L2_ackB_w = false;
+		}
+	}*/
+	//L2_ackB_w = isFE2B_w && (L2_ack_true_tmp.read().val || L2_ack_true);
+		
+	//L2_ackB_w = isFE2B_w && ((L2_ack_true_tmp.read().val || L2_ack_true)
+	//	||(isFE2ShareSRAM.read().val&&(share_sram_ack_pc==PCFE2.read()))&&!share_sram_irq_plus.read());
+	
+	L2_ackB_w = isFE2B_w && (
+		(L2_ack_true_tmp.read().val || L2_ack_true)
+		||(
+			isFE2ShareSRAM.read().val&&
+			(ExtractBinStr(share_sram_ack_pc,4,28) == ExtractBinStr(PCFE2.read(),4,28))
+			&&!share_sram_irq_plus.read()
+			)
+		);
+
+	//Modify hitFE2Inst_w according to the prediction
+	if(isFE2B_w ){
+		if(p_flush != 16){
+			//printf("#####################\n");
+			for(int i=p_flush+1;i<16;i++){
+				hitFE2Inst_w.insnSlot[i] = 0;
+			}
+		}
+	}
+	
+	//Check end of line
+	if(isEndOfLine(15)){
+		lastLineNotComplete.write(false);
+	}else{
+		lastLineNotComplete.write(true);
+	}
+	
+	//printf("isFE2B_w = %d,PC = %x,p_flush = %x\n",isFE2B_w,PCFE2.read(),p_flush);
+	
+	return;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void icache_module_new::display()
+{
+	
+	DEBUG_INFO_STREAM("icDMAProc_d[0] = "<<icDMAProc_d[0].read().val<<std::endl);
+	DEBUG_INFO_STREAM("icDMAProc_d[1] = "<<icDMAProc_d[1].read().val<<std::endl);
+	DEBUG_INFO_STREAM("icDMAProc_d[2] = "<<icDMAProc_d[2].read().val<<std::endl);
+	DEBUG_INFO_STREAM("icDMAPC = "<<icDMAPC.read()<<std::endl);	
+	//DEBUG_INFO_STREAM("isFPCUsed_w = "<<isFPCUsed_w<<std::endl);
+	DEBUG_INFO_STREAM("icDMARdAddr = "<<icDMARdAddr.read()<<std::endl);
+		
+			
+	DEBUG_INFO_STREAM("isFPCUsed_w = "<<isFPCUsed_w<<std::endl);
+	DEBUG_INFO_STREAM("ICDMA_CON = "<<ICDMA_CON.read()<<std::endl);
+	DEBUG_INFO_STREAM("ICFLUSH_CON = "<<ICFLUSH_CON.read()<<std::endl);
+	DEBUG_INFO_STREAM("exflush_during_internal_process = "<<exflush_during_internal_process<<std::endl);
+	DEBUG_INFO_STREAM("extern_ExFlush_w = "<<extern_ExFlush_w<<std::endl);
+	
+	DEBUG_INFO_STREAM("extern_ExFlush_pri_w = "<<extern_ExFlush_pri_w<<std::endl);
+	DEBUG_INFO_STREAM("INT_proc = "<<INT_proc<<std::endl);	
+		
+	
+	DEBUG_INFO_STREAM("ISRFirstLine_FE0 = "<<ISRFirstLine_FE0.read().val<<std::endl);
+	
+	DEBUG_INFO_STREAM("tr_bypass = "<<tr_bypass.read().val<<std::endl);
+	DEBUG_INFO_STREAM("mode = "<<mode<<" ICGC = "<<ICGC.read()<<std::endl);
+	DEBUG_INFO_STREAM("L2_irq_w = "<<L2_irq_w<<std::endl);
+	DEBUG_INFO_STREAM("L2_irq_pc_w = "<<L2_irq_pc_w<<std::endl);
+	DEBUG_INFO_STREAM("share_sram_ack_pc = "<<share_sram_ack_pc<<std::endl);
+
+		
+	DEBUG_INFO_STREAM("m_last_trans_finished = "<<m_last_trans_finished<<std::endl);
+	DEBUG_INFO_STREAM("ex_flush = "<<exFlush<<std::endl);
+	DEBUG_INFO_STREAM("pc = "<<exFlushPC<<std::endl);
+	DEBUG_INFO_STREAM("IAB_HALT = "<<IAB_HALT<<std::endl);
+	DEBUG_INFO_STREAM("L2_ackB_w = "<<L2_ackB_w<<std::endl);
+	DEBUG_INFO_STREAM("dsp_en = "<<dsp_en<<std::endl);
+
+	DEBUG_INFO_STREAM("isFlushRETI = "<<isFlushRETI<<std::endl);
+	DEBUG_INFO_STREAM("isExRETI_1d = "<<isExRETI_1d.read().val<<std::endl);
+
+	DEBUG_INFO_STREAM("calcPCFromPMASK = "<<calcPCFromPMASK<<std::endl);
+	DEBUG_INFO_STREAM("calcPCFromPMASK_new = "<<calcPCFromPMASK_new<<std::endl);
+	DEBUG_INFO_STREAM("L2_ack_true = "<<L2_ack_true<<std::endl);
+	DEBUG_INFO_STREAM("L2_ack_true_tmp = "<<L2_ack_true_tmp.read().val<<std::endl);
+	DEBUG_INFO_STREAM("hitFE2_w = "<<hitFE2_w<<std::endl);
+	DEBUG_INFO_STREAM("L2_ack_w = "<<L2_ack_w<<std::endl);
+	DEBUG_INFO_STREAM("expr = "<<  (ExtractBinStr(L2_ack_pc_w,4,28) == ExtractBinStr(PCFE2.read(),4,28))<<std::endl);
+	DEBUG_INFO_STREAM("L2_ack_pc_w ="<<hex<<L2_ack_pc_w<<" PCFE2 = "<<PCFE2.read()<<std::endl);
+
+	DEBUG_INFO_STREAM("icFlushProc = "<<icFlushProc);
+	DEBUG_INFO_STREAM("icFlushProc_1d = "<<icFlushProc_1d.read().val<<std::endl);
+
+
+
+	DEBUG_INFO_STREAM("isFE2InnerSRAM = "<<isFE2InnerSRAM.read().val<<std::endl);
+			DEBUG_INFO_STREAM("isFE2ShareSRAM = "<<isFE2ShareSRAM.read().val<<std::endl);
+	DEBUG_INFO_STREAM("icDMAProc = "<<icDMAProc);
+	DEBUG_INFO_STREAM(" icdma_cnt = "<<icdma_cnt.read());
+	DEBUG_INFO_STREAM(" icDMAAck ="<<icDMAAck<<std::endl);
+	DEBUG_INFO_STREAM("icDMAProc_1d = "<<icDMAProc_1d.read().val<<std::endl);
+	DEBUG_INFO_STREAM("icDMAFirst3Addr_w = "<<icDMAFirst3Addr_w<<std::endl);
+		
+
+	DEBUG_INFO_STREAM("icWbDelay_2nd_w = "<<icWbDelay_2nd_w<<std::endl);
+	DEBUG_INFO_STREAM("hitFE2Inst_w =");
+	for(int i=0;i<16;i++)
+		DEBUG_INFO_STREAM(hitFE2Inst_w.insnSlot[i]<<" ");
+	DEBUG_INFO_STREAM("\n");
+
+	//TBD
+	DEBUG_INFO_STREAM("LRU in bufFE2 = "<<std::hex<<(unsigned int)(bufCacheLine.read().tagLine.lru)<<std::endl);
+
+	DEBUG_INFO_STREAM("PCFE0_w:\t\t0x"<<std::hex<<PCFE0_w<<"\n");
+	DEBUG_INFO_STREAM("PCFE0:\t\t0x"<<std::hex<<PCFE0.read()<<"\n");
+	DEBUG_INFO_STREAM("PCFE0_en:\t\t"<<PCFE0_en.read().val<<"\n");
+	DEBUG_INFO_STREAM("priFE0:\t\t"<<priFE0.read()<<"\n");
+
+		DEBUG_INFO_STREAM("PCFE1:\t\t0x"<<std::hex<<PCFE1.read()<<"\t");
+		if(isFE1BUB.read().val){
+			DEBUG_INFO_STREAM("is BUBBLE");
+		}
+		DEBUG_INFO_STREAM(std::endl;)
+		DEBUG_INFO_STREAM("priFE1:\t\t"<<priFE1.read()<<"\n");
+		DEBUG_INFO_STREAM("PCFE2:\t\t0x"<<PCFE2.read()<<"\t");
+		if(isFE2BUB.read().val){
+			DEBUG_INFO_STREAM("is BUBBLE"<<"\t");
+		}
+		DEBUG_INFO_STREAM(std::endl);
+		DEBUG_INFO_STREAM("priFE2:\t\t"<<priFE2.read()<<"\n");
+		if(!hitFE2_w){
+
+			if(L2_irq_w){
+				DEBUG_INFO_STREAM("Requesting insn from L2, pc = 0x"<<L2_irq_pc_w<<"\n");
+			}else{
+				DEBUG_INFO_STREAM("miss\n");
+				for(int i=0;i<4;i++){
+					for(int j=0;j<16;j++){
+						DEBUG_INFO_STREAM(bufCacheLine.read().dataLine[i].insnSlot[j]<<"\t");
+					}
+					DEBUG_INFO_STREAM(std::endl);
+				}
+			}
+		}else{
+			if(isReflush_proc.read().val){
+				DEBUG_INFO_STREAM("Reflush"<<std::endl);
+			}else if(!L2_ack_w && !(L2_ack_true_tmp.read().val)){
+				DEBUG_INFO_STREAM("hit from FE2 buffer"<<std::endl);
+				for(int i=0;i<16;i++){
+					//DEBUG_INFO_STREAM(insnLine_toIAB_w.insnSlot[i]<<"\t");
+					DEBUG_INFO_STREAM("0x"<<bufCacheLine.read().dataLine[hitway_w].insnSlot[i]<<"\t");
+				}
+			}else{//hit return from L2
+				DEBUG_INFO_STREAM("hit from L2 return, pc = 0x"<<L2_ack_pc_w<<std::endl);
+				for(int i=0;i<16;i++){
+					DEBUG_INFO_STREAM("0x"<<L2_ack_insn_w.insnSlot[i]<<"\t");
+				}
+			}
+			DEBUG_INFO_STREAM(std::endl);
+		}
+		//DEBUG_INFO_STREAM("L2_ack_true = "<<L2_ack_true.read().val<<std::endl);
+		//DEBUG_INFO_STREAM("L2_ack_true_tmp = "<<L2_ack_true_tmp<<std::endl);
+
+		DEBUG_INFO_STREAM(std::endl);
+		DEBUG_INFO_STREAM("bufCachLine Contens:"<<std::endl);
+		for(int i=0;i<4;i++){
+			for(int j=0;j<16;j++){
+				DEBUG_INFO_STREAM("0x"<<bufCacheLine.read().dataLine[i].insnSlot[j]<<"\t");
+			}
+			DEBUG_INFO_STREAM(std::endl);
+		}
+		DEBUG_INFO_STREAM(std::endl);
+
+	DEBUG_INFO_STREAM("Cycle: "<<local_cycle_L<<std::endl);
+	DEBUG_INFO_STREAM("==========================================="<<std::endl<<std::endl);
+	return;
+}
+
+void icache_module_new::genStimulation()
+{
+	FILE *fp = NULL;
+//	if(!(fp = fopen("input.txt","a+"))){
+//		DEBUG_INFO_STREAM("Warning: can't open input.txt"<<std::endl);
+//		return;
+//	}
+	(fp = fopen("input.txt","a+"));
+	//Out put a line each cycle
+	unsigned int tmp_softCC = local_cycle_L;
+	unsigned int tmp_dspen = dsp_en;
+	unsigned int tmp_pcInitSoft = 0;
+	unsigned int tmp_pcInt = INT_PC;
+	unsigned int tmp_priInt = INT_pri;
+	unsigned int tmp_ExFlush = (exFlush == true)?1:0;
+	unsigned int tmp_priExFlush = exFlushPri;
+	unsigned int tmp_pcExFlush = exFlushPC;
+	unsigned int tmp_isExRETI = (isFlushRETI == true)?1:0;
+	unsigned int tmp_IAB_HALT = (IAB_HALT == true)?1:0;
+	unsigned int tmp_l2_ack = (L2_ack_w == true)?1:0;
+	tmp_l2_ack = tmp_l2_ack & dsp_en;		//This signal only last for 1 cycle.    2014-06-30
+	//unsigned int tmp_l2_ack = (L2_ack_true.read() == true)?1:0;
+	unsigned int tmp_roCJMP = ro_CJMP;		//2014-07-02
+	unsigned int tmp_roLC[4];			//2014-07-02
+	for(int i=0;i<4;i++){
+		tmp_roLC[i] = ro_LC[i];
+	}
+	unsigned int tmp_l2_ack_pc = L2_ack_pc_w;
+	unsigned int tmp_l2_inst[16];
+	for(int i=0;i<16;i++){
+		tmp_l2_inst[i] = L2_ack_insn_w.insnSlot[i];
+	}
+	unsigned int tmp_imme_wr=0;
+	unsigned int tmp_imme_wAddr[4]={0,0,0,0};
+	unsigned int tmp_imme_wData[4]={0,0,0,0};
+	for(int i=0;i<4;i++){
+		if(imme_wr[i]){
+			tmp_imme_wr |= (0x1<<i);
+		}
+		tmp_imme_wAddr[i] = imme_wAddr[i];
+		tmp_imme_wData[i] = imme_wData[i];
+	}
+
+	fprintf(fp, "%x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x\n",
+			tmp_softCC,
+			tmp_dspen,
+			tmp_pcInitSoft,
+			tmp_pcInt,
+			tmp_priInt,
+			tmp_ExFlush,
+			tmp_pcExFlush,
+			tmp_priExFlush,
+			tmp_isExRETI,
+			tmp_IAB_HALT,
+			tmp_roCJMP,
+			tmp_roLC[0],
+			tmp_roLC[1],
+			tmp_roLC[2],
+			tmp_roLC[3],
+			tmp_l2_ack,
+			tmp_l2_ack_pc,
+			tmp_l2_inst[0],
+			tmp_l2_inst[1],
+			tmp_l2_inst[2],
+			tmp_l2_inst[3],
+			tmp_l2_inst[4],
+			tmp_l2_inst[5],
+			tmp_l2_inst[6],
+			tmp_l2_inst[7],
+			tmp_l2_inst[8],
+			tmp_l2_inst[9],
+			tmp_l2_inst[10],
+			tmp_l2_inst[11],
+			tmp_l2_inst[12],
+			tmp_l2_inst[13],
+			tmp_l2_inst[14],
+			tmp_l2_inst[15],
+			tmp_imme_wr,
+			tmp_imme_wAddr[0],
+			tmp_imme_wAddr[1],
+			tmp_imme_wAddr[2],
+			tmp_imme_wAddr[3],
+			tmp_imme_wData[0],
+			tmp_imme_wData[1],
+			tmp_imme_wData[2],
+			tmp_imme_wData[3]
+			);
+	fclose(fp);
+	return;
+}
+
+void icache_module_new::genOutputRef()
+{
+	FILE *fp = NULL;
+//	if(!(fp = fopen("output.txt","a+"))){
+//		DEBUG_INFO_STREAM("Warning: can't open output.txt"<<std::endl);
+//		return;
+//	}
+	(fp = fopen("output.txt","a+"));
+	//Out put a line each cycle
+	unsigned int tmp_tbCC = local_cycle_L;
+	unsigned int tmp_IABLaunchEn = submitToIAB_w;//((hitFE2_w & !IAB_HALT) == true) ?1:0  ;
+	unsigned int tmp_IABLaunchPC = PCFE2.read();
+	unsigned int tmp_IABLaunchPri = priFE2.read();
+	unsigned int tmp_IABLaunchB = iab_launchB_maks;
+	unsigned int tmp_IABLaunchInst[16];
+
+
+
+
+
+
+	for(int i=0;i<16;i++){
+		tmp_IABLaunchInst[i] = insnLine_toIAB_w.insnSlot[i];
+	}
+if(dsp_en && (tmp_IABLaunchEn == 1)){
+	fprintf(fp, "0x%08x  0x%x  0x%08x  0x%02x  0x%04x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x  0x%08x\n",
+			tmp_tbCC,
+			tmp_IABLaunchEn,
+			tmp_IABLaunchPC,
+			tmp_IABLaunchPri,
+			tmp_IABLaunchB,
+			tmp_IABLaunchInst[0],
+			tmp_IABLaunchInst[1],
+			tmp_IABLaunchInst[2],
+			tmp_IABLaunchInst[3],
+			tmp_IABLaunchInst[4],
+			tmp_IABLaunchInst[5],
+			tmp_IABLaunchInst[6],
+			tmp_IABLaunchInst[7],
+			tmp_IABLaunchInst[8],
+			tmp_IABLaunchInst[9],
+			tmp_IABLaunchInst[10],
+			tmp_IABLaunchInst[11],
+			tmp_IABLaunchInst[12],
+			tmp_IABLaunchInst[13],
+			tmp_IABLaunchInst[14],
+			tmp_IABLaunchInst[15]
+
+			);
+}
+	fclose(fp);
+	return;
+}
+
+
+void icache_module_new::dumpIcacheRam()
+{
+	FILE *fp = NULL;
+
+	(fp = fopen("dumpcache.dat", "w"));
+	for(int bank_idx=0;bank_idx<4;bank_idx++){
+		fprintf(fp,"Bank#%d\n",bank_idx);
+		for (int i=0;i<128;i++)
+		{
+			fprintf(fp,"[%8x]\n",i);
+			for(int j=0;j<4;j++){
+				for(int k=0; k<16; k++){
+					fprintf(fp, "0x%8x ", ICACHE_RAM.cacheMem[bank_idx][i].read().dataLine[j].insnSlot[k]);
+				}
+				fprintf(fp,"\n");
+			}
+		}
+	}
+	fclose(fp);
+	return;
+}
+
+
+DSPU32 icache_module_new::GSignExtend(DSPU32 p_u32Src, int p_intSrcLen)
+{
+	DSPU32 u32Rtn = 0xFFFFFFFF;
+	DSPU32 u32Temp;
+
+	if (p_intSrcLen < 2 || p_intSrcLen > 32)
+	{
+		return u32Rtn;
+	}
+
+	u32Temp = (p_u32Src >> (p_intSrcLen - 1)) & 0x1;
+	if ( u32Temp == 0 )
+	{
+		u32Rtn = ~(u32Rtn << p_intSrcLen);
+		u32Rtn = u32Rtn & p_u32Src;
+	}
+	else
+	{
+		u32Rtn = (u32Rtn << p_intSrcLen) | p_u32Src;
+	}
+
+	return u32Rtn;
+}
+
+DSPU32 icache_module_new::ExtractBinStr(DSPU32 p_u32BinStr, DSPU32 p_u32StartBit, DSPU32 p_u32BitLen)
+{
+	DSPU32 u32Mask = 0xFFFFFFFF;
+
+//	if (p_u32StartBit > 31) // 0 ~ 31 is valid
+//	{
+//		return  -1;
+//	}
+//
+//	if ((p_u32BitLen > 32) || (p_u32BitLen == 0)) // 1 ~ 32 is valid
+//	{
+//		return -1;
+//	}
+	assert(!(p_u32StartBit > 31));
+	assert((!(p_u32BitLen > 32) || (p_u32BitLen == 0)));
+
+	p_u32BinStr = p_u32BinStr >> p_u32StartBit;
+	u32Mask = u32Mask >> (32 - p_u32BitLen);
+
+	return (p_u32BinStr & u32Mask);
+}
+
+bool icache_module_new::isAlignTo16(DSPU32 PC)
+{
+	bool ret = true;
+	if(PC%16 !=0){
+		ret =false;
+	}
+	return ret;
+}
+
+bool icache_module_new::isSecondWordInDW(unsigned int insn_word,bool *isHead)
+{
+	*isHead = (ExtractBinStr(insn_word,31,1)==1) ;
+	if(ExtractBinStr(insn_word,25,2)==2){		//High word in a DW.( 00 01-single word, 10-high word, 11-low word)
+		return true;
+	}else{
+		return false;
+	}
+}
+
+bool icache_module_new::isEndOfLine(unsigned int idx){
+	if(idx >=16)return false;
+	if((hitFE2Inst_w.insnSlot[idx] & 0x80000000) != 0){
+		return true;
+	}
+	else
+		return false;
+}
+
+bool icache_module_new::isRetInsn(unsigned int idx)
+{
+	if((hitFE2Inst_w.insnSlot[idx] & 0x7fffffff) == 0x440000){//RET: 0x00440000
+		return true;
+	}
+	else
+		return false;
+}
+
+bool icache_module_new::isBNInsn(unsigned int idx)
+{
+	if(((hitFE2Inst_w.insnSlot[idx] & 0x7ffe0000)>> 17) == 0x34){	//BN: 0b0000,0000,0110,100x,xxxx,xxxx,xxxx,xxxx
+		return true;
+	}else
+		return false;
+}
+
+bool icache_module_new::isDoubleInsn(unsigned int idx)
+{
+	unsigned int word_1 = hitFE2Inst_w.insnSlot[idx];
+	unsigned int word_0 = hitFE2Inst_w.insnSlot[idx+1];
+
+	if(((word_0 & 0x06000000) == 0x04000000) && ( (word_1&0x06000000) == 0x06000000)){//Double word or not depend on [26..25]
+		return true;
+	}
+	else
+		return false;
+}
+
+bool icache_module_new::predTaken(unsigned int bpb_value)
+{
+	if((bpb_value == 0) || (bpb_value ==1))
+		return false;
+	else
+		return true;
+}
+
+bool icache_module_new::isBranchInsn(unsigned int idx)
+{
+	bool ret=false;
+	if(isRetInsn(idx)|| isBNInsn(idx)){	//SW instruction branch: RET, BN
+		ret = true;
+	}
+	if((idx<15)&&(isDoubleInsn(idx))){	//DW instruction: D6, D7(part), D9, D10, D11, D14
+		unsigned int opcode = ((hitFE2Inst_w.insnSlot[idx+1]) & 0x01e00000 ) >> 21;
+		if(opcode == 6){
+			ret = true;
+		}
+		if((opcode == 7) && (ExtractBinStr(hitFE2Inst_w.insnSlot[idx+1],18,1) == 0)){
+			ret = true;
+		}
+		if((opcode == 9) || (opcode == 10) || (opcode == 11) || (opcode == 14)){
+			ret = true;
+		}
+	}//if DW
+	return ret;
+}
+
+unsigned int icache_module_new::pickVictimLine()
+{
+	unsigned int B0,B1,B2;
+	B0= ExtractBinStr(bufCacheLine.read().tagLine.lru,2,1);
+	B1= ExtractBinStr(bufCacheLine.read().tagLine.lru,1,1);
+	B2= ExtractBinStr(bufCacheLine.read().tagLine.lru,0,1);
+	unsigned int V[4];
+	for(int i=0;i<4;i++){
+		V[i]= ExtractBinStr(bufCacheLine.read().tagLine.valid[i],0,1);
+		if(V[i] == 0){
+			return i;
+		}
+	}
+	//V[0..3] all valid, using LRU bit B0~3 to pick victim
+	if((B0 == 0) && (B1 == 0)){
+		return 0;
+	}
+	if((B0 == 0) && (B1 == 1)){
+		return 1;
+	}
+	if((B0 == 1) && (B2 == 0)){
+		return 2;
+	}
+	if((B0 == 1) && (B2 == 1)){
+		return 3;
+	}
+	return 0;
+}
+
+double icache_module_new::Utilization()
+{
+	double ret = 0.0;
+	ICACHE_RAM.getUtilization(&ret);
+	return ret;
+}
+
+double icache_module_new::MissRate()
+{
+	double ret = (double)(ICMCNT.read())/ICACNT.read();
+	DEBUG_INFO_STREAM("ICMCNT = "<<ICMCNT.read()<<" ICACNT = "<<ICACNT.read()<<std::endl);
+	return ret;
+}
+
+void icache_module_new::NotifyImmeWr(bool wr_en[4],unsigned int wr_addr[4],unsigned int wr_data[4])
+{
+	for(int i=0;i<4;i++){
+		imme_wr[i] = wr_en[i];
+		imme_wAddr[i] = wr_addr[i];
+		imme_wData[i] = wr_data[i];
+	}
+	return;
+}
+
+void icache_module_new::ImmeWrReg()
+{
+	for(int i=0;i<4;i++){// 4 write immediate channels
+		if(imme_wr[i]){//enable write
+			WrCacheReg(imme_wAddr[i],imme_wData[i]);
+		}
+	}
+}
+#ifdef SC_ICACHE
+tlm::tlm_sync_enum
+icache_module_new::nb_transport_bw(
+				tlm::tlm_generic_payload &trans,
+				tlm::tlm_phase &phase,
+				sc_core::sc_time &t)
+{
+	if(phase == BEGIN_RESP_CACHE_LINE)
+	{
+		//Recieved a response from mmac
+		process_RESPONSE(trans);
+		phase = END_RESP_CACHE_LINE;
+		//Last transcation is finished 
+		//m_last_trans_finished = true;
+	}
+#ifdef TLM_SHARED_SRAM
+	else if(phase == BEGIN_RESP_CACHE_LINE_SHARED_SRAM)
+	{
+		process_RESPONSE_from_Shared_SRAM(trans);
+		phase = END_RESP_CACHE_LINE_SHARED_SRAM;
+	}
+#endif
+	else
+	{
+		cout<<"ICACHE recieved a unknown phase on the backward path"<<endl;
+	}
+	return tlm::TLM_COMPLETED;
+}
+#ifdef TLM_SHARED_SRAM
+void icache_module_new::send_REQUEST_to_Shared_SRAM(bool irq_plus,bool p_dsp_en)
+{
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"send_REQUEST_to_Shared_SRAM addr = 0x%x,irq_plus = 0x%x, dsp_en = %d\n",PCFE1.read(),irq_plus,p_dsp_en);
+	fclose(fp);*/
+
+
+	//cout<<"["<<sc_time_stamp()<<"]";
+	//printf("Send_Request to Share_SRAM addr = 0x%x\n",PCFE1.read());
+	//Build a new transaction with PCFE2
+	tlm::tlm_generic_payload pld;
+	tlm::tlm_generic_payload *p_trans = &pld;//new tlm::tlm_generic_payload;;
+	insnLine512 *p_cache_line_buf = new insnLine512;
+	p_cache_line_buf->reset();
+
+	p_trans->set_address	(	p_dsp_en ? PCFE1.read() : PCFE2.read()		);		//Address
+	p_trans->set_command	(	tlm::TLM_READ_COMMAND	);		//A read command
+	p_trans->set_data_length(	sizeof(insnLine512)	);	
+	p_trans->set_byte_enable_ptr(	0			);		//unused
+	p_trans->set_streaming_width(	sizeof(insnLine512)	);		//unused
+	p_trans->set_data_ptr(	(unsigned char *)(p_cache_line_buf)	);		//data pointer
+	p_trans->set_response_status(	tlm::TLM_INCOMPLETE_RESPONSE	);	//Clear the response status
+
+	//Add an extension to label this transaction
+	CoreID_extension *id_extension = new CoreID_extension;
+	p_trans->set_extension(id_extension);
+	id_extension->core_id = m_core_id;
+	
+	//Send request through nb_transport_fw() function
+	tlm::tlm_phase phase;
+	if(irq_plus){
+		phase = BEGIN_REQ_CACHE_LINE_SHARED_SRAM_UP;
+	}else{
+		phase = BEGIN_REQ_CACHE_LINE_SHARED_SRAM_DOWN;
+	}
+	sc_core::sc_time delay = SC_ZERO_TIME;
+	tlm::tlm_sync_enum return_value = init_socket_to_shared_sram->nb_transport_fw( *p_trans, phase, delay );
+
+	//Check for return value
+	switch(return_value)
+	{
+		//Target return UPDATED means the request is taken,
+		//Wait for the target to send BEGIN_RESP_CACHE_LINE from the backward path
+		case tlm::TLM_UPDATED:
+			{
+				if( phase == END_REQ_CACHE_LINE ){
+					//<wait for delay>
+				}
+				break;
+			}
+		case tlm::TLM_COMPLETED:
+		case tlm::TLM_ACCEPTED:
+		default:
+			{
+				//Not defined
+				cout<<"Recieved unexpected return value"<<endl;
+				break;
+			}
+	}	
+
+	delete p_cache_line_buf;
+	return;
+}
+#endif
+void icache_module_new::send_REQUEST()
+{
+	//Build a new transaction with L2_irq_pc_w
+	tlm::tlm_generic_payload *p_trans = new tlm::tlm_generic_payload;
+	insnLine512 *p_cache_line_buf = new insnLine512;
+	p_cache_line_buf->reset();
+
+	p_trans->set_address	(	L2_irq_pc_w		);		//Address
+	p_trans->set_command	(	tlm::TLM_READ_COMMAND	);		//A read command
+	p_trans->set_data_length(	sizeof(insnLine512)	);	
+	p_trans->set_byte_enable_ptr(	0			);		//unused
+	p_trans->set_streaming_width(	sizeof(insnLine512)	);		//unused
+	p_trans->set_data_ptr(	(unsigned char *)(p_cache_line_buf)	);		//data pointer
+	p_trans->set_response_status(	tlm::TLM_INCOMPLETE_RESPONSE	);	//Clear the response status
+
+	//Add an extension to label this transaction
+	CoreID_extension *id_extension = new CoreID_extension;
+	p_trans->set_extension(id_extension);
+	id_extension->core_id = m_core_id;
+	
+	//Send request through nb_transport_fw() function
+	tlm::tlm_phase phase = BEGIN_REQ_CACHE_LINE;
+	sc_core::sc_time delay = SC_ZERO_TIME;
+	tlm::tlm_sync_enum return_value = init_socket_to_sram->nb_transport_fw( *p_trans, phase, delay );
+
+	//Check for return value
+	switch(return_value)
+	{
+		//Target return UPDATED means the request is taken,
+		//Wait for the target to send BEGIN_RESP_CACHE_LINE from the backward path
+		case tlm::TLM_UPDATED:
+			{
+				if( phase == END_REQ_CACHE_LINE ){
+					//<wait for delay>
+				}
+				break;
+			}
+		case tlm::TLM_COMPLETED:
+		case tlm::TLM_ACCEPTED:
+		default:
+			{
+				//Not defined
+				cout<<"Recieved unexpected return value"<<endl;
+				break;
+			}
+	}
+
+		
+	return;
+}
+
+#ifdef TLM_SHARED_SRAM
+void icache_module_new::process_RESPONSE_from_Shared_SRAM(tlm::tlm_generic_payload &gp)
+{
+
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"shared_sram response: addr = 0x%x\n",(unsigned int)gp.get_address());
+	fclose(fp);*/
+
+
+	unsigned int address = (unsigned int )gp.get_address();
+	tlm::tlm_command command = gp.get_command();
+	insnLine512 * data = (insnLine512 *)gp.get_data_ptr();
+	unsigned int length = gp.get_data_length();
+
+	if(gp.get_response_status() != tlm::TLM_OK_RESPONSE){
+		cout<<"Received a bad response "<<gp.get_response_status()<<" from target"<<endl;
+		return;
+	}
+	
+	if((command != tlm::TLM_READ_COMMAND)||(length != sizeof(insnLine512))){
+		cout<<"Recieved a unknown transaction"<<endl;
+		return;
+	}
+	
+	//Print transaction has been recieved
+	/*cout<<"["<<sc_time_stamp()<<"] Recieved a response of address = "<<address<<endl;
+	cout<<"InsnLine = [";
+	for(int i=0;i<16;i++){
+		cout<<"0x"<<hex<<data->insnSlot[i]<<",";
+	}
+	cout<<"]"<<endl;
+	*/
+	
+	//Write input signals buffer
+	//share_sram_ack_pc_reg.write(address);
+	//share_sram_ack_inst_reg.write(*data);
+	share_sram_ack_inst  = *data;
+	share_sram_ack_pc = address;
+	//last transaction is finished
+	//release all allocated memory
+	CoreID_extension *id_extension;
+	gp.get_extension(id_extension);
+	gp.release_extension(id_extension);
+	delete data;
+	tlm::tlm_generic_payload * p_gp = &gp;
+	delete p_gp;
+	
+	
+	return;
+}
+
+#endif
+void icache_module_new::process_RESPONSE(tlm::tlm_generic_payload &gp)
+{
+	unsigned int address = (unsigned int )gp.get_address();
+	tlm::tlm_command command = gp.get_command();
+	insnLine512 * data = (insnLine512 *)gp.get_data_ptr();
+	unsigned int length = gp.get_data_length();
+
+	if(gp.get_response_status() != tlm::TLM_OK_RESPONSE){
+		cout<<"Received a bad response "<<gp.get_response_status()<<" from target"<<endl;
+		return;
+	}
+	
+	if((command != tlm::TLM_READ_COMMAND)||(length != sizeof(insnLine512))){
+		cout<<"Recieved a unknown transaction"<<endl;
+		return;
+	}
+	
+	//Print transaction has been recieved
+	/*cout<<"["<<sc_time_stamp()<<"] Recieved a response of address = "<<address<<endl;
+	cout<<"InsnLine = [";
+	for(int i=0;i<16;i++){
+		cout<<"0x"<<hex<<data->insnSlot[i]<<",";
+	}
+	cout<<"]"<<endl;
+	*/
+	
+	//Write input signals buffer
+	L2_ack_reg.write(true);				//only last one cycle
+	L2_ack_pc_reg.write(address);
+	L2_ack_insn_reg.write(*data);
+
+	//last transaction is finished
+	//release all allocated memory
+	CoreID_extension *id_extension;
+	gp.get_extension(id_extension);
+	gp.release_extension(id_extension);
+	delete data;
+	tlm::tlm_generic_payload * p_gp = &gp;
+	delete p_gp;
+	
+	
+	return;
+}
+
+
+#endif
+bool icache_module_new::IsCacheBusy()
+{
+	bool tmp_icDMAProc = getBitREG(ICACHE_ICDMA_CON,1) || getBitREG(ICACHE_ICDMA_CON,5);
+	bool tmp_icFlushProc = getBitREG(ICACHE_ICFLUSH_CON,1);
+	bool bolRet = (tmp_icDMAProc || icDMAProc_1d.read().val || tmp_icFlushProc || icFlushProc_1d.read().val);
+	//std::cout << "Cycle: " << local_cycle_L << ", Ret: " << bolRet << std::endl;
+	return bolRet;
+}
+
+void icache_module_new::share_sram_docycle(bool isDSPEn)
+{
+#ifdef TLM_SHARED_SRAM
+
+	dsp_en_reg.write(isDSPEn);
+
+	bool send_irq_to_shared_sram =
+		isFE1_load_w ?																	//sample value of last cycle 
+		(!isFE1BUB.read() && !isFE2B_w
+		&&((PCFE2.read()/16 >= ShareSRAMStart/16) && (PCFE2.read()/16 <= ShareSRAMEnd/16))) :
+	false;
+
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"share_sram_docycle: isDSPEn = %d, send_irq_to_shared_sram = %d, coreID = %d\n",isDSPEn, send_irq_to_shared_sram, m_core_id);
+	fclose(fp);
+	*/
+	
+	if((PCFE2.read()/16 >= ShareSRAMStart/16) && (PCFE2.read()/16 <= ShareSRAMEnd/16)){
+		send_REQUEST_to_Shared_SRAM(dsp_en_reg.read().val ? send_irq_to_shared_sram : false, false);
+		//send_REQUEST_to_Shared_SRAM(dsp_en_reg.read().val && send_irq_to_shared_sram );
+	}
+
+	dsp_en_reg.update();
+	
+#endif
+}
+

@@ -1,0 +1,276 @@
+/*
+ * share_sram.cpp
+ *
+ * Created on: Jun 4, 2015
+ * Author:		liugu
+ */
+#include "share_sram.h"
+#include "icache_memory.h"
+using namespace BWDSP104X;
+
+share_sram::share_sram(sc_module_name module_name)
+	:name(module_name),
+	share_sram_low_address(SHARE_SRAM_DEFAULT_LOW_ADDRESS),
+	share_sram_size(SHARE_SRAM_DEFAULT_SIZE)
+{
+	for(int i=0;i<2;i++){
+		ack_pc[i] = FALSE_ADDR;
+		ack_pc_next[i] = FALSE_ADDR;
+		ack_counter[i] = 0;
+		/*Socket binding*/
+		target_socket_from_icache[i].bind(*this);
+	}
+
+	
+
+	/*Clock tick function initializing*/
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+
+	/*Allocate space for memory*/
+	try{
+		memory = new unsigned int[share_sram_size];
+	}catch(std::bad_alloc err){
+		DEBUG_out<<"ERROR"<<err.what()<<": Bad allocation for Share SRAM buffer"<<endl;
+	}
+}
+
+share_sram::~share_sram()
+{
+	/*Free memory space*/
+	delete memory;
+}
+
+void share_sram::reset()
+{
+	for(int i=0;i<2;i++){
+		ack_pc[i] = FALSE_ADDR;
+		ack_pc_next[i] = FALSE_ADDR;
+		ack_counter[i] = 1;
+		ack_pc_ready[i] = false;
+		ack_pc_next_ready[i] = false;
+		irq_pc[i] = FALSE_ADDR;
+		irq_plus_en[i] = false;
+	}
+	memset(memory, 0x0, share_sram_size* sizeof(unsigned int));
+}
+
+/*
+ * nb_transport_fw():
+ * Receving payloads from icache
+ */
+tlm_sync_enum share_sram::nb_transport_fw(
+		tlm_generic_payload &trans,
+		tlm_phase &phase,
+		sc_time &t){
+	unsigned int request_addr = (unsigned int)trans.get_address();
+	if((request_addr < share_sram_low_address)||(request_addr > (share_sram_low_address + share_sram_size))){
+			DEBUG_out<<"ERROR: access Shared SRAM address 0x"<<hex<<request_addr<<" out of range"<<endl;
+			return TLM_ACCEPTED;
+	}
+	//DEBUG_out<<"EVENT:access Shared SRAM address 0x"<<hex<<request_addr<<endl;
+	unsigned int aligned_request_addr = request_addr &0xfffffff0;
+	
+	CoreID_extension * p_ext;
+	trans.get_extension(p_ext);
+	unsigned int core_id = p_ext->core_id;
+	
+	if(phase == BEGIN_REQ_CACHE_LINE_SHARED_SRAM_UP){
+		irq_pc[core_id] = aligned_request_addr;
+		irq_plus_en[core_id] = true;
+		
+		//DEBUG_out<<"Request for PC = 0x"<<hex<<request_addr<<" UP"<<endl;
+		
+		if(ack_counter[core_id] == 1){			//pipeline status: pc+30,pc+20,pc+10,pc
+			//send pc+10 this cycle
+			send_cache_line(ack_pc_next[core_id],core_id);
+		}else if(ack_counter[core_id] == 2){		//pipeline status: pc+20,pc+10,pc, --
+			//send pc this cycle
+			send_cache_line(ack_pc[core_id],core_id);
+		}else{																			//pipeline status: pc,...,--,--
+			send_cache_line(FALSE_ADDR,core_id);
+		}
+		
+		//ack_pc[core_id] = aligned_request_addr;
+		//ack_pc_next[core_id] = aligned_request_addr + 0x10;
+		
+	}else if(phase == BEGIN_REQ_CACHE_LINE_SHARED_SRAM_DOWN){
+		irq_plus_en[core_id] = false;
+		irq_pc[core_id] = aligned_request_addr;
+		
+		//DEBUG_out<<"Request for PC = 0x"<<hex<<request_addr<<" DOWN"<<endl;
+		
+		if(ack_counter[core_id] == 1){
+			//send pc this cycle
+			send_cache_line(ack_pc[core_id],core_id);
+		}else{
+			send_cache_line(FALSE_ADDR,core_id);
+		}
+		
+	}else{
+			return TLM_ACCEPTED;
+	}
+		
+		
+	phase = END_REQ_CACHE_LINE_SHARED_SRAM;	
+	return  TLM_UPDATED;
+}
+
+void share_sram::send_cache_line(unsigned int addr,unsigned int core_id)
+{
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"send_cache_line 0x%x\n",addr);
+	fclose(fp);*/
+
+
+	//DEBUG_out<<"Send cache line to core "<<core_id<<" with addr = 0x"<<hex<<addr<<endl;
+	//DEBUG_out<<" counter = "<<ack_counter[0]<<" ack_pc = 0x"<<ack_pc[core_id]<<" ack_pc_next = 0x"<<ack_pc_next[core_id]<<endl;
+	bool is_false_addr = (addr == FALSE_ADDR) ? true : false;
+
+	if(!is_false_addr){
+		assert((addr>=share_sram_low_address) && (addr < share_sram_low_address+share_sram_size));
+		assert(addr % 16 ==0);
+		//DEBUG_out<<"Send cache line to core "<<core_id<<" with addr = 0x"<<hex<<addr<<" content:";
+			
+		
+	}
+	if(is_false_addr){
+		//DEBUG_out<<"Send cache line to core"<<core_id<<" with false addr"<<" content:";
+	}
+
+	tlm_generic_payload * p_trans = new tlm_generic_payload;
+	insnLine512 * data = new insnLine512;
+	if(!is_false_addr){
+		for(int i=0;i<16;i++){
+			data->insnSlot[i] = memory[addr + i - share_sram_low_address];
+			//cerr<<"0x"<<hex<<memory[addr + i - share_sram_low_address]<<" ";
+		}
+		//cerr<<"\n";
+	}else{
+		(*data).reset();
+		for(int i=0;i<16;i++){
+			//cerr<<"0x0"<<" ";
+		}
+		
+		//cerr<<"\n";
+	}
+
+	p_trans->set_data_ptr		(	(unsigned char *)data	);
+	p_trans->set_address		(	addr				);
+	p_trans->set_command		(	tlm::TLM_READ_COMMAND	);
+	p_trans->set_data_length	(	sizeof(insnLine512)	);
+	p_trans->set_byte_enable_ptr(	0					);
+	p_trans->set_streaming_width(	sizeof(insnLine512)	);
+	p_trans->set_response_status(	TLM_OK_RESPONSE		);
+
+	CoreID_extension *id_extension = new CoreID_extension;
+	p_trans->set_extension(id_extension);
+	id_extension->core_id = core_id;
+
+
+	tlm_phase phase_new = BEGIN_RESP_CACHE_LINE_SHARED_SRAM;
+	sc_time delay = SC_ZERO_TIME;
+
+	tlm_sync_enum status = TLM_COMPLETED;
+	status = target_socket_from_icache[core_id]->nb_transport_bw(*p_trans,phase_new,delay);
+	
+	switch(status){
+		case TLM_COMPLETED:
+		{
+			return;
+			break;
+		}
+		case TLM_ACCEPTED:
+		case TLM_UPDATED:
+		default:
+		{
+			break;
+		}
+	}
+	
+}
+
+/*
+ * clock_tick():
+ * Main function
+ */
+void share_sram::clock_tick(){
+	
+	for(int core_id = 0;core_id <2 ;core_id++){
+		if(irq_plus_en[core_id]){			//receive a request
+			if(ack_counter[core_id] == 1){
+				if(irq_pc[core_id] == ack_pc[core_id]){//hit ack_pc in the pipeline,pipeline stop
+					//do nothing
+				}else if(irq_pc[core_id] == ack_pc_next[core_id]){//hit ack_pc_next, pipeline goes					
+					ack_pc[core_id] = irq_pc[core_id];
+					ack_pc_next[core_id] = irq_pc[core_id]+0x10;
+				}else{	//not hit in pipeline, flush
+					//printf("1:\n");
+					ack_counter[core_id] = PIPELINE_DEPTH;
+					ack_pc[core_id] = irq_pc[core_id];
+					ack_pc_next[core_id] = irq_pc[core_id]+0x10;
+				}
+			}else if(ack_counter[core_id] == 2){
+				if(irq_pc[core_id] == ack_pc[core_id]){	//hit in the pipeline, pipeline goes down
+					ack_counter[core_id] --;
+					ack_pc[core_id] = irq_pc[core_id];
+					ack_pc_next[core_id] = irq_pc[core_id]+0x10;
+				}else{			//not hit in the pipeline, flush
+					//printf("2:\n");
+					ack_counter[core_id] = PIPELINE_DEPTH;
+					ack_pc[core_id] = irq_pc[core_id];
+					ack_pc_next[core_id] = irq_pc[core_id]+0x10;
+				}
+			}else{		//ack_counter > 2, flush
+				//printf("3:\n");
+				ack_counter[core_id] = PIPELINE_DEPTH;
+				ack_pc[core_id] = irq_pc[core_id];
+				ack_pc_next[core_id] = irq_pc[core_id]+0x10;
+			}
+			
+			
+			
+		}else{			//irq_plus_en == 0
+			if(ack_counter[core_id]>1){
+				ack_counter[core_id] --;
+			}
+		}
+		
+		
+	}
+
+	/*FILE * fp = fopen("tlm.txt","at");
+	fprintf(fp,"share_sram clock_tick: ack_counter[0]= %d,ack_pc[0] = 0x%x, irq_pc[0] = 0x%x,ack_pc_next[0] = 0x%x\n"
+		,ack_counter[0],ack_pc[0],irq_pc[0],ack_pc_next[0]);
+	fclose(fp);*/
+
+	
+	
+}
+
+/*JTAG Interface*/
+bool share_sram::read_word(unsigned int addr,unsigned int &value)
+{
+	bool ret = false;
+	//Check for address
+	if((addr < share_sram_low_address)||(addr>(share_sram_low_address + share_sram_size))){
+		DEBUG_out<<"ERROR: access share_sram address 0x"<<hex<<addr<<" out of range"<<endl;
+		return false;
+	}
+	value = memory[addr-share_sram_low_address];
+	return true;
+}
+
+bool share_sram::write_word(unsigned int addr,const unsigned int value)
+{
+	bool ret = false;
+	//Check for address
+	if((addr < share_sram_low_address)||(addr>(share_sram_low_address + share_sram_size))){
+		DEBUG_out<<"ERROR: access share_sram address 0x"<<hex<<addr<<" out of range"<<endl;
+		return false;
+	}
+	memory[addr-share_sram_low_address] = value;
+	//DEBUG_out<<"Write to share_sram address 0x"<<hex<<addr<<" value = "<<value<<endl;
+	return true;
+}

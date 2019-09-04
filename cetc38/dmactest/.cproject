@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?fileVersion 4.0.0?>
+
+<cproject storage_type_id="org.eclipse.cdt.core.XmlProjectDescriptionStorage">
+	<storageModule moduleId="org.eclipse.cdt.core.settings">
+		<cconfiguration id="bwdsp104.toolchain.assembly.executable.configuration.debug.255906770">
+			<storageModule buildSystemId="org.eclipse.cdt.managedbuilder.core.configurationDataProvider" id="bwdsp104.toolchain.assembly.executable.configuration.debug.255906770" moduleId="org.eclipse.cdt.core.settings" name="Debug">
+				<externalSettings/>
+				<extensions>
+					<extension id="org.eclipse.cdt.core.ELF" point="org.eclipse.cdt.core.BinaryParser"/>
+					<extension id="org.eclipse.cdt.core.MakeErrorParser" point="org.eclipse.cdt.core.ErrorParser"/>
+					<extension id="org.eclipse.cdt.core.GCCErrorParser" point="org.eclipse.cdt.core.ErrorParser"/>
+				</extensions>
+			</storageModule>
+			<storageModule moduleId="cdtBuildSystem" version="4.0.0">
+				<configuration artifactExtension="out" artifactName="${ProjName}" buildProperties="" description="" id="bwdsp104.toolchain.assembly.executable.configuration.debug.255906770" name="Debug" parent="bwdsp104.toolchain.assembly.executable.configuration.debug">
+					<folderInfo id="bwdsp104.toolchain.assembly.executable.configuration.debug.255906770." name="/" resourcePath="">
+						<toolChain id="occ.bwdsp104.toolchain.configuration.asm.debug.1183963816" name="Open64 Tool-chain" superClass="occ.bwdsp104.toolchain.configuration.asm.debug">
+							<targetPlatform archList="BWDSP1042" binaryParser="org.eclipse.cdt.core.ELF" id="occ.toolchain.targetplatform.1042.1122368378" isAbstract="true" name="bwdsp1042" superClass="occ.toolchain.targetplatform.1042"/>
+							<builder buildPath="${workspace_loc:/dmactest/Debug}" id="occ.toolchain.debug.toolchain.builder.1042.78931764" managedBuildOn="true" name="make.Debug" superClass="occ.toolchain.debug.toolchain.builder.1042"/>
+							<tool id="occ.toolchain.compiler.1042.2134860970" name="Compiler" superClass="occ.toolchain.compiler.1042">
+								<inputType id="occ.toolchain.compiler.input.1042.626830063" name="Compiler Input" superClass="occ.toolchain.compiler.input.1042"/>
+							</tool>
+							<tool id="occ.toolchain.asm.linker.1042.1580104186" name="Linker" superClass="occ.toolchain.asm.linker.1042"/>
+						</toolChain>
+					</folderInfo>
+				</configuration>
+			</storageModule>
+			<storageModule moduleId="org.eclipse.cdt.core.externalSettings"/>
+		</cconfiguration>
+	</storageModule>
+	<storageModule moduleId="cdtBuildSystem" version="4.0.0">
+		<project id="dmactest.bwdsp104.toolchain.assembly.executable.599815110" name="ASM Executable" projectType="bwdsp104.toolchain.assembly.executable"/>
+	</storageModule>
+	<storageModule moduleId="scannerConfiguration">
+		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
+	</storageModule>
+</cproject>

@@ -1,0 +1,51 @@
+#include "APB_BUS_MODULE.h"
+
+
+
+APB_BUS_MODULE::APB_BUS_MODULE(sc_module_name mn)
+
+{
+
+		//init_socket2bridge.bind(*this);
+		targ_socket2bridge.bind(*this);
+
+		init_socket2ddr0.bind(*this);
+		//targ_socket2ddr0.bind(*this);
+
+		init_socket2ddr1.bind(*this);
+		//targ_socket2ddr1.bind(*this);
+
+		init_socket2uart.bind(*this);
+		//targ_socket2uart.bind(*this);
+
+
+
+	SC_METHOD(clock_tick);
+	sensitive<<clk.pos();
+	dont_initialize();
+}
+
+
+tlm::tlm_sync_enum APB_BUS_MODULE::nb_transport_bw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+
+tlm::tlm_sync_enum APB_BUS_MODULE::nb_transport_fw(
+	tlm::tlm_generic_payload &trans,
+	tlm::tlm_phase &phase,
+	sc_core::sc_time &t){
+		return tlm::TLM_UPDATED;
+
+}
+
+
+void APB_BUS_MODULE::clock_tick(){
+
+
+}

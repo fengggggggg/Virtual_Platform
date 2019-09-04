@@ -1,0 +1,663 @@
+
+#include <string>
+#include <sstream>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <vector>
+//#include "dlfcn.h"
+#include "AlgoriLib/dsptypes.h"
+
+#define SOFILE "/root/CPrj/SOPrj/CreateSO/libmy.so"
+
+using namespace std;
+
+//--------------------------------------------------------------------------
+string Int2Str(int p_intIn);
+int Str2Int(string p_strIn);
+string TrimLeft(string p_strSrc);
+string TrimRight(string p_strSrc);
+string Trim(string p_strSrc);
+//bool WrIRQsFile(string p_strFileName, int *p_intIRQs);
+bool WrNewIRQsFile(string p_strFileName, DSPU64 *p_u64IRQs);
+int HexStr2Int(string p_strIn);
+
+//--------------------------------------------------------------------------
+vector<string> g_svct_on_call;
+vector<string> g_svct_on_ret;
+
+//--------------------------------------------------------------------------
+bool comp_svct_call_ret(string p_strIOPath,  int  p_intType)
+{
+	/*string strLine, strFileName;
+	ifstream ifsFileCall, ifsFileRet;
+	ofstream ofsFile;
+	bool bolIsSame = true;
+	vector<string>::iterator iter;
+
+	g_svct_on_call.clear();
+	g_svct_on_ret.clear();
+
+	//-------------------------------------------------------------------------------------------------------------
+	if (p_bolForLib)
+	{
+		strFileName = p_strIOPath + "/StateOnCall_ForLib.txt";
+		//strFileName = p_strIOPath + "\\StateOnCall.txt";
+	}
+	else
+	{
+		strFileName = p_strIOPath + "/StateOnCall.txt";
+	}
+	
+	ifsFileCall.open(strFileName.c_str(), ios_base::in);
+	if (!ifsFileCall)
+	{
+		//cerr << "comp_svct_call_ret: unable to open file " << strFileName << " for input!\n";
+		return false;
+	}
+
+	while (getline(ifsFileCall, strLine, '\n' ))
+	{
+		g_svct_on_call.push_back(strLine);
+	}
+
+	ifsFileCall.close();
+
+	//-------------------------------------------------------------------------------------------------------------
+	if (p_bolForLib)
+	{
+		strFileName = p_strIOPath + "/StateOnRet_ForLib.txt";
+		//strFileName = p_strIOPath + "\\StateOnRet.txt";
+	}
+	else
+	{
+		strFileName = p_strIOPath + "/StateOnRet.txt";
+	}
+
+	ifsFileRet.open(strFileName.c_str(), ios_base::in);
+	if (!ifsFileRet)
+	{
+		//cerr << "comp_svct_call_ret: unable to open file " << strFileName << " for input!\n";
+		return false;
+	}
+
+	while (getline(ifsFileRet, strLine, '\n' ))
+	{
+		g_svct_on_ret.push_back(strLine);
+	}
+
+	ifsFileRet.close();
+
+	//-------------------------------------------------------------------------------------------------------------
+	if (g_svct_on_call.size() < g_svct_on_ret.size())
+	{
+		bolIsSame = false;
+	}
+
+	while ( !g_svct_on_call.empty() && !g_svct_on_ret.empty() )
+	{
+		if (g_svct_on_call.back() != g_svct_on_ret.back())
+		{
+			bolIsSame = false;
+			break;
+		}
+
+		g_svct_on_call.pop_back();
+		g_svct_on_ret.pop_back();
+	}
+
+	if (bolIsSame)
+	{
+		if (p_bolForLib)
+		{
+			strFileName = p_strIOPath + "/StateOnCall_ForLib.txt";
+			//strFileName = p_strIOPath + "\\StateOnCall.txt";
+		}
+		else
+		{
+			strFileName = p_strIOPath + "/StateOnCall.txt";
+		}
+
+		ofsFile.open(strFileName.c_str(), ios_base::out);
+		if (!ofsFile)
+		{
+			//cerr << "comp_svct_call_ret: unable to open file " << strFileName << " for output!\n";
+			return false;
+		}
+
+		for (iter = g_svct_on_call.begin(); iter != g_svct_on_call.end(); ++iter)
+		{
+			ofsFile << *iter << endl;
+		}
+
+		ofsFile.close();
+	}
+
+	return bolIsSame;
+	*/
+	string strLine, strFileName;
+	ifstream ifsFileCall, ifsFileRet;
+	ofstream ofsFile;
+	bool bolIsSame = true;
+	vector<string>::iterator iter;
+
+	g_svct_on_call.clear();
+	g_svct_on_ret.clear();
+
+	//-------------------------------------------------------------------------------------------------------------
+	if ( p_intType == 1 )
+	{
+		strFileName = p_strIOPath + "/StateOnCall_ForLib.txt";
+	}
+	else if ( p_intType == 2 )
+	{
+		strFileName = p_strIOPath + "/StateOnCall.txt";
+	}
+	else if ( p_intType == 3 )
+	{
+		strFileName = p_strIOPath + "/StateOnEnterISR.txt";
+	}
+	else
+	{
+		printf("comp_svct_call_ret: error file type, do nothing\n");
+		return false;
+	}
+	
+	ifsFileCall.open(strFileName.c_str(), ios_base::in);
+	if (!ifsFileCall)
+	{
+		//cerr << "comp_svct_call_ret: unable to open file " << strFileName << " for input!\n";
+		return false;
+	}
+
+	while (getline(ifsFileCall, strLine, '\n' ))
+	{
+		g_svct_on_call.push_back(strLine);
+	}
+
+	ifsFileCall.close();
+
+	//-------------------------------------------------------------------------------------------------------------
+	if ( p_intType == 1 )
+	{
+		strFileName = p_strIOPath + "/StateOnRet_ForLib.txt";
+	}
+	else if ( p_intType == 2 )
+	{
+		strFileName = p_strIOPath + "/StateOnRet.txt";
+	}
+	else if ( p_intType == 3 )
+	{
+		strFileName = p_strIOPath + "/StateOnLeaveISR.txt";
+	}
+
+	ifsFileRet.open(strFileName.c_str(), ios_base::in);
+	if (!ifsFileRet)
+	{
+		//cerr << "comp_svct_call_ret: unable to open file " << strFileName << " for input!\n";
+		return false;
+	}
+
+	while (getline(ifsFileRet, strLine, '\n' ))
+	{
+		g_svct_on_ret.push_back(strLine);
+	}
+
+	ifsFileRet.close();
+
+	//-------------------------------------------------------------------------------------------------------------
+	if (g_svct_on_call.size() < g_svct_on_ret.size())
+	{
+		return false;
+	}
+
+	while ( !g_svct_on_call.empty() && !g_svct_on_ret.empty() )
+	{
+		if (g_svct_on_call.back() != g_svct_on_ret.back())
+		{
+			bolIsSame = false;
+			break;
+		}
+
+		g_svct_on_call.pop_back();
+		g_svct_on_ret.pop_back();
+	}
+
+	if (bolIsSame)
+	{
+		if ( p_intType == 1 )
+		{
+			strFileName = p_strIOPath + "/StateOnCall_ForLib.txt";
+		}
+		else if ( p_intType == 2 )
+		{
+			strFileName = p_strIOPath + "/StateOnCall.txt";
+		}
+		else if ( p_intType == 3 )
+		{
+			strFileName = p_strIOPath + "/StateOnEnterISR.txt";
+		}
+
+		ofsFile.open(strFileName.c_str(), ios_base::out);
+		if (!ofsFile)
+		{
+			//cerr << "comp_svct_call_ret: unable to open file " << strFileName << " for output!\n";
+			return false;
+		}
+
+		for (iter = g_svct_on_call.begin(); iter != g_svct_on_call.end(); ++iter)
+		{
+			ofsFile << *iter << endl;
+		}
+
+		ofsFile.close();
+	}
+
+	return bolIsSame;
+}
+
+//--------------------------------------------------------------------------
+int (* mymax)(int arrIn[], int n);
+int (* mymin)(int arrIn[], int n);
+//void * mymax;
+//void * mymin;
+
+void TestDLL()
+{
+/*
+	int arrTest[5];
+
+	arrTest[0] = 1;
+	arrTest[1] = 2;
+	arrTest[2] = 4;
+	arrTest[3] = 5;
+	arrTest[4] = 9;
+
+	void *dp = dlopen(SOFILE, RTLD_LAZY);
+	mymax = (int (*)(int arrIn[], int n))dlsym(dp, "mymax");
+	mymin =  (int (*)(int arrIn[], int n))dlsym(dp, "mymin");
+	printf("Max: %d\n", mymax(arrTest, 5));
+	printf("Min: %d\n", mymin(arrTest, 5));
+	dlclose(dp);
+*/
+}
+
+//--------------------------------------------------------------------------
+string Int2Str(int p_intIn)
+{
+	stringstream strmTemp;
+	string strResult;
+
+	//strmTemp.clear();
+	strmTemp.str("");
+
+	strmTemp << p_intIn;
+	strResult =strmTemp.str();
+	return strResult;
+}
+//--------------------------------------------------------------------------
+int Str2Int(string p_strIn)
+{
+	stringstream strmTemp;
+	int intRtnValue;
+
+	//ToLowerCase(p_strIn);
+	strmTemp.str("");
+
+	strmTemp << p_strIn;
+	strmTemp >> intRtnValue;
+
+	return intRtnValue;
+}
+//--------------------------------------------------------------------------
+DSPU32  HexStr2UInt(string p_strIn)
+{
+	DSPU32  u32RtnValue;
+	string strInput;
+	char chrTemp;
+
+	strInput = Trim(p_strIn);
+	u32RtnValue = 0;
+	for (int i = 0; i < strInput.length(); i++)
+	{
+        chrTemp = strInput[i];
+        switch (chrTemp)
+        {
+               case '0':
+               case '1':
+               case '2':
+               case '3':
+               case '4':
+               case '5':
+               case '6':
+               case '7':
+               case '8':
+               case '9':
+                    u32RtnValue = u32RtnValue * 16 + chrTemp - '0';
+                    break;
+               case 'a':
+               case 'b':
+               case 'c':
+               case 'd':
+               case 'e':
+               case 'f':
+                    u32RtnValue = u32RtnValue * 16 + chrTemp - 'a' + 10;
+                    break;
+               case 'A':
+               case 'B':
+               case 'C':
+               case 'D':
+               case 'E':
+               case 'F':
+                    u32RtnValue = u32RtnValue * 16 + chrTemp - 'A' + 10;
+                    break;
+               default:
+                    u32RtnValue = 0;
+                    //cerr << "HexStr2UInt: Invalid hex string: " << strInput << endl;
+                    i = strInput.length();
+        }
+    }
+
+	return u32RtnValue;
+}
+//--------------------------------------------------------------------------
+DSPU64  HexStr2UInt64(string p_strIn)
+{
+	DSPU64  u64RtnValue;
+	string strInput;
+	char chrTemp;
+
+	strInput = Trim(p_strIn);
+	u64RtnValue = 0;
+	for (int i = 0; i < strInput.length(); i++)
+	{
+        chrTemp = strInput[i];
+        switch (chrTemp)
+        {
+               case '0':
+               case '1':
+               case '2':
+               case '3':
+               case '4':
+               case '5':
+               case '6':
+               case '7':
+               case '8':
+               case '9':
+                    u64RtnValue = u64RtnValue * 16 + chrTemp - '0';
+                    break;
+               case 'a':
+               case 'b':
+               case 'c':
+               case 'd':
+               case 'e':
+               case 'f':
+                    u64RtnValue = u64RtnValue * 16 + chrTemp - 'a' + 10;
+                    break;
+               case 'A':
+               case 'B':
+               case 'C':
+               case 'D':
+               case 'E':
+               case 'F':
+                    u64RtnValue = u64RtnValue * 16 + chrTemp - 'A' + 10;
+                    break;
+               default:
+                    u64RtnValue = 0;
+                    //cerr << "HexStr2UInt64: Invalid hex string: " << strInput << endl;
+                    i = strInput.length();
+        }
+    }
+
+	return u64RtnValue;
+}
+//--------------------------------------------------------------------------
+int HexStr2Int(string p_strIn)
+{
+	int intRtnValue;
+	string strInput;
+	char chrTemp;
+
+	strInput = Trim(p_strIn);
+	intRtnValue = 0;
+	for (int i = 0; i < strInput.length(); i++)
+	{
+        chrTemp = strInput[i];
+        switch (chrTemp)
+        {
+               case '0':
+               case '1':
+               case '2':
+               case '3':
+               case '4':
+               case '5':
+               case '6':
+               case '7':
+               case '8':
+               case '9':
+                    intRtnValue = intRtnValue * 16 + chrTemp - '0';
+                    break;
+               case 'a':
+               case 'b':
+               case 'c':
+               case 'd':
+               case 'e':
+               case 'f':
+                    intRtnValue = intRtnValue * 16 + chrTemp - 'a' + 10;
+                    break;
+               case 'A':
+               case 'B':
+               case 'C':
+               case 'D':
+               case 'E':
+               case 'F':
+                    intRtnValue = intRtnValue * 16 + chrTemp - 'A' + 10;
+                    break;
+               default:
+                    intRtnValue = 0;
+                    //cerr << "HexStr2Int: Invalid hex string: " << strInput << endl;
+                    i = strInput.length();
+        }
+    }
+
+	return intRtnValue;
+}
+//--------------------------------------------------------------------------
+string TrimLeft(string p_strSrc)  
+{     
+	string	strTrimed = " \t";		//GRui: attention
+
+	if(!p_strSrc.empty())
+	{
+		while(strTrimed.find(p_strSrc[0]) != string::npos)  
+		{
+        	p_strSrc.erase(0, 1);
+        }		
+	} 
+	return p_strSrc;
+}  
+//--------------------------------------------------------------------------   
+string TrimRight(string p_strSrc)  
+{  
+	string	strTrimed = " \t";
+
+	if(!p_strSrc.empty())
+	{
+		while(strTrimed.find(p_strSrc[p_strSrc.length() - 1]) != string::npos)
+		{
+			p_strSrc.erase(p_strSrc.length() - 1);
+		}
+	}
+	return p_strSrc;
+}
+//--------------------------------------------------------------------------
+string Trim(string p_strSrc)
+{
+	p_strSrc = TrimLeft(p_strSrc);
+	p_strSrc = TrimRight(p_strSrc);
+
+	return p_strSrc;
+}
+//--------------------------------------------------------------------------
+// 从文件中读虚拟的中断信号初始化p_u64IRQs指向的数据结构
+//
+//attention: IRQs.txt should be in unix format.
+//
+bool  RdNewIRQsFile(string p_strFileName, DSPU64 *p_u64IRQs)
+{
+	string strLine, strTemp;
+	DSPU64  u64IRQ;
+	DSPU32  u32Lines;
+	ifstream ifsInFile;
+	bool bolRtn = true;
+
+	ifsInFile.open(p_strFileName.c_str(), ios::in | ios::out);
+	if (!ifsInFile)
+	{
+		//cerr << "RdNewIRQsFile: unable to open file " << p_strFileName << " for input!\n";
+		return false;
+	}
+
+	u32Lines = 0;
+	while (getline(ifsInFile, strLine, '\n' ))
+	{
+		strLine = Trim(strLine);
+		strTemp = strLine.substr(0, 16);
+		u64IRQ = HexStr2UInt64(strTemp);
+
+		if ( u32Lines < 2048 )  // new irqs: 2048
+		{			
+			p_u64IRQs[u32Lines] = u64IRQ;
+
+			//cerr << hex << setw(8) << setfill('0') << "p_u64IRQs[u32Lines]: " << p_u64IRQs[u32Lines] << endl;
+			//cerr << hex << setw(8) << setfill('0') << "u64IRQ: " << u64IRQ << endl;
+		}
+
+		u32Lines++;
+		if ( u32Lines >= 2048 )  // new irqs: 2048
+		{
+			break;
+		}
+		
+		
+	} // while (getline(ifsInFile, strLine, '\n' ))
+
+	ifsInFile.close();
+
+	if (bolRtn)
+	{
+		// only for debug
+		// WrNewIRQsFile("C:\\DSPLog_core0\\WrIRQs.txt", p_u64IRQs);
+	}
+
+	return bolRtn;
+}
+
+//--------------------------------------------------------------------------
+// 将p_u64IRQs指向的数据结构中的虚拟中断信号写入文件
+//
+bool WrNewIRQsFile(string p_strFileName, DSPU64 *p_u64IRQs)
+{
+	ofstream ofsOutPutFile;
+
+	ofsOutPutFile.open(p_strFileName.c_str(), ios::out | ios::app);
+	if ( !ofsOutPutFile.is_open() )
+	{
+		//cerr << "unable to open file " << p_strFileName << " for output!" << endl;
+		return false;
+	}
+
+	for (int i = 0; i < 2048; i++)  // new irqs: 2048
+	{	
+		ofsOutPutFile << hex << setw(16) << setfill('0') << p_u64IRQs[i] << endl;
+	}
+
+	ofsOutPutFile.close();
+	return true;
+}
+
+//--------------------------------------------------------------------------
+/*
+bool WrIRQsFile(string p_strFileName, int *p_intIRQs)
+{
+	ofstream ofsOutPutFile;
+
+	ofsOutPutFile.open(p_strFileName.c_str(), ios::out | ios::app);
+	if ( !ofsOutPutFile.is_open() )
+	{
+		//cerr << "unable to open file " << p_strFileName << " for output!" << endl;
+		return false;
+	}
+
+	for (int i = 0; i < 1024; i++)
+	{
+		if (p_intIRQs[i] != -1)
+		{
+			ofsOutPutFile << hex << setw(8) << setfill('0') << i << "    ";
+			ofsOutPutFile << hex << setw(8) << p_intIRQs[i] << endl;
+		}
+	}
+
+	ofsOutPutFile.close();
+	return true;
+}
+*/
+/*
+//--------------------------------------------------------------------------
+ofstream ofsOutPutFile;
+bool OpenLogFile(string p_strFileName)
+{
+	ofsOutPutFile.open(p_strFileName.c_str(), ios::out | ios::app);
+	if ( !ofsOutPutFile.is_open() )
+	{
+		//cerr << "unable to open file " << p_strFileName << " for output!" << endl;
+		return false;
+	}
+
+	return true;
+}
+
+//--------------------------------------------------------------------------
+bool WrValueToLog(DSPU32 p_u32Content)
+{
+	if ( !ofsOutPutFile.is_open() )
+	{
+		//cerr << "Please open the log file at first!" << endl;
+		return false;
+	}
+
+	ofsOutPutFile << hex << setw(8) << setfill('0') << p_u32Content ;
+
+	return true;
+}
+//--------------------------------------------------------------------------
+bool WrSpaceToLog()
+{
+	if ( !ofsOutPutFile.is_open() )
+	{
+		//cerr << "Please open the log file at first!" << endl;
+		return false;
+	}
+
+	ofsOutPutFile << "      ";
+	return true;
+}
+//--------------------------------------------------------------------------
+bool WrEndlToLog()
+{
+	if ( !ofsOutPutFile.is_open() )
+	{
+		//cerr << "Please open the log file at first!" << endl;
+		return false;
+	}
+
+	ofsOutPutFile << endl;
+	return true;
+}
+//--------------------------------------------------------------------------
+void CloseLogFile()
+{
+	ofsOutPutFile.close();
+}
+*/
+

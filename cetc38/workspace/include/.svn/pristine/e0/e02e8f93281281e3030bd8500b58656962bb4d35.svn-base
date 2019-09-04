@@ -1,0 +1,422 @@
+#include "iss_timer.h"
+
+void iss_timer::DoTimer()
+{
+	DSPU32 u32Temp;
+	for (int i = 0; i < TIMER_NUM; i++)
+	{
+		if ( TIsBitSet(u32r_LTCR[i], MODE_SEL_BIT) )	// 32-bit Mode
+		{
+			if(bolr_TMChg[i])
+			{
+				RstTCNT(i, TIMER_HI);
+				RstTCNT(i, TIMER_LO);
+				bolr_TMChg[i] = false;
+			}
+			else	DoTimer_32(u32r_LTCR[i], i);
+		}
+		else										// 64-bit Mode
+		{
+			if(bolr_TMChg[i])
+			{
+				RstTCNT(i, TIMER_HL);
+				bolr_TMChg[i] = false;
+			}
+			else	DoTimer_64(u32r_LTCR[i], i);
+		}		
+	
+		u32r_LTCR[i].GetInput(&u32Temp);
+		u32Temp ^= (DSPU32)u32r_LTCR[i];
+		if(TIsBitSet(u32Temp, MODE_SEL_BIT))
+		{
+			bolr_TMChg[i] = true;
+		}
+	}
+}
+
+void iss_timer::DoTimer_32(DSPU32 u32TCR, DSPU32 u32TIDX)
+{
+	DSPU32 u32PulWidth_HI, u32PulWidth_LO;
+
+	// =====================================
+	// TIMER_HI Configuration
+	if( !TIsBitSet(u32TCR, HI_OUT_CLK_BIT) )
+	{
+		if( TIsBitSet(u32TCR, HI_TM_OM_BIT) )
+		{
+			u32PulWidth_HI = (u32TCR >> HI_PUL_BIT);
+		}
+
+		if( TIsBitSet(u32TCR, HI_TM_EN_BIT) )
+		{
+			if( TIsBitSet(u32TCR, HI_TM_RST_BIT) || (u32r_LTCNTHI[u32TIDX] == 0U) )
+			{
+				if(u32r_LTCNTHI[u32TIDX] == 0U)
+				{
+					bolTINT_HI[u32TIDX] = true;
+//					printf("Trig HI Timer INT");
+				}
+				RstTCNT(u32TIDX, TIMER_HI);
+			}
+			else
+			{
+				u32r_LTCNTHI[u32TIDX]--;
+			}
+//			printf("TIMER_HI%d: %u\n", p_u32Idx, (DSPU32)u32r_THCNT[p_u32Idx]);
+		}
+	}
+
+	// =====================================
+	// TIMER_LO Configuration
+	if( !TIsBitSet(u32TCR, LO_OUT_CLK_BIT) )
+	{
+		if( TIsBitSet(u32TCR, LO_TM_OM_BIT) )
+		{
+			u32PulWidth_LO = ((u32TCR & 0xffffU) >> LO_PUL_BIT);
+		}
+		if( TIsBitSet(u32TCR, LO_TM_EN_BIT) )
+		{
+			if( TIsBitSet(u32TCR, LO_TM_RST_BIT) || (u32r_LTCNTLO[u32TIDX] == 0U) )
+			{
+				if(u32r_LTCNTLO[u32TIDX] == 0U)
+				{
+					bolTINT_LO[u32TIDX] = true;
+//					printf("Trig LO Timer INT\t");
+				}
+
+				RstTCNT(u32TIDX, TIMER_LO);
+			}
+			else
+			{
+				u32r_LTCNTLO[u32TIDX]--;
+			}
+//			printf("TIMER_LO%d: %u\n", p_u32Idx, (DSPU32)u32r_TLCNT[p_u32Idx]);
+		}
+	}
+}
+
+void iss_timer::DoTimer_64(DSPU32 u32TCR, DSPU32 u32TIDX)
+{
+	if( !TIsBitSet(u32TCR, LO_OUT_CLK_BIT) )
+	{
+		if( TIsBitSet(u32TCR, LO_TM_EN_BIT) )
+		{
+			if(u32r_LTCNTLO[u32TIDX] == 0U)
+			{
+				if( u32r_LTCNTHI[u32TIDX] == 0U )
+				{
+					bolTINT_HL[u32TIDX] = true;
+//					printf("Trig Timer INT\t");
+					RstTCNT(u32TIDX, TIMER_HL);
+				}
+				else
+				{
+					u32r_LTCNTLO[u32TIDX] = ~0U;
+					u32r_LTCNTHI[u32TIDX]--;
+				}
+			}
+			else
+			{
+				u32r_LTCNTLO[u32TIDX]--;
+			}
+			if( TIsBitSet(u32TCR, LO_TM_RST_BIT) )
+			{
+				RstTCNT(u32TIDX, TIMER_HL);
+			}
+//			printf("TIMER%d: %#x%x\n", p_u32Idx, (DSPU32)u32r_THCNT[p_u32Idx], (DSPU32)u32r_TLCNT[p_u32Idx]);
+		}
+	}
+}
+void iss_timer::RstTCNT(DSPU32 u32TIDX, TIMER_ENUM eHL)
+{
+	DSPU32 u32TLPR, u32THPR;
+	DSPU64 u64TPR;
+
+	u32TLPR = (DSPU32)u32r_LTPRLO[u32TIDX];
+	u32THPR = (DSPU32)u32r_LTPRHI[u32TIDX];
+
+	switch(eHL)
+	{
+	case TIMER_HI:
+		u32r_LTCNTHI[u32TIDX] = (u32THPR == 0U) ? 0U : (u32THPR - 1);
+		break;
+	case TIMER_LO:
+		u32r_LTCNTLO[u32TIDX] = (u32TLPR == 0U) ? 0U : (u32TLPR - 1);
+		break;
+	case TIMER_HL:
+		u64TPR = u32THPR;
+		u64TPR = ((u64TPR << 32) | u32TLPR);
+		u64TPR = (u64TPR == 0) ? 0 : (u64TPR - 1);
+		u32r_LTCNTLO[u32TIDX] = (DSPU32)(u64TPR & 0xffffffffU);
+		u32r_LTCNTHI[u32TIDX] = (DSPU32)((u64TPR >> 32) & 0xffffffffU);
+
+		break;
+	default:
+		printf("Unrecognized Timer\n");
+		break;
+	}
+}
+
+
+void iss_timer::ShiftRegs()
+{
+	for(int i = 0; i < TIMER_NUM; i++)
+	{
+		u32r_LTCR[i].shift();
+		u32r_LTCSR[i].shift();
+		u32r_LTCCR[i].shift();
+		u32r_LTPRLO[i].shift();
+		u32r_LTPRHI[i].shift();
+		u32r_LTCNTLO[i].shift();
+		u32r_LTCNTHI[i].shift();
+		bolr_TMChg[i].shift();
+	}
+}
+
+DSPU32 iss_timer::GetTINTMask()
+{
+	DSPU32 u32Rtn = 0;
+
+	for(int i = 0; i < TIMER_NUM; i++)
+	{
+		if(bolTINT_LO[i])
+		{
+			u32Rtn = TSetBit(u32Rtn, i*8 + 0);
+			bolTINT_LO[i] = false;
+		}
+		if(bolTINT_HI[i] || bolTINT_HL[i])
+		{
+			u32Rtn = TSetBit(u32Rtn, i*8 + 1);
+			bolTINT_HI[i] = false;
+		}
+	}
+
+	return u32Rtn;
+}
+
+
+
+DSPU32 iss_timer::GetTCR(DSPU32 u32TIDX)
+{
+	return (DSPU32)u32r_LTCR[u32TIDX];
+}
+
+/*
+void iss_timer::SetTCR(DSPU32 u32TIDX, DSPU32 u32Val)
+{
+	u32r_LTCR[u32TIDX] = u32Val;
+}
+void iss_timer::SetTCSR(DSPU32 u32TIDX, DSPU32 u32Val)
+{
+	u32r_LTCSR[u32TIDX] = u32Val;
+}
+void iss_timer::SetTCCR(DSPU32 u32TIDX, DSPU32 u32Val)
+{
+	u32r_LTCCR[u32TIDX] = u32Val;
+}
+
+void iss_timer::SetTPR(DSPU32 u32TIDX, DSPU32 u32Val, TIMER_ENUM eHL)
+{
+	switch(eHL)
+	{
+	case TIMER_HI:
+		u32r_LTPRHI[u32TIDX] = u32Val;
+		break;
+	case TIMER_LO:
+		u32r_LTPRLO[u32TIDX] = u32Val;
+		break;
+	default:
+		printf("Unrecognized Timer\n");
+		break;
+	}
+}
+void iss_timer::SetTCNT(DSPU32 u32TIDX, DSPU32 u32Val, TIMER_ENUM eHL)
+{
+	switch(eHL)
+	{
+	case TIMER_HI:
+		u32r_LTCNTHI[u32TIDX] = u32Val;
+		break;
+	case TIMER_LO:
+		u32r_LTCNTLO[u32TIDX] = u32Val;
+		break;
+	default:
+		printf("Unrecognized Timer\n");
+		break;
+	}
+}
+DSPU32 iss_timer::GetTCSR(int idx)
+{
+	return (DSPU32)u32r_LTCSR[idx];
+}
+
+DSPU32 iss_timer::GetTCCR(int idx)
+{
+	return (DSPU32)u32r_LTCCR[idx];
+}
+*/
+DSPU32 iss_timer::GetTPR(DSPU32 u32TIDX, TIMER_ENUM eHL)
+{
+	DSPU32 u32Rtn = 0;
+
+	switch(eHL)
+	{
+	case TIMER_HI:
+		u32Rtn = u32r_LTPRHI[u32TIDX];
+		break;
+	case TIMER_LO:
+		u32Rtn = u32r_LTPRLO[u32TIDX];
+		break;
+	default:
+		break;
+	}
+
+	return u32Rtn;
+}
+
+DSPU32 iss_timer::GetTCNT(DSPU32 u32TIDX, TIMER_ENUM eHL)
+{
+	DSPU32 u32Rtn = 0;
+	switch(eHL)
+	{
+	case TIMER_HI:
+		u32Rtn = u32r_LTCNTHI[u32TIDX];
+		break;
+	case TIMER_LO:
+		u32Rtn = u32r_LTCNTLO[u32TIDX];
+		break;
+	default:
+		break;
+	}
+	return u32Rtn;
+}
+bool iss_timer::RdTimerRegs(DSPU32 u32RegIdx, DSPU32 &u32Value)
+{
+	bool bolRtn = true;
+	DSPU32 u32HLIdx = (u32RegIdx >> 4);
+	
+	u32RegIdx &= 0xfU;
+	switch(u32RegIdx)
+	{
+		case 0x0:
+			u32Value = (DSPU32)u32r_LTCR[u32HLIdx];
+			break;
+		case 0x3:
+			u32Value = (DSPU32)u32r_LTPRLO[u32HLIdx];
+			break;
+		case 0x4:
+			u32Value = (DSPU32)u32r_LTPRHI[u32HLIdx];
+			break;
+		case 0x5:
+			u32Value = (DSPU32)u32r_LTCNTLO[u32HLIdx];
+			break;
+		case 0x6:
+			u32Value = (DSPU32)u32r_LTCNTHI[u32HLIdx];
+			break;
+		default:
+			u32Value = 0x5a5a5a5a;
+			bolRtn = false;
+			break;
+	}
+
+	return bolRtn;
+}
+bool iss_timer::WrTimerRegs(DSPU32 u32RegIdx, DSPU32 u32Value)
+{
+	bool bolRtn = true;
+	DSPU32 u32Temp;
+	DSPU32 u32HLIdx = (u32RegIdx >> 4);
+	
+	u32RegIdx &= 0xfU;
+	
+	switch(u32RegIdx)
+	{
+		case 0x1:	// LTCSR0
+			u32Temp = (DSPU32)u32r_LTCR[u32HLIdx];
+			//u32r_LTCR[u32HLIdx] = (u32Temp | u32Value);
+			u32r_LTCR[u32HLIdx] = (u32Temp | u32Value) & 0xff98ff98; //将保留位清除
+			break;
+		case 0x2:	// LTCCR0
+			u32Temp = (DSPU32)u32r_LTCR[u32HLIdx];
+			//u32r_LTCR[u32HLIdx] = ((~u32Value) & u32Temp);
+			u32r_LTCR[u32HLIdx] = ((~u32Value) & u32Temp) & 0xff98ff98; //将保留位清除
+			break;
+		case 0x3:	// LTPRLO
+			u32r_LTPRLO[u32HLIdx] = u32Value;
+			break;
+		case 0x4:	// LTPRHI0
+			u32r_LTPRHI[u32HLIdx] = u32Value;
+			break;
+		default:
+			bolRtn = false;
+			break;
+	}
+
+	return bolRtn;
+}
+bool iss_timer::JTagRdTimerRegs(DSPU32 u32RegIdx, DSPU32 &u32Value)
+{
+	bool bolRtn = true;
+	DSPU32 u32HLIdx = (u32RegIdx >> 4);
+	
+	u32RegIdx &= 0xfU;
+	
+	switch(u32RegIdx)
+	{
+		case 0x0:
+			u32Value = (DSPU32)u32r_LTCR[u32HLIdx];
+			break;
+		case 0x3:
+			u32Value = (DSPU32)u32r_LTPRLO[u32HLIdx];
+			break;
+		case 0x4:
+			u32Value = (DSPU32)u32r_LTPRHI[u32HLIdx];
+			break;
+		case 0x5:
+			u32Value = (DSPU32)u32r_LTCNTLO[u32HLIdx];
+			break;
+		case 0x6:
+			u32Value = (DSPU32)u32r_LTCNTHI[u32HLIdx];
+			break;
+		default:
+			u32Value = 0x5a5a5a5a;
+			bolRtn = false;
+			break;
+	}
+
+	return bolRtn;
+}
+bool iss_timer::JTagWrTimerRegs(DSPU32 u32RegIdx, DSPU32 u32Value)
+{
+	bool bolRtn = true;
+	DSPU32 u32Temp;
+	DSPU32 u32HLIdx = (u32RegIdx >> 4);
+	
+	u32RegIdx &= 0xfU;
+
+	switch(u32RegIdx)
+	{
+		case 0x1:		// LTCSR
+			u32Temp = (DSPU32)u32r_LTCR[u32HLIdx];
+			u32Temp = (u32Temp | u32Value) & 0xff98ff98;
+			u32r_LTCR[u32HLIdx].SetValue(u32Temp);
+			break;
+		case 0x2:		// LTCCR
+			u32Temp = (DSPU32)u32r_LTCR[u32HLIdx];
+			u32Temp = (u32Temp & (~u32Value) & 0xff98ff98);
+			u32r_LTCR[u32HLIdx].SetValue(u32Temp);
+			break;
+		case 0x3:		// LTPRLO
+			u32r_LTPRLO[u32HLIdx].SetValue(u32Value);
+			break;
+		case 0x4:		// LTPRHI
+			u32r_LTPRHI[u32HLIdx].SetValue(u32Value);
+			break;
+		default:
+			bolRtn = false;
+			break;
+	}
+
+	return bolRtn;
+}
+

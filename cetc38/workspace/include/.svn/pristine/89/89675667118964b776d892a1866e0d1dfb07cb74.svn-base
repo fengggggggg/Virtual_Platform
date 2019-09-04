@@ -1,0 +1,33 @@
+#include "Cfloat32.h"
+
+void Cfloat32::SetZero()
+{
+      cf32value.split_f32.u8Exp = 0;
+      cf32value.split_f32.u23Frac = 0;       
+}
+
+void Cfloat32::SetU32(DSPU32 pu32src)
+{
+   cf32value.u32Value = pu32src;
+}  
+
+DSPU32 Cfloat32::GetU32() 
+{
+    return cf32value.u32Value;
+}  
+
+float Cfloat32::GetF32()
+{
+    return (float &)cf32value.u32Value;
+}   
+
+Cfloat32::Cfloat32(DSPU32 pu32src) 
+{                  
+    cf32value.u32Value = pu32src;    
+	rf32value.u32Value = pu32src;                  //add by yufenglin 2007.12.11 
+}      
+
+Cfloat32::Cfloat32(float pf32src) 
+{                   
+    cf32value.u32Value = (DSPU32 &)pf32src;                       
+}

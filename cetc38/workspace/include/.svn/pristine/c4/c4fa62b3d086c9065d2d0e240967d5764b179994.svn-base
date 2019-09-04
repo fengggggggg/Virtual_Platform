@@ -1,0 +1,313 @@
+/******************************************************************************
+Copyright (C), CETE38
+文件名  :    TCPRemoteComm.cpp
+作者    :    黄光红      
+版本    :    v0.0.1       
+完成日期:    2013-03-01
+描述    :    TCPRemoteComm.cpp实现TCPRemoteComm类
+其它    :          
+历史记录:       
+1. 
+修改日期:
+作者    :
+修改内容:
+2. 
+...
+******************************************************************************/
+
+#include "TCPRemoteComm.h"
+#include "JtagError.h"
+#include "JTAGLog.h"
+//#define ENCRPTION_PROTOCOL
+#include <iostream>
+
+using namespace std;
+
+    TCPRemoteComm::TCPRemoteComm()
+    {
+		ipAddress="127.0.0.1";
+		ipPort=5688;
+
+		tcpSockServer=0;
+		tcpSockAccept=0;
+    }
+
+    /******************************************************************************
+    函数名称:    TCPRemoteComm
+    描述    :    析构函数
+    输入参数:    无
+    输出参数:    无
+    返回值  :    无
+    其它    :
+    ******************************************************************************/
+    TCPRemoteComm::~TCPRemoteComm()
+    {
+		if(tcpSockAccept)
+		{
+			//windows下关闭socket
+#ifdef DSP_WIN32
+			closesocket(tcpSockAccept);
+			WSACleanup();
+#else
+			close(tcpSockAccept);
+#endif
+		}
+		tcpSockAccept=0;
+		if(tcpSockServer)
+		{
+			//windews下关闭socket
+#ifdef DSP_WIN32
+			closesocket(tcpSockServer);
+			WSACleanup();
+#else
+			close(tcpSockServer);
+#endif
+		}
+		tcpSockServer=0;
+        //cout<<"        TCPRemoteComm destruction success."<<endl;
+    }
+
+    /******************************************************************************
+         函数名称:    setCommProt
+         描述    :    构造函数
+         输入参数:    ipPort指定端口号
+         输出参数:    无
+         返回值  :    无
+         其它    :
+    ******************************************************************************/
+    void TCPRemoteComm::setCommPort(unsigned short pIPPort)
+    {
+        this->ipPort = pIPPort;
+    }
+
+    /******************************************************************************
+         函数名称:    setCommAddress
+         描述    :    构造函数
+         输入参数:     ipAddress指定IP地址，形式为“a.b.c.d”
+         输出参数:    无
+         返回值  :    成功返回0；若指定IP地址形式不合法，返回非0错误码SERVER_ETHERNET_IPADDRESS_INVALID_ERROR
+         其它    :
+    ******************************************************************************/
+    int TCPRemoteComm::setCommAddress(string pIPAddress)
+    {
+        if(INADDR_NONE == inet_addr(pIPAddress.c_str()))
+        {
+            return SERVER_ETHERNET_IPADDRESS_INVALID_ERROR;
+        }
+        else
+        {
+            this->ipAddress = pIPAddress;
+            return JTAG_OK;
+        }
+    }
+
+    /******************************************************************************
+    函数名称:    initComm
+    描述    :    初始化通信模块
+    输入参数:    无
+    输出参数:    无
+    返回值  :    成功返回0；失败返回非0错误码SERVER_ETHERNET_STARTUP_ERROR
+    其它    :
+    ******************************************************************************/
+    int TCPRemoteComm::initComm()
+    {
+        
+
+        //创建一个socket
+        if((tcpSockServer = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP))//IPPROTO_IP
+                == -1)
+        {
+            //cout<<"        TCP socket error."<<endl;
+				tcpSockServer=0;
+            	#ifdef DSP_WIN32
+            	WSACleanup( );
+            	#endif
+				JTAGLog(0,"Init socket error\n",0);
+            	return SERVER_ETHERNET_STARTUP_ERROR;
+        }
+		JTAGLog(0,"create socket successfully!\n",0);
+
+
+		sockaddr_in service;
+		service.sin_family = AF_INET;
+
+		if(ipAddress=="127.0.0.1")
+		{
+			service.sin_addr.s_addr = INADDR_ANY;
+		}
+		else
+		{
+			service.sin_addr.s_addr = inet_addr(ipAddress.c_str());
+		}
+
+		service.sin_port = htons(ipPort);
+
+		int sock_opt=1;
+		if(::setsockopt(tcpSockServer,SOL_SOCKET,SO_REUSEADDR,(const char *)&sock_opt,sizeof(sock_opt))==-1)
+		{
+			JTAGLog(0,"set socket opt SO_REUSEADDR error, %d.\n",0);
+		}
+
+		if (::bind(tcpSockServer,(struct sockaddr *) &service, 
+			sizeof(service)) == -1)
+		{
+		#ifdef DSP_WIN32
+			closesocket(tcpSockServer);
+			WSACleanup();
+		#else
+			close(tcpSockServer);
+		#endif
+			tcpSockServer=0;
+			JTAGLog(0,"bind %s , port %d , error\n",ipAddress.c_str(),ipPort);
+			return SERVER_ETHERNET_STARTUP_ERROR;
+		}
+
+		JTAGLog(0,"bind %s , port %d\n",ipAddress.c_str(),ipPort);
+		int iResult = listen(tcpSockServer, 1);
+		if (iResult == -1)
+		{
+			#ifdef DSP_WIN32
+			closesocket(tcpSockServer);
+			//cout<<"listen failed: "<<WSAGetLastError()<<endl;
+            		WSACleanup( );
+			#else
+			close(tcpSockServer);
+			#endif
+			tcpSockServer=0;
+			JTAGLog(0,"listen error\n",0);
+			return SERVER_ETHERNET_STARTUP_ERROR;
+		}
+
+		tcpSockAccept = accept(tcpSockServer, NULL, NULL);
+		JTAGLog(0,"accept %s , port %d\n",ipAddress.c_str(),ipPort);
+		if (tcpSockAccept == -1)
+		{
+			#ifdef DSP_WIN32
+			closesocket(tcpSockServer);
+			//cout<<"accept failed: "<<WSAGetLastError();
+			WSACleanup();
+			#else
+			close(tcpSockServer);
+			#endif
+			tcpSockServer=0;
+			tcpSockAccept=0;
+			JTAGLog(0,"accept error\n",0);
+			return SERVER_ETHERNET_STARTUP_ERROR;
+		}
+
+		// No longer need server socket
+		#ifdef DSP_WIN32
+		closesocket(tcpSockServer);
+		#else
+		close(tcpSockServer);
+		#endif
+		tcpSockServer=0;
+
+        //cout<<"        TCPRemoteComm::initComm success."<<endl;
+        return JTAG_OK;
+    }
+
+    /******************************************************************************
+       函数名称:    closeConnect
+       描述    :    关闭连接
+       输入参数:    无
+       输出参数:    无
+       返回值  :    空
+       其它    :
+    ******************************************************************************/
+    void TCPRemoteComm::closeConnect()
+    {
+		if(tcpSockAccept)
+		{
+			//windews下关闭socket
+			#ifdef DSP_WIN32
+			closesocket(tcpSockAccept);
+			#else
+			close(tcpSockAccept);
+			#endif
+		}
+		tcpSockAccept=0;
+        //cout<<"        TCPRemoteComm::closeConnect success."<<endl;
+    }
+
+    /******************************************************************************
+         函数名称:    receive
+         描述    :    接收数据。接收到指定数量的字节才返回
+         输入参数:    bufferCnt指定接收字节数量；
+         buffer指定接收缓冲区
+         输出参数:    无
+         返回值  :    成功返回0；失败返回非0错误码SERVER_ETHERNET_RECV_ERROR
+         其它    :
+    ******************************************************************************/
+    int TCPRemoteComm::receive(char *buffer ,int bufferCnt)
+    {
+        int recvCnt = 0;
+        int index = 0;
+        int remnant = bufferCnt;
+		if(tcpSockAccept==0)
+		{
+			return SERVER_ETHERNET_STARTUP_ERROR;
+		}
+        while(remnant >0)
+        {
+            recvCnt = recv(tcpSockAccept, buffer + index, remnant, 0);
+			//cout<<"after recv "<<hex<<(int)(buffer[index])<<dec<<" "<<remnant<<endl;
+            if(recvCnt == -1)
+            {
+				//cout<<"recv fail"<<endl;
+                return SERVER_ETHERNET_RECV_ERROR;
+            }
+#ifdef ENCRPTION_PROTOCOL
+			char *pbuffer=buffer+index;
+			for (int i=0;i<recvCnt;i++)
+			{
+				*pbuffer=(*pbuffer)^0x5a;
+				pbuffer++;
+			}
+#endif
+            index += recvCnt;
+            remnant -= recvCnt;
+        }
+        return JTAG_OK;
+    }
+
+    /******************************************************************************
+       函数名称:    sendout
+       描述    :    发送数据。将指定数量的字节全部发送完成才返回
+       输入参数:    bufferCnt指定接收缓冲区字节大小；
+                    buffer指定接收缓冲区
+       输出参数:    无
+       返回值  :    成功返回0；失败返回非0错误码
+       其它    :
+    ******************************************************************************/
+    int TCPRemoteComm::sendout(char *buffer, int bufferCnt)
+    {
+        int sendCnt = 0;
+        int index = 0;
+        int remnant = bufferCnt;
+
+		if(tcpSockAccept==0)
+		{
+			return SERVER_ETHERNET_STARTUP_ERROR;
+		}
+#ifdef ENCRPTION_PROTOCOL
+		char *pbuffer=buffer;
+		for (int i=0;i<bufferCnt;i++)
+		{
+			*pbuffer=(*pbuffer)^0x5a;
+			pbuffer++;
+		}
+#endif
+        while(remnant >0)
+        {
+            sendCnt = send(tcpSockAccept, buffer + index, remnant, 0);
+            if(sendCnt == -1)
+            {
+                return SERVER_ETHERNET_SEND_ERROR;
+            }
+            index += sendCnt;
+            remnant -= sendCnt;
+        }
+        return JTAG_OK;
+    }
+

@@ -1,0 +1,48 @@
+
+#include "DSPU40.h"
+#include "GlobleDef.h"
+
+//------------------------------------------------------------------------------
+DSPU40::DSPU40(DSP_BIT40 pSrc)
+{
+   
+    u32Low = pSrc.u32Low;
+    u8High = pSrc.u8High;
+}
+
+void DSPU40::SignExtend()
+{
+    if (this->u32Low & 0x80000000)
+    {
+        u8High = 0xff;
+    }             
+}
+
+DSPU40 DSPU40::operator+ (DSPU40 pSrc2)
+{
+    DSPU40 u40Result;
+    
+    u40Result.u32Low = this->u32Low + pSrc2.u32Low;
+    
+    bool bolLow32Carry = ((this->u32LowSign() != pSrc2.u32LowSign()) && !u40Result.u32LowSign()) 
+                           || (this->u32LowSign() && pSrc2.u32LowSign()); 
+                              
+    u40Result.u8High = this->u8High + pSrc2.u8High + bolLow32Carry;
+
+    return u40Result;   
+}
+
+DSPU40 DSPU40::operator+ (DSPU32 pSrc2)
+{
+    DSPU40 Src2(pSrc2);
+    return *this + Src2;   
+}
+
+bool DSPU40::operator== (DSPU40 pSrc2)
+{
+     return (this->u32Low == pSrc2.u32Low) && (this->u8High == pSrc2.u8High);
+     
+     
+}   
+  
+//------------------------------------------------------------------------------

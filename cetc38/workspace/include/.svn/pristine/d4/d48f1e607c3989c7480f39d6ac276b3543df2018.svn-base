@@ -1,0 +1,100 @@
+#include "DSPU80.h"
+
+
+DSPU80::DSPU80(DSP_BIT80 pSrc)
+{
+    u64Low = pSrc.u64Low;
+    u16High = pSrc.u16High;
+}
+
+DSPU80::DSPU80(DSPU64 pSrc) 
+{ 
+    u64Low = pSrc;
+    u16High = 0x0000; 
+
+}
+
+DSPU80::DSPU80(DSPU16 uh,DSPU32 um, DSPU32 ul)
+{
+	DSPU64 uLow=um;
+	DSPU64 uTemp=ul;
+	uLow<<=32;
+	uLow|=uTemp;
+
+	u16High=uh;
+	u64Low=uLow;
+}
+
+void DSPU80::SignExtend()
+{
+    if (this->u64Low & u64MSBMask)
+    {
+        u16High = 0xffff;
+    }
+	else
+	{
+		u16High = 0;
+	}
+}
+
+void DSPU80::MACCSExtend()
+{
+	if(u16High & 0x0080)
+	{
+		u16High |= 0xff80;
+	}
+	else
+	{
+		u16High &= 0x00ff;
+	}
+}
+
+void DSPU80::MACCUExtend()
+{
+	u16High &= 0x00ff;
+}
+
+void DSPU80::USignExtend()
+{
+    this->u16High = 0x0000;
+}
+
+DSPU80 DSPU80::operator+ (DSPU80 pSrc2)
+{
+    DSPU80 u80Result;
+
+    u80Result.u64Low = this->u64Low + pSrc2.u64Low;
+
+    bool bolLow64Carry = ((this->u64LowSign() != pSrc2.u64LowSign()) && !u80Result.u64LowSign()) 
+                           || (this->u64LowSign() && pSrc2.u64LowSign());
+
+    u80Result.u16High = this->u16High + pSrc2.u16High + bolLow64Carry;
+
+    return u80Result;
+}
+
+DSPU80 DSPU80::operator+ (DSPU64 pSrc2)
+{
+    DSPU80 Src2(pSrc2);
+    return *this + Src2;
+}
+
+DSPU80 DSPU80::operator- (DSPU80 pSrc2)
+{
+	DSPU80 bSubed;
+	bSubed.u64Low=~(pSrc2.u64Low);
+	bSubed.u16High=~(pSrc2.u16High);
+
+	DSPU80 u80One;
+	u80One.u64Low=0x1;
+	u80One.u16High=0x0;
+	bSubed=bSubed+u80One;
+
+	return (*this)+bSubed;
+}
+
+
+bool DSPU80::operator== (DSPU80 pSrc2)
+{
+     return (this->u64Low == pSrc2.u64Low) && (this->u16High == pSrc2.u16High);
+}   
