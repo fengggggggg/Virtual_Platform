@@ -2,20 +2,15 @@
 
 ## Supported Versions
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+The version of software in our project list below.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+| Software Name     | Version   | Supported          |
+| ----------------- | --------- | ------------------ |
+| Ubuntu            | 14.04 LTS | :white_check_mark: |
+| SystemC           | 2.3.1     | :white_check_mark: |
+| Boost             | 1.51.0    | :white_check_mark: |
+| GMP               | 6.1.2     | :white_check_mark: |
+| MPFR              | 4.0.0     | :white_check_mark: |
+| MPC               | 1.1.0     | :white_check_mark: |
 
-## Reporting a Vulnerability
-
-Use this section to tell people how to report a vulnerability.
-
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+A higher version of SystemC maybe is available, but we don't **recommend**.
