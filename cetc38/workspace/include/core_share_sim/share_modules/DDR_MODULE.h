@@ -2,7 +2,7 @@
 #define DDR_MODULE_H_
 
 #include "./dmac_sim/dmac_global.h"
-#include "common.h"
+#include "include/common.h"
 
 #define Delay 5
 #define LEN 1024

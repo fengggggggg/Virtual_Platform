@@ -20,7 +20,7 @@
 #include <tlm_utils/simple_initiator_socket.h>
 #include <tlm_utils/simple_target_socket.h>
 
-#include "common.h"
+#include "include/common.h"
 #include "iss_dmac_comm.h"
 
 template<unsigned int ISS_NUM>
@@ -77,8 +77,8 @@ class mp_bus : public sc_module
 
 	tlm_utils::simple_initiator_socket_tagged<mp_bus> m_iDMACSockets[ISS_NUM];
 	tlm_utils::simple_target_socket_tagged<mp_bus> m_tDMACSockets[ISS_NUM];
-	tlm_utils::simple_initiator_socket_tagged<mp_bus> m_iDMACCh0WrSockets[ISS_NUM]; // DMAC ch0 burst·½Ê½Ð´
-	tlm_utils::simple_initiator_socket_tagged<mp_bus> m_iDMACCh0RdSockets[ISS_NUM]; // DMAC ch0 burst·½Ê½¶Á
+	tlm_utils::simple_initiator_socket_tagged<mp_bus> m_iDMACCh0WrSockets[ISS_NUM]; // DMAC ch0 burstï¿½ï¿½Ê½Ð´
+	tlm_utils::simple_initiator_socket_tagged<mp_bus> m_iDMACCh0RdSockets[ISS_NUM]; // DMAC ch0 burstï¿½ï¿½Ê½ï¿½ï¿½
 
     void DoCycle()
     {
@@ -91,30 +91,30 @@ class mp_bus : public sc_module
     	{
    /*
     		//------------------------------------------------------
-    		// Ð´ºË1Êý¾Ý´æ´¢¿Õ¼ä
+    		// Ð´ï¿½ï¿½1ï¿½ï¿½ï¿½Ý´æ´¢ï¿½Õ¼ï¿½
 			memset(&msg_insn_rw_mem, 0, sizeof(MSG_INSN_RW_MEM));
     		
-			msg_insn_rw_mem.u32ElemNum = 1;  // ·Ã´æµ¥Ôª¸öÊý
-			msg_insn_rw_mem.arrInsnsRWInfo[0].bolIsRead = false;  // Ð´·Ã´æÇëÇó
+			msg_insn_rw_mem.u32ElemNum = 1;  // ï¿½Ã´æµ¥Ôªï¿½ï¿½ï¿½ï¿½
+			msg_insn_rw_mem.arrInsnsRWInfo[0].bolIsRead = false;  // Ð´ï¿½Ã´ï¿½ï¿½ï¿½ï¿½ï¿½
 			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Bus = 0;
 			msg_insn_rw_mem.arrInsnsRWInfo[0].u32AddrIdx = 0;						
-			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Addr = 0x2400000; // ºË1µÄÊý¾Ý´æ´¢¿Õ¼ä
+			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Addr = 0x2400000; // ï¿½ï¿½1ï¿½ï¿½ï¿½ï¿½ï¿½Ý´æ´¢ï¿½Õ¼ï¿½
 			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Value = 10;
 
-			send_req_insn_rw_core_mem(&msg_insn_rw_mem, 1); // ½«·Ã´æÇëÇó·¢ÍùºË1
+			send_req_insn_rw_core_mem(&msg_insn_rw_mem, 1); // ï¿½ï¿½ï¿½Ã´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½1
 */
 			//------------------------------------------------------
-			// ¶ÁºË1Êý¾Ý´æ´¢¿Õ¼ä
+			// ï¿½ï¿½ï¿½ï¿½1ï¿½ï¿½ï¿½Ý´æ´¢ï¿½Õ¼ï¿½
 			memset(&msg_insn_rw_mem, 0, sizeof(MSG_INSN_RW_MEM));
     		
-			msg_insn_rw_mem.u32ElemNum = 1;  // ·Ã´æµ¥Ôª¸öÊý
-			msg_insn_rw_mem.arrInsnsRWInfo[0].bolIsRead = true;  // ¶Á·Ã´æÇëÇó
+			msg_insn_rw_mem.u32ElemNum = 1;  // ï¿½Ã´æµ¥Ôªï¿½ï¿½ï¿½ï¿½
+			msg_insn_rw_mem.arrInsnsRWInfo[0].bolIsRead = true;  // ï¿½ï¿½ï¿½Ã´ï¿½ï¿½ï¿½ï¿½ï¿½
 			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Bus = 0;
 			msg_insn_rw_mem.arrInsnsRWInfo[0].u32AddrIdx = 0;						
-			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Addr = 0x2400000; // ºË1µÄÊý¾Ý´æ´¢¿Õ¼ä
+			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Addr = 0x2400000; // ï¿½ï¿½1ï¿½ï¿½ï¿½ï¿½ï¿½Ý´æ´¢ï¿½Õ¼ï¿½
 			msg_insn_rw_mem.arrInsnsRWInfo[0].u32Value = 0;
 
-			send_req_insn_rw_core_mem(&msg_insn_rw_mem, 1); // ½«·Ã´æÇëÇó·¢ÍùºË1
+			send_req_insn_rw_core_mem(&msg_insn_rw_mem, 1); // ï¿½ï¿½ï¿½Ã´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½1
 
 			//------------------------------------------------------
 			
@@ -154,7 +154,7 @@ class mp_bus : public sc_module
 
 			memcpy(&msg_insn_rw_mem, trans.get_data_ptr(), sizeof(MSG_INSN_RW_MEM));
 
-			// ·ÖÎömsg_insn_rw_memÐÅÏ¢
+			// ï¿½ï¿½ï¿½ï¿½msg_insn_rw_memï¿½ï¿½Ï¢
 
 		}
 

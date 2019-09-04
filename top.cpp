@@ -7,13 +7,13 @@
  * 		线程进程无法启动
 ******************************************************/
 
-#include "common.h"
-#include "init_adapater.h"
-#include "targ_adapater.h"
-#include "initiator.h"
-#include "target.h"
-#include "router.h"
-#include "routable.h"
+#include "include/common.h"
+#include "include/init_adapater.h"
+#include "include/targ_adapater.h"
+#include "include/initiator.h"
+#include "include/target.h"
+#include "include/router.h"
+#include "include/routable.h"
 
 int _main(int argc, char *argv[])
 {

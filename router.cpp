@@ -8,8 +8,8 @@
  * payload.get_response方式获得,则会出现数据包被暂时缓存在switch中,而无法获得真实的响应情况
 ******************************************************************************/
 
-#include "router.h"
-#include "dispatch.h"
+#include "include/router.h"
+#include "include/dispatch.h"
 #include <string>
 #include <sstream>
 

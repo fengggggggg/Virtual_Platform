@@ -24,7 +24,7 @@
 #include <unistd.h> 
 #endif
 
-#include "common.h"
+#include "include/common.h"
 #include "mp_bus.h"
 
 #include "./core_share_sim/share_mmac/mmac.h"

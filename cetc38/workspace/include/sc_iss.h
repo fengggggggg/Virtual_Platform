@@ -22,7 +22,7 @@
 #include <list>
 #include <stack>
 
-#include "common.h"
+#include "include/common.h"
 #include "iss_dmac_comm.h"
 
 //----------------------------------------------------------
@@ -229,8 +229,8 @@ public:
 	tlm_utils::simple_initiator_socket<sc_iss> m_iDMACSocket;
 	tlm_utils::simple_target_socket<sc_iss> m_tDMACSocket;
 
-	tlm_utils::simple_target_socket<sc_iss> m_tDMACCh0WrSocket; // DMAC ch0 burst方式写
-	tlm_utils::simple_target_socket<sc_iss> m_tDMACCh0RdSocket; // DMAC ch0 burst方式读
+	tlm_utils::simple_target_socket<sc_iss> m_tDMACCh0WrSocket; // DMAC ch0 burst锟斤拷式写
+	tlm_utils::simple_target_socket<sc_iss> m_tDMACCh0RdSocket; // DMAC ch0 burst锟斤拷式锟斤拷
 	*/
 	tlm::tlm_initiator_socket <CH_WIDTH_256, mydma_protocol_types> m_iDMACSocket;
 	tlm::tlm_target_socket <CH_WIDTH_256, mydma_protocol_types> m_tDMACSocket;
@@ -351,16 +351,16 @@ public:
 	}
 
 	/*
-	异常码(exception code)。
-	1:核内数据存储器写地址越界（基于U地址发生器）
-	2:核内数据存储器写地址越界（基于V地址发生器）
-	3:核内数据存储器写地址越界（基于W地址发生器）
-	4:核内数据存储器写写冲突（基于U地址发生器）
-	5:核内数据存储器写写冲突（基于V地址发生器）
-	6:核内数据存储器写写冲突（基于W地址发生器）
-	7:核内数据存储器写写冲突（U、V、W地址发生器之间）
-	8:移位器内部存储器写写冲突
-	复位后默认值为0。
+	锟届常锟斤拷(exception code)锟斤拷
+	1:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写锟斤拷址越锟界（锟斤拷锟斤拷U锟斤拷址锟斤拷锟斤拷锟斤拷锟斤拷
+	2:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写锟斤拷址越锟界（锟斤拷锟斤拷V锟斤拷址锟斤拷锟斤拷锟斤拷锟斤拷
+	3:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写锟斤拷址越锟界（锟斤拷锟斤拷W锟斤拷址锟斤拷锟斤拷锟斤拷锟斤拷
+	4:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写写锟斤拷突锟斤拷锟斤拷锟斤拷U锟斤拷址锟斤拷锟斤拷锟斤拷锟斤拷
+	5:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写写锟斤拷突锟斤拷锟斤拷锟斤拷V锟斤拷址锟斤拷锟斤拷锟斤拷锟斤拷
+	6:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写写锟斤拷突锟斤拷锟斤拷锟斤拷W锟斤拷址锟斤拷锟斤拷锟斤拷锟斤拷
+	7:锟斤拷锟斤拷锟斤拷锟捷存储锟斤拷写写锟斤拷突锟斤拷U锟斤拷V锟斤拷W锟斤拷址锟斤拷锟斤拷锟斤拷之锟戒）
+	8:锟斤拷位锟斤拷锟节诧拷锟芥储锟斤拷写写锟斤拷突
+	锟斤拷位锟斤拷默锟斤拷值为0锟斤拷
 	*/
 	DSPU32 getExcode()
 	{

@@ -7,7 +7,7 @@
 
 #include <systemc>
 #include <sstream>
-#include "centralized_buffer.h"
+#include "include/centralized_buffer.h"
 
 namespace soclib { namespace tlmdt {
 
