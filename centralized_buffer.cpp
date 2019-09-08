@@ -2,7 +2,7 @@
  * Author        : feng
  * Creation time : 2019-06-06 10:53
  * Update time   : 2019-06-06 10:53
- * Description   : 注释掉了78,79,84,85行 
+ * Description   : 
 ******************************************************************************/
 
 #include <systemc>

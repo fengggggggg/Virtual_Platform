@@ -1,6 +1,6 @@
 # 交换模型switch基类函数列表
 filename                    |comment
--|-
+-                           |-
 base_routable.h             |路由表基类头文件
 base_router.h               |switch基类头文件，内附基类实现
 centralized_buffer.h        |在systemc中原文件的基础上，对选择弹出一个数据包函数稍微修改
@@ -21,9 +21,9 @@ router.cpp                  | 　
 target.cpp                  | 　
 top.cpp                     |系统最上层文件
 Makefile                    |makefile文件
-README.md                   |各个版本迭代信息简记
+synopsis.md                 |各个版本迭代信息简记
 
-上面表格记录了RapidIO交换系统涉及的主要头文件及其实现文件，主要有发送方模块，发送方适配器，接收方，接收方适配器，路由表，switch，包调度模块以及两个基类模块。
+上表记录了RapidIO交换系统涉及的主要头文件及其实现文件，主要有发送方模块、发送方适配器、接收方、接收方适配器、路由表、switch、包调度模块以及两个基类模块。
 其中circular_buffer.cpp中新增了push_sort函数，该函数用于对接收方接收到的数据包按照扩展中包的pkt_id进行排序模拟1x模式，4x模式按时间顺序进行调度转发，默认情况下就是按照时间顺序进行弹出数据包转发。
 Centralized_buffer.cpp中修改了pop函数，原来的pop函数对空buffer也参与竞争调度和设置时间，而修改后的pop函数对空buffer不参与竞争。
 Router_table.txt文本文件中静态建立RapidIO路由表时的初始路由表，后期可能改为通过jtag方式建立静态路由表。
